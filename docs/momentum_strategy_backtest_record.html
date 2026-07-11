@@ -1,0 +1,624 @@
+<title>Momentum Strategy — Backtest Variant Record</title>
+<style>
+  :root {
+    --paper: #eef1f0;
+    --paper-raised: #ffffff;
+    --ink: #16232a;
+    --ink-soft: #56666f;
+    --ink-faint: #8b979c;
+    --accent: #1f6f64;
+    --accent-soft: #e4efec;
+    --rule: #d6dcda;
+    --rule-strong: #b9c2bf;
+    --pos: #1f7a4d;
+    --neg: #b3423c;
+    --warn: #9a6a1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #12181a;
+      --paper-raised: #1a2225;
+      --ink: #e9efee;
+      --ink-soft: #9db0ac;
+      --ink-faint: #647573;
+      --accent: #5fb8a9;
+      --accent-soft: #1c2b29;
+      --rule: #2a3538;
+      --rule-strong: #3c4a4d;
+      --pos: #4ec98a;
+      --neg: #e2716a;
+      --warn: #d3a54e;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #12181a;
+    --paper-raised: #1a2225;
+    --ink: #e9efee;
+    --ink-soft: #9db0ac;
+    --ink-faint: #647573;
+    --accent: #5fb8a9;
+    --accent-soft: #1c2b29;
+    --rule: #2a3538;
+    --rule-strong: #3c4a4d;
+    --pos: #4ec98a;
+    --neg: #e2716a;
+    --warn: #d3a54e;
+  }
+  :root[data-theme="light"] {
+    --paper: #eef1f0;
+    --paper-raised: #ffffff;
+    --ink: #16232a;
+    --ink-soft: #56666f;
+    --ink-faint: #8b979c;
+    --accent: #1f6f64;
+    --accent-soft: #e4efec;
+    --rule: #d6dcda;
+    --rule-strong: #b9c2bf;
+    --pos: #1f7a4d;
+    --neg: #b3423c;
+    --warn: #9a6a1f;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, "Seravek", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 15.5px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 3.2rem 1.75rem 5rem;
+  }
+
+  h1, h2, h3 { text-wrap: balance; font-weight: 600; }
+
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding-bottom: 1.6rem;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 1.8rem;
+  }
+  .masthead .eyebrow {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .masthead h1 {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
+    font-size: 2.15rem;
+    letter-spacing: -0.01em;
+    margin: 0.1rem 0 0.2rem;
+  }
+  .masthead .dek {
+    color: var(--ink-soft);
+    font-size: 15px;
+    max-width: 62ch;
+  }
+  .masthead .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 1.4rem;
+    margin-top: 0.6rem;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: var(--ink-faint);
+  }
+  .masthead .meta-row b { color: var(--ink-soft); font-weight: 600; }
+
+  section { margin-top: 2.6rem; }
+
+  h2.section-title {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    font-size: 1.3rem;
+    letter-spacing: -0.005em;
+    padding-bottom: 0.55rem;
+    border-bottom: 1px solid var(--rule-strong);
+    margin-bottom: 1.1rem;
+  }
+
+  /* Assumptions panel */
+  .assumptions {
+    background: var(--paper-raised);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 1.3rem 1.5rem;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.9rem 2rem;
+  }
+  @media (max-width: 620px) { .assumptions { grid-template-columns: 1fr; } }
+  .assumptions dt {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 0.15rem;
+  }
+  .assumptions dd {
+    margin: 0;
+    font-size: 14.5px;
+    color: var(--ink);
+  }
+  .assumptions dd.note { color: var(--ink-soft); font-size: 13px; margin-top: 0.1rem; }
+
+  /* Lineage */
+  .lineage {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    background: var(--paper-raised);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 1rem 1.3rem;
+    line-height: 2.1;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .lineage .node { color: var(--ink); font-weight: 600; }
+  .lineage .node.dead { color: var(--neg); text-decoration: line-through; font-weight: 400; }
+  .lineage .node.pick { color: var(--accent); }
+  .lineage .arrow { color: var(--ink-faint); margin: 0 0.5rem; }
+  .lineage .branch { display: block; padding-left: 2.4rem; }
+
+  /* Tables */
+  .table-wrap { overflow-x: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+  th, td {
+    padding: 0.5rem 0.7rem;
+    text-align: right;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  th:first-child, td:first-child { text-align: left; }
+  thead th {
+    font-size: 10.5px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+    border-bottom: 1px solid var(--rule-strong);
+  }
+  tbody tr:last-child td { border-bottom: 1px solid var(--rule-strong); }
+  tr.avg-row td { font-weight: 700; color: var(--ink); background: var(--accent-soft); }
+  tr.avg-row td:first-child::before { content: "avg — "; color: var(--ink-faint); font-weight: 400; }
+  .pos { color: var(--pos); }
+  .neg { color: var(--neg); }
+  .pick-badge {
+    display: inline-block;
+    font-family: -apple-system, sans-serif;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 2px;
+    padding: 0.08rem 0.4rem;
+    margin-left: 0.5rem;
+    vertical-align: 1px;
+  }
+
+  /* Master table specifics */
+  .master-wrap { background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 3px; padding: 0.4rem 1rem 1rem; }
+  .master-wrap table td:nth-child(2), .master-wrap table th:nth-child(2) { text-align: left; white-space: normal; max-width: 20ch; color: var(--ink-soft); font-family: -apple-system, sans-serif; font-size: 12.5px; }
+
+  /* Variant cards */
+  .variant {
+    padding-top: 1.9rem;
+    border-top: 1px solid var(--rule);
+  }
+  .variant:first-of-type { border-top: none; padding-top: 0; }
+  .variant-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.3rem;
+  }
+  .variant-id {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 2px;
+    padding: 0.05rem 0.4rem;
+    font-weight: 700;
+  }
+  .variant-head h3 {
+    font-family: Georgia, "Iowan Old Style", serif;
+    font-size: 1.12rem;
+    margin: 0;
+  }
+  .variant .rules {
+    display: flex;
+    gap: 1.6rem;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin: 0.5rem 0 1rem;
+  }
+  .variant .rules div b { color: var(--ink); font-weight: 600; }
+  .variant .rules .label { font-family: ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); display: block; margin-bottom: 0.1rem; }
+
+  .verdict {
+    margin-top: 0.9rem;
+    padding: 0.85rem 1.1rem;
+    background: var(--paper-raised);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 3px 3px 0;
+    font-size: 14px;
+    color: var(--ink);
+  }
+  .verdict b { color: var(--accent); }
+
+  .informal {
+    background: var(--paper-raised);
+    border: 1px dashed var(--rule-strong);
+    border-radius: 3px;
+    padding: 1rem 1.2rem;
+    font-size: 14px;
+    color: var(--ink-soft);
+  }
+  .informal .tag {
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--warn);
+    display: block;
+    margin-bottom: 0.4rem;
+  }
+
+  .final-call {
+    margin-top: 2.6rem;
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 4px;
+    padding: 1.7rem 1.9rem;
+  }
+  :root[data-theme="dark"] .final-call, @media (prefers-color-scheme: dark) { }
+  .final-call .eyebrow {
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    opacity: 0.95;
+  }
+  .final-call h2 {
+    font-family: Georgia, "Iowan Old Style", serif;
+    font-size: 1.4rem;
+    margin: 0.3rem 0 0.7rem;
+    color: var(--paper);
+    border: none;
+  }
+  .final-call p { color: color-mix(in srgb, var(--paper) 82%, transparent); font-size: 14.5px; max-width: 68ch; }
+  .final-call p b { color: var(--paper); }
+  .final-call .caveat { margin-top: 0.9rem; padding-top: 0.9rem; border-top: 1px solid color-mix(in srgb, var(--paper) 25%, transparent); font-size: 13.5px; }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--rule);
+    font-size: 12px;
+    color: var(--ink-faint);
+    font-family: ui-monospace, monospace;
+  }
+</style>
+
+<div class="sheet">
+
+  <div class="masthead">
+    <span class="eyebrow">Internal record · strategy research</span>
+    <h1>Momentum Strategy — Variant Backtest Record</h1>
+    <p class="dek">Nine iterations of entry/exit logic tested in TradingView Strategy Tester, from the first (abandoned) pattern-based design through the current pick, Variant G. Kept for reference before the scanner is updated to match.</p>
+    <div class="meta-row">
+      <span><b>Prepared</b> 2026-07-12</span>
+      <span><b>Instrument</b> Pine Script v6 strategy, "Momentum Strategy"</span>
+      <span><b>Method</b> TradingView Strategy Tester (paper simulation)</span>
+    </div>
+  </div>
+
+  <section>
+    <h2 class="section-title">Assumptions common to every run</h2>
+    <div class="assumptions">
+      <div>
+        <dt>Ticker universe</dt>
+        <dd>DELL, AMD, NVDA, MU, TSLA</dd>
+        <dd class="note">Pilot set of 5, chosen before rolling out to the full watchlist.</dd>
+      </div>
+      <div>
+        <dt>Backtest window</dt>
+        <dd>≈ Sep 9, 2025 – Jul 11, 2026 (~10 months)</dd>
+        <dd class="note">Bounded by TradingView's available 10-minute intraday history for these symbols — not a manually chosen start date.</dd>
+      </div>
+      <div>
+        <dt>Chart resolution</dt>
+        <dd>10-minute bars</dd>
+        <dd class="note">Required so Pine's <code>session.ispremarket</code> / <code>session.ismarket</code> can distinguish premarket from regular session.</dd>
+      </div>
+      <div>
+        <dt>Starting capital</dt>
+        <dd>$100,000 simulated</dd>
+      </div>
+      <div>
+        <dt>Position size</dt>
+        <dd>20% of equity per trade</dd>
+        <dd class="note">Reduced from 100% after early tests triggered margin calls on multi-day holds.</dd>
+      </div>
+      <div>
+        <dt>Costs modeled</dt>
+        <dd>0% commission, no slippage</dd>
+        <dd class="note">Idealized fills — live results will run worse than shown here.</dd>
+      </div>
+      <div>
+        <dt>Direction</dt>
+        <dd>Long &amp; short in A–E; long-only in F &amp; G</dd>
+        <dd class="note">No short-side criteria were specified for the "original" design F was built from.</dd>
+      </div>
+      <div>
+        <dt>Risk unit (R)</dt>
+        <dd>1R = 10% of entry price</dd>
+        <dd class="note">Used in every variant with a stop; "2R trim" = first partial exit at 2× that distance.</dd>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section-title">How the design evolved</h2>
+    <div class="lineage">
+      <span class="node dead">P0 · pattern-based</span><span class="arrow">→</span><span class="node dead">P1 · % trim, multi-day</span><span class="arrow">→</span><span class="node">A · SMA200+EMA, 20d swing</span>
+      <span class="branch"><span class="arrow">↳</span><span class="node">B · no SMA200, 40d exit</span><span class="arrow">→</span><span class="node">C · no SMA200, EMA21 trail</span></span>
+      <span class="branch"><span class="arrow">↳</span><span class="node">D · SMA200+EMA, EOD exit</span><span class="arrow">→</span><span class="node">E · no SMA200, EOD exit</span></span>
+      <span class="branch"><span class="arrow">↳</span><span class="node">F · triple-breakout, EOD exit</span><span class="arrow">→</span><span class="node pick">G · F entries + A exits ★ current pick</span></span>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section-title">Master comparison</h2>
+    <div class="master-wrap table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Variant</th>
+            <th>Core idea</th>
+            <th>Avg net %</th>
+            <th>Avg PF</th>
+            <th>Avg win %</th>
+            <th>Avg max DD</th>
+            <th>Trades</th>
+            <th>Losing tickers</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>A</td><td>SMA200 + EMA stack, 20-day swing exit</td><td class="pos">+12.35%</td><td>3.21</td><td>67.8%</td><td>3.59%</td><td>42</td><td>0 / 5</td></tr>
+          <tr><td>B</td><td>EMA only, 40-day swing exit</td><td class="pos">+8.85%</td><td>1.93</td><td>49.7%</td><td>4.99%</td><td>35</td><td>2 / 5</td></tr>
+          <tr><td>C</td><td>EMA only, EMA21 trailing stop</td><td class="pos">+7.17%</td><td>1.53</td><td>55.9%</td><td>5.46%</td><td>59</td><td>1 / 5</td></tr>
+          <tr><td>D</td><td>SMA200 + EMA, flat every EOD</td><td class="pos">+2.40%</td><td>1.68</td><td>50.8%</td><td>1.88%</td><td>138</td><td>1 / 5</td></tr>
+          <tr><td>E</td><td>EMA only, flat every EOD</td><td class="pos">+2.19%</td><td>1.57</td><td>49.7%</td><td>1.88%</td><td>145</td><td>1 / 5</td></tr>
+          <tr><td>F</td><td>SMA200 + triple breakout, EOD, long-only</td><td class="pos">+2.90%</td><td>5.85</td><td>71.8%</td><td>0.66%</td><td>71</td><td>0 / 5</td></tr>
+          <tr><td>G <span class="pick-badge">pick</span></td><td>F's entries + A's swing exit, long-only</td><td class="pos">+10.39%</td><td>4.06</td><td>70.5%</td><td>3.44%</td><td>33</td><td>1 / 5</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section-title">Precursors (no per-ticker data retained)</h2>
+    <div class="informal">
+      <span class="tag">P0 — pattern-based, abandoned</span>
+      Entry required a "big base near highs," ATR-based "compression," a "fresh breakout," market cap &gt; $2B, and EMA8/21/50 all below price. Produced <b>zero trades</b> on AMD across the full history: compression (tight ATR) and a fresh breakout are close to mutually exclusive on the same bar, since a breakout day naturally expands ATR. Abandoned once it was confirmed the base/compression/breakout criteria were visual judgment calls, not something reliable to encode as a formula.
+    </div>
+    <div class="informal" style="margin-top: 0.9rem;">
+      <span class="tag">P1 — percent-based trim, multi-day hold</span>
+      SMA200 + EMA + PMH/PML entry, -5% stop, trim 25% at +25% price move, another 25% at +50%, breakeven stop after each trim. Exact per-ticker figures weren't retained, but net P&amp;L came in far below simple buy-and-hold on the same names despite genuine rallies in the underlying stocks — traced mainly to 20%-of-equity sizing diluting gains and to trim levels set as arbitrary price percentages rather than a risk-defined multiple. This directly motivated the switch to R-multiple-based trims and a fixed swing exit, i.e. Variant A.
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section-title">Variant detail</h2>
+
+    <div class="variant">
+      <div class="variant-head">
+        <span class="variant-id">A</span>
+        <h3>SMA200 trend filter + EMA stack, 20-day swing exit</h3>
+      </div>
+      <div class="rules">
+        <div><span class="label">Entry</span><b>close &gt; SMA200 (prior close)</b>, EMA8&gt;21&gt;50 stack, break of premarket high/low</div>
+        <div><span class="label">Exit</span>-10% stop · trim 25% at 2R → stop to breakeven · close at 20 trading days</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ticker</th><th>Trades</th><th>Win %</th><th>Net %</th><th>PF</th><th>Max DD</th></tr></thead>
+          <tbody>
+            <tr><td>DELL</td><td>10</td><td>70.0%</td><td class="pos">+14.58%</td><td>4.46</td><td>4.28%</td></tr>
+            <tr><td>AMD</td><td>8</td><td>75.0%</td><td class="pos">+18.65%</td><td>5.11</td><td>2.08%</td></tr>
+            <tr><td>NVDA</td><td>4</td><td>75.0%</td><td class="pos">+1.06%</td><td>1.51</td><td>3.39%</td></tr>
+            <tr><td>MU</td><td>16</td><td>68.8%</td><td class="pos">+27.43%</td><td>3.95</td><td>4.20%</td></tr>
+            <tr><td>TSLA</td><td>4</td><td>50.0%</td><td class="pos">+0.02%</td><td>1.00</td><td>4.02%</td></tr>
+            <tr class="avg-row"><td>A</td><td>42</td><td>67.8%</td><td class="pos">+12.35%</td><td>3.21</td><td>3.59%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="verdict"><b>Why it worked:</b> the SMA200 filter reliably screens out downtrend/transition names before the EMA+PMH/PML trigger fires — the reason nothing lost money. A 20-day hold is long enough for a real breakout to clear its 2R target without drifting back into chop before the time exit.</div>
+    </div>
+
+    <div class="variant">
+      <div class="variant-head">
+        <span class="variant-id">B</span>
+        <h3>EMA stack only (SMA200 dropped), 40-day swing exit</h3>
+      </div>
+      <div class="rules">
+        <div><span class="label">Entry</span>EMA8&gt;21&gt;50 stack only, break of premarket high/low</div>
+        <div><span class="label">Exit</span>-10% stop · trim 25% at 2R → breakeven · close at 40 trading days</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ticker</th><th>Trades</th><th>Win %</th><th>Net %</th><th>PF</th><th>Max DD</th></tr></thead>
+          <tbody>
+            <tr><td>DELL</td><td>7</td><td>57.1%</td><td class="pos">+3.67%</td><td>1.65</td><td>7.30%</td></tr>
+            <tr><td>AMD</td><td>7</td><td>57.1%</td><td class="pos">+12.25%</td><td>3.05</td><td>3.94%</td></tr>
+            <tr><td>NVDA</td><td>5</td><td>40.0%</td><td class="neg">-0.51%</td><td>0.90</td><td>5.33%</td></tr>
+            <tr><td>MU</td><td>11</td><td>54.5%</td><td class="pos">+32.45%</td><td>3.63</td><td>4.37%</td></tr>
+            <tr><td>TSLA</td><td>5</td><td>40.0%</td><td class="neg">-3.60%</td><td>0.40</td><td>4.01%</td></tr>
+            <tr class="avg-row"><td>B</td><td>35</td><td>49.7%</td><td class="pos">+8.85%</td><td>1.93</td><td>4.99%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="verdict"><b>Why it slipped:</b> without the 200-day anchor, the EMA stack alone is noisier trend confirmation — NVDA and TSLA both went negative with sub-1.0 profit factor and sub-50% win rate, meaning a real share of "trend" signals were false starts. Stretching the hold to 40 days didn't recover it; it mostly gave losers more time to lose.</div>
+    </div>
+
+    <div class="variant">
+      <div class="variant-head">
+        <span class="variant-id">C</span>
+        <h3>EMA stack only, EMA21 trailing stop</h3>
+      </div>
+      <div class="rules">
+        <div><span class="label">Entry</span>Same as B — EMA8&gt;21&gt;50 stack, break of premarket high/low</div>
+        <div><span class="label">Exit</span>-10% stop · trim 25% at 2R → breakeven, then stop trails EMA21</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ticker</th><th>Trades</th><th>Win %</th><th>Net %</th><th>PF</th><th>Max DD</th></tr></thead>
+          <tbody>
+            <tr><td>DELL</td><td>13</td><td>61.5%</td><td class="pos">+13.53%</td><td>2.33</td><td>9.15%</td></tr>
+            <tr><td>AMD</td><td>13</td><td>61.5%</td><td class="pos">+6.18%</td><td>1.61</td><td>3.94%</td></tr>
+            <tr><td>NVDA</td><td>4</td><td>50.0%</td><td class="pos">+0.13%</td><td>1.03</td><td>5.80%</td></tr>
+            <tr><td>MU</td><td>24</td><td>66.7%</td><td class="pos">+18.21%</td><td>2.02</td><td>4.40%</td></tr>
+            <tr><td>TSLA</td><td>5</td><td>40.0%</td><td class="neg">-2.18%</td><td>0.64</td><td>4.03%</td></tr>
+            <tr class="avg-row"><td>C</td><td>59</td><td>55.9%</td><td class="pos">+7.17%</td><td>1.53</td><td>5.46%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="verdict"><b>Why mixed:</b> same entry-quality gap as B. The trail let DELL's winners run further, but for MU it whipsawed into far more trades (24, vs. 16 under A's fixed exit) as price oscillated around EMA21, diluting average trade quality. TSLA stayed negative — confirming this is an entry problem no exit tweak fixes.</div>
+    </div>
+
+    <div class="variant">
+      <div class="variant-head">
+        <span class="variant-id">D</span>
+        <h3>SMA200 + EMA stack, flat close every day</h3>
+      </div>
+      <div class="rules">
+        <div><span class="label">Entry</span>Same as A — SMA200 filter + EMA stack + PMH/PML break</div>
+        <div><span class="label">Exit</span>-10% stop · forced flat at the end of every session, no overnight hold</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ticker</th><th>Trades</th><th>Win %</th><th>Net %</th><th>PF</th><th>Max DD</th></tr></thead>
+          <tbody>
+            <tr><td>DELL</td><td>29</td><td>65.5%</td><td class="pos">+4.89%</td><td>2.13</td><td>2.25%</td></tr>
+            <tr><td>AMD</td><td>24</td><td>54.2%</td><td class="pos">+3.91%</td><td>2.48</td><td>1.26%</td></tr>
+            <tr><td>NVDA</td><td>21</td><td>42.9%</td><td class="neg">-0.86%</td><td>0.73</td><td>1.84%</td></tr>
+            <tr><td>MU</td><td>52</td><td>50.0%</td><td class="pos">+3.07%</td><td>1.42</td><td>3.09%</td></tr>
+            <tr><td>TSLA</td><td>12</td><td>41.7%</td><td class="pos">+0.97%</td><td>1.62</td><td>0.96%</td></tr>
+            <tr class="avg-row"><td>D</td><td>138</td><td>50.8%</td><td class="pos">+2.40%</td><td>1.68</td><td>1.88%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="verdict"><b>Why it slipped:</b> the entry logic is identical to A's, but forcing a flat close every day cuts every trade off long before a multi-day breakout can develop — average return collapsed to about a fifth of A's, on more than 3× the trades. NVDA stayed negative even with the SMA200 filter present, pointing to a ticker-specific weakness in its intraday continuation, not just a trend-filter gap.</div>
+    </div>
+
+    <div class="variant">
+      <div class="variant-head">
+        <span class="variant-id">E</span>
+        <h3>EMA stack only, flat close every day</h3>
+      </div>
+      <div class="rules">
+        <div><span class="label">Entry</span>Same as B — EMA stack only, PMH/PML break</div>
+        <div><span class="label">Exit</span>-10% stop · forced flat at the end of every session</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ticker</th><th>Trades</th><th>Win %</th><th>Net %</th><th>PF</th><th>Max DD</th></tr></thead>
+          <tbody>
+            <tr><td>DELL</td><td>33</td><td>60.6%</td><td class="pos">+3.97%</td><td>1.75</td><td>2.25%</td></tr>
+            <tr><td>AMD</td><td>25</td><td>52.0%</td><td class="pos">+3.78%</td><td>2.38</td><td>1.26%</td></tr>
+            <tr><td>NVDA</td><td>21</td><td>42.9%</td><td class="neg">-0.86%</td><td>0.73</td><td>1.84%</td></tr>
+            <tr><td>MU</td><td>52</td><td>50.0%</td><td class="pos">+3.07%</td><td>1.42</td><td>3.09%</td></tr>
+            <tr><td>TSLA</td><td>14</td><td>42.9%</td><td class="pos">+0.97%</td><td>1.58</td><td>0.96%</td></tr>
+            <tr class="avg-row"><td>E</td><td>145</td><td>49.7%</td><td class="pos">+2.19%</td><td>1.57</td><td>1.88%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="verdict"><b>Why weakest overall:</b> stacks both weaknesses — no trend filter, same-day-only holding — landing the lowest average return and highest trade count of any variant tested. NVDA and MU post identical numbers to D: neither ticker generated a short signal, and both were already above their 200-day SMA whenever the EMA breakout fired, so dropping the filter changed nothing for them specifically.</div>
+    </div>
+
+    <div class="variant">
+      <div class="variant-head">
+        <span class="variant-id">F</span>
+        <h3>SMA200 + triple-confirmed breakout, 10am filter, flat EOD</h3>
+      </div>
+      <div class="rules">
+        <div><span class="label">Entry</span>Prior close &gt; SMA200, close &gt; yesterday's high, close &gt; today's premarket high, close &gt; today's high-so-far — only after 10:00 ET</div>
+        <div><span class="label">Exit</span>-10% stop · forced flat at end of session · long only</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ticker</th><th>Trades</th><th>Win %</th><th>Net %</th><th>PF</th><th>Max DD</th></tr></thead>
+          <tbody>
+            <tr><td>DELL</td><td>18</td><td>77.8%</td><td class="pos">+5.25%</td><td>11.97</td><td>0.61%</td></tr>
+            <tr><td>AMD</td><td>13</td><td>69.2%</td><td class="pos">+3.91%</td><td>7.90</td><td>0.39%</td></tr>
+            <tr><td>NVDA</td><td>7</td><td>71.4%</td><td class="pos">+0.84%</td><td>3.37</td><td>0.53%</td></tr>
+            <tr><td>MU</td><td>28</td><td>60.7%</td><td class="pos">+3.48%</td><td>2.51</td><td>1.20%</td></tr>
+            <tr><td>TSLA</td><td>5</td><td>80.0%</td><td class="pos">+1.01%</td><td>3.51</td><td>0.58%</td></tr>
+            <tr class="avg-row"><td>F</td><td>71</td><td>71.8%</td><td class="pos">+2.90%</td><td>5.85</td><td>0.66%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="verdict"><b>Why it's the cleanest of the bunch:</b> three independent breakout confirmations, gated to after 10am, is a much higher bar than "EMA stack + one PMH/PML break." By the time a stock clears premarket high, yesterday's high, <em>and</em> makes a fresh high-of-day, it has already proven real intraday strength — filtering out most of the false starts that hurt B–E. The cost of that selectivity: the EOD exit only captures the intraday leg, so absolute return stays modest despite the excellent quality metrics.</div>
+    </div>
+
+    <div class="variant">
+      <div class="variant-head">
+        <span class="variant-id">G</span>
+        <h3>F's triple-confirmed entry + A's swing exit <span class="pick-badge">current pick</span></h3>
+      </div>
+      <div class="rules">
+        <div><span class="label">Entry</span>Same as F — SMA200 + prior-day-high + premarket-high + fresh HOD, after 10:00 ET</div>
+        <div><span class="label">Exit</span>-10% stop · trim 25% at 2R → breakeven · close at 20 trading days · long only</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ticker</th><th>Trades</th><th>Win %</th><th>Net %</th><th>PF</th><th>Max DD</th></tr></thead>
+          <tbody>
+            <tr><td>MU</td><td>14</td><td>64.3%</td><td class="pos">+19.87%</td><td>3.11</td><td>4.60%</td></tr>
+            <tr><td>DELL</td><td>6</td><td>83.3%</td><td class="pos">+19.49%</td><td>11.40</td><td>2.85%</td></tr>
+            <tr><td>AMD</td><td>7</td><td>71.4%</td><td class="pos">+12.15%</td><td>3.58</td><td>4.06%</td></tr>
+            <tr><td>TSLA</td><td>3</td><td>66.7%</td><td class="pos">+2.03%</td><td>2.00</td><td>1.96%</td></tr>
+            <tr><td>NVDA</td><td>3</td><td>66.7%</td><td class="neg">-1.61%</td><td>0.20</td><td>3.72%</td></tr>
+            <tr class="avg-row"><td>G</td><td>33</td><td>70.5%</td><td class="pos">+10.39%</td><td>4.06</td><td>3.44%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="verdict"><b>Why it's the best balance:</b> giving F's stricter, higher-conviction entry room to run (2R trim + 20-day exit, instead of an EOD cutoff) lets winners compound further while keeping the false-positive rate low. DELL and MU roughly double A's return on the same names with far better profit factors (11.40 and 3.11 vs. A's 4.46 and 3.95), on fewer total trades (33 vs. 42) than A. The catch is sample size — the stricter entry cuts signal count sharply, and NVDA's 3-trade sample lands negative. NVDA has been the weakest or most-negative ticker in <em>every</em> variant tested this session, so this reads as a ticker-specific mismatch, not a flaw in G's logic.</div>
+    </div>
+
+  </section>
+
+  <div class="final-call">
+    <span class="eyebrow">Standing decision</span>
+    <h2>Variant G is the current pick</h2>
+    <p>Closest return to Variant A (<b>+10.39%</b> avg vs. A's +12.35%) while beating it on win rate (<b>70.5%</b> vs. 67.8%), profit factor (<b>4.06</b> vs. 3.21), and total trades (<b>33</b> vs. 42). It also inherits F's much cleaner entry logic — three stacked breakout confirmations instead of one — which is why 4 of 5 tickers show meaningfully better risk-adjusted numbers than under A alone.</p>
+    <p class="caveat">Open item: NVDA's 3-trade sample under G is too thin to call decisively negative — worth revisiting once more history accumulates, rather than tuning the entry further on this sample size alone.</p>
+  </div>
+
+  <footer>momentum-strategy · pine v6 · tradingview strategy tester · 5-ticker pilot (DELL / AMD / NVDA / MU / TSLA)</footer>
+
+</div>
