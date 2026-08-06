@@ -1,0 +1,85 @@
+//@version=6
+// Momentum Strategy - Variant H (live on TradingView as "Momentum Strategy").
+// Pulled verbatim from the user's TradingView account on 2026-08-03 and
+// committed here for version control - this was already running live; it
+// had just never been saved into this repo before. See
+// Algo Trading/docs/momentum_strategy_backtest_record.html for the full
+// variant history/backtest record this implements.
+strategy("Momentum Strategy", overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=20, commission_type=strategy.commission.percent, commission_value=0.0)
+
+sma200D = request.security(syminfo.tickerid, "D", ta.sma(close, 200)[1])
+prevDayClose = request.security(syminfo.tickerid, "D", close[1])
+prevDayHigh = request.security(syminfo.tickerid, "D", high[1])
+trendOk = prevDayClose > sma200D
+
+var float pmh = na
+var float sessionHigh = na
+var int lastDay = na
+newDay = dayofmonth != lastDay
+if newDay
+    pmh := na
+    sessionHigh := na
+    lastDay := dayofmonth
+
+if session.ispremarket
+    pmh := na(pmh) ? high : math.max(pmh, high)
+
+prevSessionHigh = sessionHigh
+if session.ismarket
+    sessionHigh := na(sessionHigh) ? high : math.max(sessionHigh, high)
+
+etHour = hour(time, "America/New_York")
+etMinute = minute(time, "America/New_York")
+afterTenAM = etHour >= 10
+
+aboveYesterdayHigh = close > prevDayHigh
+abovePMH = not na(pmh) and close > pmh
+newHOD = not na(prevSessionHigh) and close > prevSessionHigh
+
+breakoutNow = afterTenAM and session.ismarket and trendOk and aboveYesterdayHigh and abovePMH and newHOD
+isHourlyCheckBar = session.ismarket and afterTenAM and etHour <= 14 and etMinute == 0
+recentBreakout = ta.highest(breakoutNow ? 1.0 : 0.0, 6) == 1
+
+longCondition = isHourlyCheckBar and recentBreakout and strategy.position_size == 0
+
+if longCondition
+    strategy.entry("Long", strategy.long)
+
+// ---- Swing exits: -10% stop (=1R), trim 25% at 2R -> breakeven stop, 20-trading-day time exit ----
+var float entryPrice = na
+var float stopPrice = na
+var float initialQty = na
+var bool trimmed = false
+var int daysHeld = 0
+
+justEntered = strategy.position_size != 0 and strategy.position_size[1] == 0
+if justEntered
+    entryPrice := strategy.position_avg_price
+    initialQty := math.abs(strategy.position_size)
+    trimmed := false
+    daysHeld := 0
+    stopPrice := entryPrice * 0.90
+
+sessionStart = session.ismarket and not session.ismarket[1]
+if strategy.position_size != 0 and sessionStart and not justEntered
+    daysHeld := daysHeld + 1
+
+riskDistance = entryPrice * 0.10
+reward2R = entryPrice + 2 * riskDistance
+
+if not trimmed and not na(reward2R) and strategy.position_size > 0 and close >= reward2R
+    strategy.close("Long", qty=initialQty * 0.25, comment="Trim2R")
+    trimmed := true
+    stopPrice := entryPrice
+
+if strategy.position_size > 0 and low <= stopPrice
+    strategy.close("Long", comment="Stop")
+
+if strategy.position_size != 0 and daysHeld >= 20
+    strategy.close("Long", comment="TimeExit")
+
+plot(sma200D, title="SMA200", color=color.blue)
+plot(pmh, title="Premarket High", color=color.aqua)
+plot(prevDayHigh, title="Prev Day High", color=color.purple)
+plot(stopPrice, title="Stop", color=color.gray, style=plot.style_circles)
+plotshape(longCondition, title="Long Entry", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.small)

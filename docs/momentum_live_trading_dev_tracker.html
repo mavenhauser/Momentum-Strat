@@ -1,0 +1,231 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Momentum live trading deployment log</title>
+<style>
+  :root {
+    --paper: #eef1f0;
+    --paper-raised: #ffffff;
+    --ink: #16232a;
+    --ink-soft: #56666f;
+    --ink-faint: #8b979c;
+    --accent: #1f6f64;
+    --accent-soft: #e4efec;
+    --rule: #d6dcda;
+    --rule-strong: #b9c2bf;
+    --pos: #1f7a4d;
+    --neg: #b3423c;
+    --warn: #9a6a1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #12181a; --paper-raised: #1a2225; --ink: #e9efee; --ink-soft: #9db0ac;
+      --ink-faint: #647573; --accent: #5fb8a9; --accent-soft: #1c2b29; --rule: #2a3538;
+      --rule-strong: #3c4a4d; --pos: #4ec98a; --neg: #e2716a; --warn: #d3a54e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper); color: var(--ink);
+    font-family: -apple-system, "Seravek", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 15.5px; line-height: 1.6; -webkit-font-smoothing: antialiased; margin: 0;
+  }
+  .sheet { max-width: 900px; margin: 0 auto; padding: 3.2rem 1.75rem 5rem; }
+  h1, h2, h3 { text-wrap: balance; font-weight: 600; }
+  .masthead {
+    display: flex; flex-direction: column; gap: 0.35rem; padding-bottom: 1.6rem;
+    border-bottom: 2px solid var(--ink); margin-bottom: 1.8rem;
+  }
+  .masthead .eyebrow {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11.5px;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent);
+  }
+  .masthead h1 {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
+    font-size: 2.05rem; letter-spacing: -0.01em; margin: 0.1rem 0 0.2rem;
+  }
+  .masthead .dek { color: var(--ink-soft); font-size: 15px; max-width: 66ch; }
+  .masthead .meta-row {
+    display: flex; flex-wrap: wrap; gap: 0.3rem 1.4rem; margin-top: 0.6rem;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; color: var(--ink-faint);
+  }
+  .masthead .meta-row b { color: var(--ink-soft); font-weight: 600; }
+  section { margin-top: 2.6rem; }
+  h2.section-title {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif; font-size: 1.3rem;
+    letter-spacing: -0.005em; padding-bottom: 0.55rem; border-bottom: 1px solid var(--rule-strong);
+    margin-bottom: 1.1rem;
+  }
+  h3.sub {
+    font-family: Georgia, "Iowan Old Style", serif; font-size: 1.05rem; margin: 1.6rem 0 0.6rem;
+  }
+  .table-wrap { overflow-x: auto; }
+  table {
+    width: 100%; border-collapse: collapse; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px; font-variant-numeric: tabular-nums;
+  }
+  th, td { padding: 0.5rem 0.7rem; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  thead th {
+    font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint);
+    font-weight: 600; border-bottom: 1px solid var(--rule-strong);
+  }
+  tbody tr:last-child td { border-bottom: 1px solid var(--rule-strong); }
+  .pos { color: var(--pos); } .neg { color: var(--neg); } .warn-text { color: var(--warn); }
+  .bug {
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 3px;
+    padding: 1.1rem 1.3rem; margin-top: 1.1rem;
+  }
+  .bug-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+  .bug-id {
+    font-family: ui-monospace, monospace; font-size: 12px; color: var(--neg); border: 1px solid var(--neg);
+    border-radius: 2px; padding: 0.05rem 0.4rem; font-weight: 700;
+  }
+  .bug-head h4 { font-family: Georgia, "Iowan Old Style", serif; font-size: 1.02rem; margin: 0; font-weight: 600; }
+  .bug dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; margin: 0.7rem 0 0; font-size: 14px; }
+  .bug dt {
+    font-family: ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-faint); white-space: nowrap; padding-top: 0.15rem;
+  }
+  .bug dd { margin: 0; color: var(--ink); }
+  .status-list { list-style: none; margin: 0; padding: 0; }
+  .status-list li {
+    display: flex; gap: 0.7rem; padding: 0.55rem 0; border-bottom: 1px solid var(--rule); font-size: 14.5px;
+  }
+  .status-list li:last-child { border-bottom: none; }
+  .badge {
+    flex: 0 0 auto; font-family: ui-monospace, monospace; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.05em; text-transform: uppercase; border-radius: 2px; padding: 0.1rem 0.45rem;
+    height: fit-content; margin-top: 0.1rem;
+  }
+  .badge.done { color: var(--pos); border: 1px solid var(--pos); }
+  .badge.unconfirmed { color: var(--warn); border: 1px solid var(--warn); }
+  .badge.open { color: var(--neg); border: 1px solid var(--neg); }
+  .verdict {
+    margin-top: 0.9rem; padding: 0.85rem 1.1rem; background: var(--paper-raised);
+    border-left: 3px solid var(--accent); border-radius: 0 3px 3px 0; font-size: 14px; color: var(--ink);
+  }
+  .verdict.warn { border-left-color: var(--warn); }
+  .verdict b { color: var(--accent); }
+  .verdict.warn b { color: var(--warn); }
+  code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.9em;
+    background: var(--accent-soft); padding: 0.05em 0.35em; border-radius: 3px;
+  }
+  .final-call {
+    margin-top: 2.6rem; background: var(--ink); color: var(--paper); border-radius: 4px; padding: 1.7rem 1.9rem;
+  }
+  .final-call .eyebrow {
+    font-family: ui-monospace, monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--accent); opacity: 0.95;
+  }
+  .final-call h2 {
+    font-family: Georgia, "Iowan Old Style", serif; font-size: 1.35rem; margin: 0.3rem 0 0.7rem;
+    color: var(--paper); border: none;
+  }
+  .final-call p { color: color-mix(in srgb, var(--paper) 82%, transparent); font-size: 14.5px; max-width: 68ch; }
+  .final-call p b { color: var(--paper); }
+  footer {
+    margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid var(--rule); font-size: 12px;
+    color: var(--ink-faint); font-family: ui-monospace, monospace;
+  }
+</style></head>
+<body>
+<div class="sheet">
+
+  <div class="masthead">
+    <span class="eyebrow">Internal record · live deployment log</span>
+    <h1>Momentum live trading deployment log</h1>
+    <p class="dek">Build-out of the autonomous options paper trader for Variant H (see <code>momentum_strategy_backtest_record.html</code> for the strategy backtest this implements) and the IBKR/cron/TWS issues found and fixed getting it toward genuinely unattended operation.</p>
+    <div class="meta-row">
+      <span><b>Started</b> 2026-08-02</span>
+      <span><b>Updated</b> 2026-08-06</span>
+      <span><b>Venue</b> Interactive Brokers paper account (options) + TastyTrade (data)</span>
+      <span><b>Repo</b> Algo Trading (this project)</span>
+    </div>
+  </div>
+
+  <section>
+    <h2 class="section-title">What got built</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>src/momentum_signals.py</code></td><td>Variant H entry logic (SMA200 filter + triple-confirmed breakout, hourly 6-candle lookback) and shared IBKR bar fetchers, extracted from the backtest script so live and backtest can't drift apart.</td></tr>
+          <tr><td><code>src/momentum_option_picker.py</code></td><td>Contract selection: nearest monthly expiry ≥45 DTE, filtered by delta&gt;0.25 / volume&gt;500 / OI&gt;1000, cheapest survivor.</td></tr>
+          <tr><td><code>src/momentum_state.py</code></td><td>JSON position persistence across stateless hourly/15-min invocations, plus a PID-based run lock (added 2026-08-06).</td></tr>
+          <tr><td><code>scripts/run_momentum_paper_trader.py</code></td><td>The autonomous entrypoint. <code>--dry-run</code> supported. Manages open positions (stop / catalyst / trim / time-exit) then scans for new entries, respecting concurrency and cluster caps.</td></tr>
+          <tr><td><code>scripts/check_momentum_option_order.py</code> (+ <code>_when_ready.sh</code>)</td><td>One-lot buy/sell smoke test for the equity-option order path, gated to fire once TWS is actually reachable.</td></tr>
+          <tr><td><code>src/ibkr_client.py</code></td><td>Generalized from SPX-index-only to standard equity options (<code>symbol</code>/<code>trading_class</code> params), added <code>get_account_value()</code>.</td></tr>
+          <tr><td><code>src/tastytrade_client.py</code></td><td>Added <code>get_option_market_snapshot()</code> — DXLink streaming for real-time equity-option greeks/OI/volume (the REST snapshot returns empty for non-index strikes).</td></tr>
+          <tr><td><code>pine/momentum_strategy_variant_h.pine</code></td><td>The live TradingView Pine Script — turned out to already be live on the account under the name "Momentum Strategy"; pulled the real source and checked it into version control for the first time (my own from-scratch reconstruction was discarded in favor of it).</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="verdict"><b>Standing parameters:</b> 10-ticker universe (DELL/AMD/NVDA/MU/TSLA/AVGO/PLTR/MSFT/AAPL/GOOGL), 1% of account NLV per position, max 4 concurrent / 2 in the semis cluster, catalyst exit = <code>abs(theta) &gt; delta</code> OR same calendar week as the contract's own expiry.</div>
+  </section>
+
+  <section>
+    <h2 class="section-title">Bugs found — only surfaced under live conditions, not in review</h2>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">BUG 1</span><h4>IBKR client-ID collision (Error 326)</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>Every cron-triggered run of the live trader failed at <code>client.connect()</code> — "Unable to connect as the client id is already in use."</dd>
+        <dt>Root cause</dt><dd><code>run_paper_trader.py</code> (SPX Scalp) holds <code>clientId=1</code> continuously all session; the momentum trader defaulted to the same ID since none was ever assigned.</dd>
+        <dt>Fix</dt><dd>Distinct client IDs added to config: 45 (live trader), 46 (smoke test), 47-57 used ad hoc for diagnostics.</dd>
+      </dl>
+    </div>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">BUG 2</span><h4>Price-reasonability collar rejection (Error 202)</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>Orders submitted then immediately auto-cancelled. An early red herring (Error 10349, "TIF set to DAY") looked like the cause but wasn't.</dd>
+        <dt>Root cause</dt><dd>The shared <code>MARKETABLE_LIMIT_SLIPPAGE_PCT</code> (10%, tuned for SPX 0DTE options) is far more aggressive than IBKR's price-collar tolerance for a normal equity option (~3.5% observed on a live DELL test).</dd>
+        <dt>Fix</dt><dd>New <code>MOMENTUM_LIMIT_SLIPPAGE_PCT = 0.03</code>, scoped to the momentum system only — the shared SPX constant was deliberately left untouched since it's unverified against this same collar and the SPX trader is already live.</dd>
+      </dl>
+    </div>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">BUG 3</span><h4>TWS order-processing stall</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>A live DELL close order sat at "Submitted"/no-response indefinitely across 3 separate attempts (minutes each) despite reads (positions, NLV, quotes) working fine and fast throughout.</dd>
+        <dt>Root cause</dt><dd>TWS's own order-processing got stuck — consistent with prior project history (<code>docs/paper_trading_dev_tracker.html</code>) of "Error 322: Maximum number of account summary requests exceeded" after prolonged uptime, visible cycling in <code>paper_trader.log</code> at the same time.</dd>
+        <dt>Fix</dt><dd>Manual TWS restart. Not a code fix — this is an operational hazard to watch for, not something the scripts can self-heal.</dd>
+      </dl>
+    </div>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">ONGOING</span><h4>Cron not reliably firing at all</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>Zero confirmed successful <em>unattended</em> cron-triggered runs as of 2026-08-06, across multiple trading days. Every successful run has been a manual invocation.</dd>
+        <dt>Root cause (suspected)</dt><dd>The MacBook cycling into "Maintenance Sleep" every 15-90 min while on battery + Low Power Mode + standby — cron cannot fire while the OS is suspended, and this produces no error, nothing logged, the tick is just silently skipped. Confirmed real (not just theory) via <code>pmset -g log</code> showing near-continuous sleep cycling through a full trading day.</dd>
+        <dt>Fix</dt><dd>User to keep the machine plugged in / Low Power Mode off during market hours. <b>Not yet confirmed resolved</b> — no full trading window has completed under "plugged in" conditions with a clean result yet.</dd>
+      </dl>
+    </div>
+
+    <div class="verdict warn"><b>Also discovered, unrelated to any of the above:</b> another session/actor has been working on the SPX Scalp system in parallel in this same repo (rewrote <code>get_quote()</code> to use DXLink, added several new signal modules, a <code>launch_paper_trader_if_needed.py</code> reliability script). Confirmed via file-watcher diffs showing up mid-session that weren't authored here. The 2026-08-06 commit was carefully scoped to include only the momentum system's own changes — see git log <code>30e23d6</code>.</div>
+  </section>
+
+  <section>
+    <h2 class="section-title">Current status</h2>
+    <ul class="status-list">
+      <li><span class="badge done">Done</span><span>Strategy logic correct and matches the backtest record (verified: real live signals found on NVDA/GOOGL in a dry-run 2026-08-03).</span></li>
+      <li><span class="badge done">Done</span><span>Real order fill confirmed end-to-end (DELL smoke test: bought and sold a real paper contract, 2026-08-03/05).</span></li>
+      <li><span class="badge done">Done</span><span>Committed to git (<code>30e23d6</code>, momentum-only scope) — not yet pushed to origin.</span></li>
+      <li><span class="badge done">Done</span><span>Overlap-safe: PID-based run lock added 2026-08-06 before shortening the cron interval.</span></li>
+      <li><span class="badge unconfirmed">Unconfirmed</span><span>Cron firing reliably unattended — schedule is now every 15 min, 9am-2:59pm ET weekdays (internal gate: 9:45am-2pm ET). No clean unattended cycle observed yet.</span></li>
+      <li><span class="badge open">Open</span><span>Sleep-cycling root cause — mitigation (stay plugged in) suggested, not yet verified across a full session.</span></li>
+      <li><span class="badge open">Open</span><span>TWS stability under prolonged uptime — no automatic recovery; needs a human to notice and restart if it recurs.</span></li>
+    </ul>
+  </section>
+
+  <div class="final-call">
+    <span class="eyebrow">Standing decision</span>
+    <h2>Built, bug-fixed, and order-path-proven — autonomy still unconfirmed</h2>
+    <p>The trading logic itself is correct and has placed a real, filled order on the paper account. But "the code is right" and "it will run unattended and reliably" turned out to be two very different claims this session — three separate infrastructure bugs (client ID, price collar, TWS stall) were each invisible until tested against live conditions, and the cron/sleep issue means <b>zero unattended runs have succeeded as of this writing</b>. A scheduled pre-market check is set for 8:30am ET the next trading day to get a real, current answer before assuming it's live.</p>
+    <p style="margin-top:0.9rem; padding-top:0.9rem; border-top:1px solid color-mix(in srgb, var(--paper) 25%, transparent); font-size:13.5px;">The actual trading script has zero dependency on Claude Code or an active session — it runs entirely on OS cron + local Python + broker APIs. The scheduled check-ins and any future debugging do depend on it.</p>
+  </div>
+
+  <footer>momentum-strategy · variant H · live deployment · IBKR paper · git 30e23d6 · updated 2026-08-06</footer>
+
+</div>
+</body></html>
