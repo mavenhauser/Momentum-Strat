@@ -7,16 +7,31 @@ nothing survives between invocations unless it's written to disk. This is
 the only state-persistence code in the repo; there's no existing pattern to
 follow, so it's kept deliberately simple: one JSON file, atomic writes.
 
-Position schema (one entry per ticker with an open position):
+Position schema (a ticker key is only present while it has at least one
+open lot; the value is a LIST of lots, not a single dict, because a
+delayed/late fill on an order the script already gave up waiting on can
+land after a later cycle has opened a fresh lot on the same ticker -
+seen for real 2026-08-07 on PLTR - so a single-slot-per-ticker schema
+would silently lose track of one of them):
     {
-      "strike": float, "expiry": "YYYYMMDD", "streamer_symbol": str,
-      "contracts_remaining": int,
-      "entry_premium": float, "entry_underlying_price": float,
-      "entry_date": "YYYY-MM-DD",
-      "trims_done": [float, ...],       # R-multiples already trimmed at
-      "breakeven_active": bool,
-      "itm_extension_deadline": "YYYY-MM-DD" | null,  # set once the time
-                                                       # exit is reached ITM
+      "<TICKER>": [
+        {
+          "strike": float, "expiry": "YYYYMMDD", "streamer_symbol": str,
+          "contracts_remaining": int,
+          "entry_premium": float, "entry_underlying_price": float,
+          "target_price": float | None,     # measured-move trim target set at
+                                             # entry (2026-08-15) - None on
+                                             # positions opened before this
+                                             # existed, or if there wasn't
+                                             # enough daily history at entry
+          "entry_date": "YYYY-MM-DD",
+          "trims_done": [float, ...],       # R-multiples already trimmed at
+          "breakeven_active": bool,
+          "itm_extension_deadline": "YYYY-MM-DD" | null,  # set once the time
+                                                           # exit is reached ITM
+        },
+        ...
+      ]
     }
 """
 import json

@@ -58,10 +58,11 @@ from src.momentum_signals import (  # noqa: E402
     check_variant_h_entry,
     fetch_daily_bars,
     fetch_intraday_bars,
+    find_swing_leg,
     is_same_week,
+    r_multiple,
     split_session_bars,
     trading_days_since,
-    underlying_r_multiple,
 )
 from src.momentum_state import acquire_lock, load_state, release_lock, save_state  # noqa: E402
 from src.tastytrade_client import TastytradeClient  # noqa: E402
@@ -102,7 +103,10 @@ def within_entry_window(now_et):
 def scan_for_entry(ib, ticker):
     """Fetch daily+intraday bars for `ticker` and check Variant H's entry
     condition against today's regular-session bars so far. Returns
-    (triggered: bool, current_price: float | None)."""
+    (triggered: bool, current_price: float | None, target_price: float | None).
+    target_price is the measured-move trim target, pivot-based (None if no
+    confirmed prior swing leg is found within
+    config.MOMENTUM_SWING_PIVOT_MAX_LOOKBACK_DAYS) - see find_swing_leg()."""
     contract = Stock(ticker, "SMART", "USD")
     ib.qualifyContracts(contract)
 
@@ -110,20 +114,29 @@ def scan_for_entry(ib, ticker):
     context = build_daily_context(daily_bars, sma_window=config.MOMENTUM_SMA_WINDOW)
     ctx = context.get(date.today())
     if ctx is None:
-        return False, None
+        return False, None, None
     prev_day_high, _prev_day_low, prev_day_close, sma = ctx
 
     intraday_bars = fetch_intraday_bars(ib, contract, date.today(), date.today())
     premarket_bars, regular_bars = split_session_bars(intraday_bars)
     if not regular_bars:
-        return False, None
+        return False, None, None
     premarket_high = max((b.high for b in premarket_bars), default=None)
 
     triggered = check_variant_h_entry(
         prev_day_close, sma, prev_day_high, premarket_high, regular_bars,
         lookback=config.MOMENTUM_ENTRY_LOOKBACK_CANDLES,
     )
-    return triggered, regular_bars[-1].close
+    current_price = regular_bars[-1].close
+    target_price = None
+    if triggered:
+        swing_high, swing_low = find_swing_leg(
+            daily_bars, date.today(),
+            config.MOMENTUM_SWING_PIVOT_WIDTH, config.MOMENTUM_SWING_PIVOT_MAX_LOOKBACK_DAYS,
+        )
+        if swing_high is not None:
+            target_price = current_price + (swing_high - swing_low)
+    return triggered, current_price, target_price
 
 
 def cluster_open_count(state, cluster):
@@ -131,13 +144,13 @@ def cluster_open_count(state, cluster):
 
 
 def try_open_position(client, tt, ib, ticker, state, nlv, dry_run=False):
-    triggered, current_price = scan_for_entry(ib, ticker)
+    triggered, current_price, target_price = scan_for_entry(ib, ticker)
     if not triggered or current_price is None:
         return
 
     contract_info = pick_contract(tt, ticker)
     if contract_info is None:
-        send(f"*Momentum Trader* - {ticker}: entry signal fired but no contract cleared the "
+        send(f"*Momentum Trader* - *{ticker}*: entry signal fired but no contract cleared the "
              f"delta/volume/OI filters - skipped, no order placed.")
         return
 
@@ -145,13 +158,14 @@ def try_open_position(client, tt, ib, ticker, state, nlv, dry_run=False):
     premium_budget = nlv * config.MOMENTUM_SIZING_PCT_NLV
     contracts = int(premium_budget // (ask * 100))
     if contracts < 1:
-        send(f"*Momentum Trader* - {ticker}: entry signal fired but the {config.MOMENTUM_SIZING_PCT_NLV:.0%} "
+        send(f"*Momentum Trader* - *{ticker}*: entry signal fired but the {config.MOMENTUM_SIZING_PCT_NLV:.0%} "
              f"NLV budget (${premium_budget:,.0f}) doesn't cover even 1 contract at ${ask:.2f} - skipped.")
         return
 
     if dry_run:
         print(f"[dry-run] would BUY {ticker} {contract_info['strike']:.0f}C {contract_info['expiry']} "
-              f"x{contracts} @ ~{ask:.2f} (underlying {current_price:.2f}, delta {contract_info['delta']})")
+              f"x{contracts} @ ~{ask:.2f} (underlying {current_price:.2f}, target {target_price}, "
+              f"delta {contract_info['delta']})")
         return
 
     limit_price = ask * (1 + config.MOMENTUM_LIMIT_SLIPPAGE_PCT)
@@ -161,24 +175,28 @@ def try_open_position(client, tt, ib, ticker, state, nlv, dry_run=False):
     )
     trade = client.wait_for_fill(trade)
     if trade.orderStatus.status != "Filled":
-        send(f"*Momentum Trader* - {ticker}: entry order did not fill in time - skipped, check TWS.")
+        send(f"*Momentum Trader* - *{ticker}*: entry order did not fill in time - skipped, check TWS.")
         return
 
-    state[ticker] = {
+    state.setdefault(ticker, []).append({
         "strike": contract_info["strike"],
         "expiry": contract_info["expiry"].strftime("%Y%m%d"),
         "streamer_symbol": contract_info["streamer_symbol"],
         "contracts_remaining": contracts,
         "entry_premium": trade.orderStatus.avgFillPrice,
         "entry_underlying_price": current_price,
+        "target_price": target_price,
         "entry_date": date.today().isoformat(),
         "trims_done": [],
         "breakeven_active": False,
         "itm_extension_deadline": None,
-    }
+    })
+    target_line = f"\nTarget: {target_price:.2f}" if target_price is not None else "\nTarget: n/a (no confirmed swing leg at entry)"
     send(
-        f"*Momentum Trader* - Entered {ticker} {contract_info['strike']:.0f}C {contract_info['expiry']} "
-        f"x{contracts} @ {trade.orderStatus.avgFillPrice:.2f} (underlying {current_price:.2f})"
+        f"*Momentum Trader* - Entered *{ticker}* *{contract_info['strike']:.0f}C* {contract_info['expiry']} "
+        f"x{contracts} @ {trade.orderStatus.avgFillPrice:.2f} (underlying {current_price:.2f})\n"
+        f"Reason: SMA200 uptrend + triple-confirmed breakout (close above prior-day high, premarket high, "
+        f"and fresh high-of-day){target_line}"
     )
 
 
@@ -197,14 +215,15 @@ def _close_full(client, tt, ticker, position, reason, dry_run=False):
     )
     trade = client.wait_for_fill(trade)
     exit_premium = trade.orderStatus.avgFillPrice if trade.orderStatus.status == "Filled" else limit_price
-    send(f"*Momentum Trader* - {ticker}: closed ({reason}) {position['contracts_remaining']}x @ {exit_premium:.2f}")
+    send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: closed ({reason}) "
+         f"{position['contracts_remaining']}x @ {exit_premium:.2f}")
 
 
-def _trim_one_quarter(client, tt, ticker, position, level, dry_run=False):
+def _trim_one_quarter(client, tt, ticker, position, level, reason, dry_run=False):
     trim_qty = max(1, int(round(position["contracts_remaining"] * config.MOMENTUM_TRIM_FRACTION)))
     trim_qty = min(trim_qty, position["contracts_remaining"])
     if dry_run:
-        print(f"[dry-run] would TRIM {ticker} {trim_qty}x at {level}R")
+        print(f"[dry-run] would TRIM {ticker} {trim_qty}x ({reason})")
         return
     quote = tt.get_option_market_snapshot([position["streamer_symbol"]]).get(position["streamer_symbol"]) or {}
     bid = quote.get("bid")
@@ -221,8 +240,8 @@ def _trim_one_quarter(client, tt, ticker, position, level, dry_run=False):
     position["trims_done"].append(level)
     if level >= config.MOMENTUM_TRIM_R:
         position["breakeven_active"] = True
-    send(f"*Momentum Trader* - {ticker}: trimmed {trim_qty}x @ {exit_premium:.2f} "
-         f"({position['contracts_remaining']} remaining)")
+    send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: trimmed {trim_qty}x @ {exit_premium:.2f} "
+         f"({reason}, {position['contracts_remaining']} remaining)")
 
 
 def manage_position(client, tt, ib, ticker, position, dry_run=False):
@@ -254,7 +273,7 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
     #   (a) theta exceeds delta
     #   (b) still holding into the contract's own expiry week
     snapshot = tt.get_option_market_snapshot([position["streamer_symbol"]]).get(position["streamer_symbol"]) or {}
-    theta, delta = snapshot.get("theta"), snapshot.get("delta")
+    theta, delta, current_bid = snapshot.get("theta"), snapshot.get("delta"), snapshot.get("bid")
     theta_exceeds_delta = theta is not None and delta is not None and abs(theta) > delta
     in_expiry_week = is_same_week(date.today(), expiry_date)
     if theta_exceeds_delta or in_expiry_week:
@@ -262,12 +281,29 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
         _close_full(client, tt, ticker, position, reason, dry_run)
         return False
 
-    # 3. Pending trim
-    r_multiple = underlying_r_multiple(entry_underlying, current_underlying, config.MOMENTUM_R_PCT)
-    if config.MOMENTUM_TRIM_R not in position["trims_done"] and r_multiple >= config.MOMENTUM_TRIM_R:
-        _trim_one_quarter(client, tt, ticker, position, config.MOMENTUM_TRIM_R, dry_run)
-        if position["contracts_remaining"] <= 0:
-            return False
+    # 3. Pending trim - fires on EITHER of two independent triggers, whichever
+    # comes first (2026-08-15, per scripts/momentum_target_price_backtest.py):
+    #   (a) option premium up +2R (not the underlying's move - that's what
+    #       actually drives this account's P&L)
+    #   (b) the underlying hitting its measured-move target_price set at
+    #       entry (None on positions opened before this existed, or if there
+    #       wasn't enough daily history at entry time - just skips this leg)
+    if config.MOMENTUM_TRIM_R not in position["trims_done"]:
+        hit_premium_2r = (
+            current_bid is not None
+            and r_multiple(position["entry_premium"], current_bid, config.MOMENTUM_R_PCT) >= config.MOMENTUM_TRIM_R
+        )
+        target_price = position.get("target_price")
+        hit_target = target_price is not None and current_underlying >= target_price
+        if hit_premium_2r or hit_target:
+            reasons = []
+            if hit_premium_2r:
+                reasons.append("+2R premium")
+            if hit_target:
+                reasons.append(f"target {target_price:.2f} hit")
+            _trim_one_quarter(client, tt, ticker, position, config.MOMENTUM_TRIM_R, " & ".join(reasons), dry_run)
+            if position["contracts_remaining"] <= 0:
+                return False
 
     # 4. Time exit, with a bounded ITM extension. The expiry-week catalyst
     # check above already guarantees this never runs past expiry week, so
@@ -285,7 +321,8 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
             deadline = add_trading_days(date.today(), config.MOMENTUM_ITM_EXTENSION_TRADING_DAYS)
             if not dry_run:
                 position["itm_extension_deadline"] = deadline.isoformat()
-            send(f"*Momentum Trader* - {ticker}: time exit reached but ITM - extending to {deadline.isoformat()}.")
+            send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: time exit reached but ITM - "
+                 f"extending to {deadline.isoformat()}.")
         else:
             _close_full(client, tt, ticker, position, "time exit", dry_run)
             return False
@@ -314,7 +351,12 @@ def main():
         return
 
     try:
-        _run(args)
+        try:
+            _run(args)
+        except Exception as e:
+            print(f"Run failed: {e}")
+            traceback.print_exc()
+            send("*Momentum Trader* - No strat run.")
     finally:
         release_lock()
 
@@ -334,15 +376,25 @@ def _run(args):
         if nlv is None:
             print("Could not read account NLV this run - skipping entry scan (exits still evaluated).")
 
-        # 1. Manage open positions first.
+        # 1. Manage open positions first. A ticker can hold more than one lot
+        # (see src/momentum_state.py) - each is evaluated independently, so
+        # one can close while another stays open.
         for ticker in list(state.keys()):
-            try:
-                still_open = manage_position(client, tt, client.ib, ticker, state[ticker], args.dry_run)
-                if not still_open and not args.dry_run:
+            remaining_lots = []
+            for position in state[ticker]:
+                try:
+                    still_open = manage_position(client, tt, client.ib, ticker, position, args.dry_run)
+                except Exception as e:
+                    print(f"Failed managing {ticker}, leaving position untouched this run: {e}")
+                    traceback.print_exc()
+                    still_open = True
+                if still_open or args.dry_run:
+                    remaining_lots.append(position)
+            if not args.dry_run:
+                if remaining_lots:
+                    state[ticker] = remaining_lots
+                else:
                     del state[ticker]
-            except Exception as e:
-                print(f"Failed managing {ticker}, leaving position untouched this run: {e}")
-                traceback.print_exc()
 
         # 2. Scan flat tickers for entries, respecting concurrency/cluster caps.
         if nlv is not None:

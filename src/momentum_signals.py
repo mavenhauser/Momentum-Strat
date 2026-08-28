@@ -111,6 +111,98 @@ def build_daily_context(daily_bars, sma_window=200):
     return context
 
 
+# ---- Target-price methods (2026-08-15, momentum_target_price_backtest.py) --
+# Added to compare candidate "hit our target price" trim triggers against the
+# existing +2R-only trim - see docs/momentum_strategy_backtest_record.html
+# for methodology/results once run. Both helpers are lookahead-safe the same
+# way build_daily_context() is: a value "as of" day D only ever uses bars
+# strictly before D, never D's own still-forming bar.
+
+def build_atr_context(daily_bars, period=14):
+    """Per completed trading day: {date: ATR(period)} using the standard True
+    Range formula (max of high-low, |high-prev_close|, |low-prev_close|),
+    then a simple rolling mean. ATR "as of" a day uses only the `period`
+    true-range values ending the day before it."""
+    true_ranges = []
+    for i in range(1, len(daily_bars)):
+        high, low, prev_close = daily_bars[i].high, daily_bars[i].low, daily_bars[i - 1].close
+        true_ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
+        # true_ranges[i - 1] is the TR for daily_bars[i]
+
+    context = {}
+    for i in range(period + 1, len(daily_bars)):
+        window = true_ranges[i - 1 - period: i - 1]  # TRs for daily_bars[i - period .. i - 1]
+        if len(window) < period:
+            continue
+        context[daily_bars[i].date] = sum(window) / period
+    return context
+
+
+def swing_range(daily_bars, as_of_date, lookback_days=20):
+    """(swing_high, swing_low) = max(high) / min(low) over the `lookback_days`
+    trading days strictly before as_of_date. Naive version - a plain
+    high/low over a fixed window doesn't distinguish "a clean prior swing
+    with room left to run" from "the exact rally that already used up the
+    room to run" (seen for real 2026-08-15 on NVDA: this projected a target
+    above the stock's own all-time high, because the 20-day window's low
+    and high were just the two ends of the same rally that carried it to
+    its highs). find_swing_leg() below is the fix - kept for backtest
+    comparison. Returns (None, None) if there isn't enough history."""
+    idx = next((i for i, b in enumerate(daily_bars) if b.date == as_of_date), None)
+    if idx is None or idx < lookback_days:
+        return None, None
+    window = daily_bars[idx - lookback_days: idx]
+    return max(b.high for b in window), min(b.low for b in window)
+
+
+def find_swing_leg(daily_bars, as_of_date, pivot_width=3, max_lookback_days=60):
+    """(swing_high, swing_low) for the most recent CONFIRMED A -> B impulse
+    leg before as_of_date, using real local pivots instead of a plain
+    window high/low (see swing_range()'s docstring for why that matters).
+
+    A bar at index i is a confirmed swing high if its high is the max of
+    the pivot_width bars on both sides of it (a local peak); swing low is
+    the analogous local trough. Walking backward from as_of_date: find the
+    most recent confirmed swing high (point B), then the most recent
+    confirmed swing low before that (point A) - i.e. the trough that
+    started the rally into B. This isolates one real prior leg instead of
+    whatever a stock happened to do across an arbitrary fixed window.
+
+    Lookahead-safe: a pivot at index i needs pivot_width bars on each side
+    to confirm, so only pivots whose confirming bars are ALL strictly
+    before as_of_date are considered - never peeks at or after entry.
+    Returns (None, None) if no confirmed A->B leg is found within
+    max_lookback_days."""
+    as_of_idx = next((i for i, b in enumerate(daily_bars) if b.date == as_of_date), None)
+    if as_of_idx is None:
+        return None, None
+
+    latest_confirmable = as_of_idx - pivot_width - 1  # needs pivot_width bars after it, all < as_of_idx
+    earliest = max(pivot_width, as_of_idx - max_lookback_days)
+
+    swing_high_idx = None
+    for i in range(latest_confirmable, earliest - 1, -1):
+        window = daily_bars[i - pivot_width: i + pivot_width + 1]
+        if daily_bars[i].high == max(b.high for b in window):
+            swing_high_idx = i
+            break
+    if swing_high_idx is None:
+        return None, None
+
+    swing_low_idx = None
+    for i in range(swing_high_idx - 1, earliest - 1, -1):
+        if i - pivot_width < 0:
+            break
+        window = daily_bars[i - pivot_width: i + pivot_width + 1]
+        if daily_bars[i].low == min(b.low for b in window):
+            swing_low_idx = i
+            break
+    if swing_low_idx is None:
+        return None, None
+
+    return daily_bars[swing_high_idx].high, daily_bars[swing_low_idx].low
+
+
 # ---- Variant H entry condition (long-only) ----------------------------------
 
 def _daily_breakout_flags(prev_day_high, premarket_high, regular_bars_so_far):
@@ -147,14 +239,27 @@ def check_variant_h_entry(prev_day_close, sma200, prev_day_high, premarket_high,
     return any(flags[-lookback:])
 
 
-# ---- Exit thresholds (pure functions, underlying-price terms) ---------------
+# ---- Exit thresholds (pure functions) ----------------------------------------
 
-def underlying_pct_move(entry_price, current_price):
+def pct_move(entry_price, current_price):
     return (current_price - entry_price) / entry_price
 
 
+def r_multiple(entry_price, current_price, r_pct=0.10):
+    return pct_move(entry_price, current_price) / r_pct
+
+
+# Stop-loss stays underlying-price-based; these two names are kept as thin
+# wrappers around the generic versions above so existing callers (stop-loss)
+# are untouched, while the trim check (2026-08-15) switched to option-premium
+# terms via r_multiple() directly - see manage_position() in
+# scripts/run_momentum_paper_trader.py.
+def underlying_pct_move(entry_price, current_price):
+    return pct_move(entry_price, current_price)
+
+
 def underlying_r_multiple(entry_price, current_price, r_pct=0.10):
-    return underlying_pct_move(entry_price, current_price) / r_pct
+    return r_multiple(entry_price, current_price, r_pct)
 
 
 def stop_triggered(entry_price, current_price, stop_pct=-0.10):

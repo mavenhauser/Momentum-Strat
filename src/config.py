@@ -201,8 +201,30 @@ MOMENTUM_SMA_WINDOW = 200
 # Exit (underlying-price terms, translated into option sell orders):
 MOMENTUM_STOP_PCT = -0.10  # -10%
 MOMENTUM_R_PCT = 0.10  # 1R = 10% of entry price
-MOMENTUM_TRIM_R = 2.0  # trim 25% at +2R
+MOMENTUM_TRIM_R = 2.0  # trim 25% at +2R (option premium terms - see r_multiple() usage in manage_position())
 MOMENTUM_TRIM_FRACTION = 0.25
+
+# Second, independent trim trigger (2026-08-15): the underlying hitting a
+# "target price" set at entry, whichever of this or MOMENTUM_TRIM_R fires
+# first. Target = entry underlying + (swing_high - swing_low), a
+# "measured-move" projection - picked over ATR-multiple/Fibonacci-extension
+# per scripts/momentum_target_price_backtest.py's results (2026-08-15): it
+# beat the +2R-only baseline on return, win rate, AND max drawdown, where
+# the other two candidates were a real trade-off or basically inert.
+#
+# swing_high/swing_low come from find_swing_leg() (real local pivots), NOT
+# a plain N-day high/low window - the first live version used a plain
+# 20-day window and it backfired immediately: NVDA's target came out above
+# its own all-time high, because the window's low and high were just the
+# two ends of the same rally that had already carried it to its highs, not
+# a separate leg with room to run. Re-backtested with pivot-based detection
+# as a direct replacement (same day): target-hit rate rose from 15.3% to
+# 37.5% and win rate improved, for a total-return cost that landed at
+# rough parity with baseline rather than beating it - a small, honest
+# trade-off versus a flaw. See docs/momentum_strategy_backtest_record.html
+# for the full comparison.
+MOMENTUM_SWING_PIVOT_WIDTH = 3  # bars needed on each side to confirm a local high/low
+MOMENTUM_SWING_PIVOT_MAX_LOOKBACK_DAYS = 60
 MOMENTUM_TIME_EXIT_TRADING_DAYS = 20
 MOMENTUM_ITM_EXTENSION_TRADING_DAYS = 10  # extra runway if still ITM at the time exit
 
