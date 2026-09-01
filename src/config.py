@@ -199,18 +199,62 @@ MOMENTUM_ENTRY_WINDOW_ET = (9, 45, 14, 0)  # (start_hour, start_min, end_hour, e
 MOMENTUM_SMA_WINDOW = 200
 
 # Exit (underlying-price terms, translated into option sell orders):
+# MOMENTUM_STOP_PCT/MOMENTUM_TRIM_R are kept only for
+# scripts/momentum_target_price_backtest.py, which already ran and whose
+# results are recorded in the docs - not touching them keeps that backtest
+# reproducible. The live script (run_momentum_paper_trader.py) moved on
+# 2026-08-31 to the option-primary design below (MOMENTUM_PREMIUM_STOP_R /
+# MOMENTUM_TRIM_LEVELS), so these two are no longer read by live code.
 MOMENTUM_STOP_PCT = -0.10  # -10%
 MOMENTUM_R_PCT = 0.10  # 1R = 10% of entry price
-MOMENTUM_TRIM_R = 2.0  # trim 25% at +2R (option premium terms - see r_multiple() usage in manage_position())
+MOMENTUM_TRIM_R = 2.0  # backtest-only, see note above
 MOMENTUM_TRIM_FRACTION = 0.25
 
-# Second, independent trim trigger (2026-08-15): the underlying hitting a
-# "target price" set at entry, whichever of this or MOMENTUM_TRIM_R fires
-# first. Target = entry underlying + (swing_high - swing_low), a
-# "measured-move" projection - picked over ATR-multiple/Fibonacci-extension
-# per scripts/momentum_target_price_backtest.py's results (2026-08-15): it
-# beat the +2R-only baseline on return, win rate, AND max drawdown, where
-# the other two candidates were a real trade-off or basically inert.
+# Stop-loss (2026-08-31 redesign): option premium is now the ONLY primary
+# trigger - the underlying is a secondary filter, not an independent stop.
+# Previously the live stop was underlying-only (-10%), which gave zero
+# protection against a real case: NVDA's premium dropped 54% to theta decay
+# while the underlying was barely down 2%. A pure premium stop was tried
+# first (-5R/-50%) but replaced same-day with this gated design once the
+# underlying-primary/secondary-filter principle was set for both stop and
+# trim - not backtested (see the abandoned Black-Scholes-modeling attempt:
+# IBKR has no historical option data for this account, TastyTrade's DXLink
+# is live-only, and reconstructing which strike would've been selected
+# needs volume/OI liquidity data that doesn't exist historically either;
+# the 5 real fills observed this session ranged +3.5% to +17.3% OTM at
+# entry, too wide a spread for a synthetic strike guess to trust). -25% is
+# the chosen "primary" threshold - narrower than the earlier -50% attempt,
+# since the underlying gate (below) is what actually provides the leeway
+# now, by holding off the close during a normal pullback:
+#   premium <= MOMENTUM_PREMIUM_STOP_R  ->
+#     underlying >= its MOMENTUM_STOP_EMA_PERIOD-day EMA -> HOLD (still at
+#       support, don't sell yet)
+#     underlying <= its LoD reference (min of prev-day low and today's
+#       low-so-far, a trailing reference that only ever tightens) -> CLOSE
+#       (confirmed breakdown)
+#     neither -> HOLD (premium alone isn't enough without underlying
+#       confirmation)
+MOMENTUM_PREMIUM_STOP_R = -2.5  # -25%
+MOMENTUM_STOP_EMA_PERIOD = 8
+
+# Trim ladder (2026-08-31 redesign): pure option-premium R-multiples, three
+# levels, each taking MOMENTUM_TRIM_FRACTION of whatever remains at the
+# time - 2R/5R/8R (+20%/+50%/+80%) leaves a final ~25% of the original
+# size to ride uncapped (still protected by the stop above and the time
+# exit). Replaces the single-level MOMENTUM_TRIM_R for live trading.
+# The measured-move target_price (below) stays as a secondary filter on
+# just the first level - confirmation noted in the trim's alert when the
+# underlying has also reached it, but the premium condition alone is what
+# fires the trim now, consistent with the same option-primary principle.
+MOMENTUM_TRIM_LEVELS = [2.0, 5.0, 8.0]
+
+# Measured-move target price (2026-08-15, demoted to secondary-filter role
+# 2026-08-31): the underlying hitting a target set at entry. Target =
+# entry underlying + (swing_high - swing_low), picked over ATR-multiple/
+# Fibonacci-extension per scripts/momentum_target_price_backtest.py's
+# results (2026-08-15): it beat the +2R-only baseline on return, win rate,
+# AND max drawdown, where the other two candidates were a real trade-off
+# or basically inert.
 #
 # swing_high/swing_low come from find_swing_leg() (real local pivots), NOT
 # a plain N-day high/low window - the first live version used a plain

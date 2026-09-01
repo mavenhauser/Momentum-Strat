@@ -55,6 +55,7 @@ from src.momentum_signals import (  # noqa: E402
     ET,
     add_trading_days,
     build_daily_context,
+    build_ema_context,
     check_variant_h_entry,
     fetch_daily_bars,
     fetch_intraday_bars,
@@ -203,51 +204,96 @@ def try_open_position(client, tt, ib, ticker, state, nlv, dry_run=False):
 # --- exit side -----------------------------------------------------------------
 
 def _close_full(client, tt, ticker, position, reason, dry_run=False):
+    """Attempts to close the full remaining position. Returns True if fully
+    closed (caller should drop this ticker from state), False if the order
+    didn't fully fill (position stays open, contracts_remaining corrected
+    to whatever actually filled - zero if nothing did).
+
+    2026-08-31: fixed a real bug found live - this used to send "closed Nx"
+    and let the caller drop the ticker regardless of what the order
+    actually did. Caught it corrupting 3 real positions in one cycle: a
+    GOOGL sell that filled only 1 of 13 (reported as fully closed, 12 left
+    completely untracked), and NVDA/MU sells that were fully Cancelled (0
+    filled) but still reported as closed and dropped."""
+    qty_attempted = position["contracts_remaining"]
     if dry_run:
-        print(f"[dry-run] would CLOSE {ticker} ({reason}) {position['contracts_remaining']}x")
-        return
+        print(f"[dry-run] would CLOSE {ticker} ({reason}) {qty_attempted}x")
+        return True
     quote = tt.get_option_market_snapshot([position["streamer_symbol"]]).get(position["streamer_symbol"]) or {}
     bid = quote.get("bid")
     limit_price = bid * (1 - config.MOMENTUM_LIMIT_SLIPPAGE_PCT) if bid else position["entry_premium"]
     trade = client.sell_to_close(
-        position["expiry"], position["strike"], "C", position["contracts_remaining"], limit_price,
+        position["expiry"], position["strike"], "C", qty_attempted, limit_price,
         trading_class=None, symbol=ticker,
     )
     trade = client.wait_for_fill(trade)
-    exit_premium = trade.orderStatus.avgFillPrice if trade.orderStatus.status == "Filled" else limit_price
-    send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: closed ({reason}) "
-         f"{position['contracts_remaining']}x @ {exit_premium:.2f}")
+    filled = trade.orderStatus.filled
+    if filled <= 0:
+        send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: close attempt ({reason}) did not "
+             f"fill (status={trade.orderStatus.status}) - still holding {qty_attempted}x, will retry.")
+        return False
+    position["contracts_remaining"] -= filled
+    fully_closed = position["contracts_remaining"] <= 0
+    if fully_closed:
+        send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: closed ({reason}) "
+             f"{filled}x @ {trade.orderStatus.avgFillPrice:.2f}")
+    else:
+        send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: PARTIAL close ({reason}) "
+             f"{filled}x of {qty_attempted}x @ {trade.orderStatus.avgFillPrice:.2f} - "
+             f"{position['contracts_remaining']}x still open, will retry the rest.")
+    return fully_closed
 
 
 def _trim_one_quarter(client, tt, ticker, position, level, reason, dry_run=False):
-    trim_qty = max(1, int(round(position["contracts_remaining"] * config.MOMENTUM_TRIM_FRACTION)))
-    trim_qty = min(trim_qty, position["contracts_remaining"])
+    """Returns True if this level is fully done (trims_done should record
+    it), False if it didn't fill at all this cycle (nothing changed,
+    retries next cycle) - same fill-verification fix as _close_full
+    (2026-08-31)."""
+    trim_qty_target = max(1, int(round(position["contracts_remaining"] * config.MOMENTUM_TRIM_FRACTION)))
+    trim_qty_target = min(trim_qty_target, position["contracts_remaining"])
     if dry_run:
-        print(f"[dry-run] would TRIM {ticker} {trim_qty}x ({reason})")
-        return
+        print(f"[dry-run] would TRIM {ticker} {trim_qty_target}x ({reason})")
+        return True
     quote = tt.get_option_market_snapshot([position["streamer_symbol"]]).get(position["streamer_symbol"]) or {}
     bid = quote.get("bid")
     if bid is None:
-        return
+        return False
     limit_price = bid * (1 - config.MOMENTUM_LIMIT_SLIPPAGE_PCT)
     trade = client.sell_to_close(
-        position["expiry"], position["strike"], "C", trim_qty, limit_price,
+        position["expiry"], position["strike"], "C", trim_qty_target, limit_price,
         trading_class=None, symbol=ticker,
     )
     trade = client.wait_for_fill(trade)
-    exit_premium = trade.orderStatus.avgFillPrice if trade.orderStatus.status == "Filled" else limit_price
-    position["contracts_remaining"] -= trim_qty
-    position["trims_done"].append(level)
-    if level >= config.MOMENTUM_TRIM_R:
-        position["breakeven_active"] = True
-    send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: trimmed {trim_qty}x @ {exit_premium:.2f} "
-         f"({reason}, {position['contracts_remaining']} remaining)")
+    filled = trade.orderStatus.filled
+    if filled <= 0:
+        send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: trim attempt ({reason}) did not "
+             f"fill (status={trade.orderStatus.status}) - will retry.")
+        return False
+    position["contracts_remaining"] -= filled
+    position["breakeven_active"] = True
+    fully_done = filled >= trim_qty_target
+    if fully_done:
+        position["trims_done"].append(level)
+        send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: trimmed {filled}x @ "
+             f"{trade.orderStatus.avgFillPrice:.2f} ({reason}, {position['contracts_remaining']} remaining)")
+    else:
+        send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: PARTIAL trim ({reason}) "
+             f"{filled}x of {trim_qty_target}x target @ {trade.orderStatus.avgFillPrice:.2f} - "
+             f"{position['contracts_remaining']}x remaining, will retry the rest of this level.")
+    return fully_done
 
 
 def manage_position(client, tt, ib, ticker, position, dry_run=False):
-    """Evaluates Variant H's swing exit (translated to option terms) in
-    priority order: stop -> theta-decay -> pending trim -> time-exit/ITM
-    extension. Returns True if the position is still open afterward."""
+    """Evaluates the swing exit in priority order: stop -> theta-decay ->
+    pending trim -> time-exit/ITM extension. Returns True if the position
+    is still open afterward.
+
+    2026-08-31 redesign: option premium is the PRIMARY basis for both stop
+    and trim; the underlying is only ever a secondary filter/confirmation
+    on top of a premium-triggered decision, never an independent trigger
+    of its own - see src/config.py (MOMENTUM_PREMIUM_STOP_R,
+    MOMENTUM_STOP_EMA_PERIOD, MOMENTUM_TRIM_LEVELS) for the full
+    rationale."""
     contract = Stock(ticker, "SMART", "USD")
     ib.qualifyContracts(contract)
     intraday_bars = fetch_intraday_bars(ib, contract, date.today(), date.today())
@@ -256,14 +302,37 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
         return True  # no data yet this run - don't act blind
 
     current_underlying = regular_bars[-1].close
-    entry_underlying = position["entry_underlying_price"]
-    stop_pct = 0.0 if position["breakeven_active"] else config.MOMENTUM_STOP_PCT
+    today_low_so_far = min(b.low for b in regular_bars)
 
-    # 1. Stop (or breakeven stop once the 2R trim has fired)
-    if (current_underlying - entry_underlying) / entry_underlying <= stop_pct:
-        reason = "breakeven stop" if position["breakeven_active"] else "stop"
-        _close_full(client, tt, ticker, position, reason, dry_run)
-        return False
+    daily_bars = fetch_daily_bars(ib, contract, duration="2 Y")
+    daily_ctx = build_daily_context(daily_bars, sma_window=config.MOMENTUM_SMA_WINDOW).get(date.today())
+    prev_day_low = daily_ctx[1] if daily_ctx is not None else None
+    lod_reference = min(prev_day_low, today_low_so_far) if prev_day_low is not None else today_low_so_far
+    ema = build_ema_context(daily_bars, config.MOMENTUM_STOP_EMA_PERIOD).get(date.today())
+
+    snapshot = tt.get_option_market_snapshot([position["streamer_symbol"]]).get(position["streamer_symbol"]) or {}
+    theta, delta, current_bid = snapshot.get("theta"), snapshot.get("delta"), snapshot.get("bid")
+
+    # 1. Stop - the option's own premium collapsing MOMENTUM_PREMIUM_STOP_R
+    # is the PRIMARY trigger; the underlying only ever gates whether a
+    # triggered stop actually executes, never triggers on its own:
+    #   underlying >= its EMA(period) -> HOLD (still at support, don't sell)
+    #   underlying <= LoD reference (trailing: min of prev-day low and
+    #     today's low-so-far, only ever tightens) -> CLOSE (confirmed
+    #     breakdown)
+    #   neither -> HOLD (premium alone isn't enough without confirmation)
+    premium_stop_hit = (
+        current_bid is not None
+        and r_multiple(position["entry_premium"], current_bid, config.MOMENTUM_R_PCT) <= config.MOMENTUM_PREMIUM_STOP_R
+    )
+    if premium_stop_hit:
+        at_or_above_support = ema is not None and current_underlying >= ema
+        broke_down = current_underlying <= lod_reference
+        if broke_down and not at_or_above_support:
+            if _close_full(client, tt, ticker, position, "premium stop (LoD break)", dry_run):
+                return False
+            return True  # didn't fully fill - reassess fresh next cycle
+        # else: at/above the EMA, or no LoD confirmation yet - hold
 
     expiry_date = datetime.strptime(position["expiry"], "%Y%m%d").date()
     is_itm = current_underlying > position["strike"]
@@ -272,38 +341,36 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
     # if either holds (user-specified definition, 2026-08-02):
     #   (a) theta exceeds delta
     #   (b) still holding into the contract's own expiry week
-    snapshot = tt.get_option_market_snapshot([position["streamer_symbol"]]).get(position["streamer_symbol"]) or {}
-    theta, delta, current_bid = snapshot.get("theta"), snapshot.get("delta"), snapshot.get("bid")
     theta_exceeds_delta = theta is not None and delta is not None and abs(theta) > delta
     in_expiry_week = is_same_week(date.today(), expiry_date)
     if theta_exceeds_delta or in_expiry_week:
         reason = "theta > delta" if theta_exceeds_delta else "expiry week"
-        _close_full(client, tt, ticker, position, reason, dry_run)
-        return False
+        if _close_full(client, tt, ticker, position, reason, dry_run):
+            return False
+        return True  # didn't fully fill - reassess fresh next cycle
 
-    # 3. Pending trim - fires on EITHER of two independent triggers, whichever
-    # comes first (2026-08-15, per scripts/momentum_target_price_backtest.py):
-    #   (a) option premium up +2R (not the underlying's move - that's what
-    #       actually drives this account's P&L)
-    #   (b) the underlying hitting its measured-move target_price set at
-    #       entry (None on positions opened before this existed, or if there
-    #       wasn't enough daily history at entry time - just skips this leg)
-    if config.MOMENTUM_TRIM_R not in position["trims_done"]:
-        hit_premium_2r = (
-            current_bid is not None
-            and r_multiple(position["entry_premium"], current_bid, config.MOMENTUM_R_PCT) >= config.MOMENTUM_TRIM_R
-        )
-        target_price = position.get("target_price")
-        hit_target = target_price is not None and current_underlying >= target_price
-        if hit_premium_2r or hit_target:
-            reasons = []
-            if hit_premium_2r:
-                reasons.append("+2R premium")
-            if hit_target:
-                reasons.append(f"target {target_price:.2f} hit")
-            _trim_one_quarter(client, tt, ticker, position, config.MOMENTUM_TRIM_R, " & ".join(reasons), dry_run)
+    # 3. Trim ladder - pure option-premium R-multiples (2026-08-31),
+    # ascending: 25% of whatever remains at each of MOMENTUM_TRIM_LEVELS.
+    # The measured-move target_price is only a secondary confirmation noted
+    # on the first level's alert now - it no longer independently triggers
+    # a trim on its own (same option-primary principle as the stop above).
+    if current_bid is not None:
+        premium_r = r_multiple(position["entry_premium"], current_bid, config.MOMENTUM_R_PCT)
+        for level in config.MOMENTUM_TRIM_LEVELS:
+            if level in position["trims_done"]:
+                continue
+            if premium_r < level:
+                break  # ascending levels - none higher can be hit either
+            reasons = [f"+{level:.0f}R premium"]
+            if level == config.MOMENTUM_TRIM_LEVELS[0]:
+                target_price = position.get("target_price")
+                if target_price is not None and current_underlying >= target_price:
+                    reasons.append(f"target {target_price:.2f} also hit")
+            filled_ok = _trim_one_quarter(client, tt, ticker, position, level, " & ".join(reasons), dry_run)
             if position["contracts_remaining"] <= 0:
                 return False
+            if not filled_ok:
+                break  # this attempt didn't fill - don't stack more orders this cycle
 
     # 4. Time exit, with a bounded ITM extension. The expiry-week catalyst
     # check above already guarantees this never runs past expiry week, so
@@ -314,8 +381,9 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
     if position["itm_extension_deadline"] is not None:
         deadline = date.fromisoformat(position["itm_extension_deadline"])
         if date.today() >= deadline:
-            _close_full(client, tt, ticker, position, "time exit (ITM extension expired)", dry_run)
-            return False
+            if _close_full(client, tt, ticker, position, "time exit (ITM extension expired)", dry_run):
+                return False
+            return True  # didn't fully fill - reassess fresh next cycle
     elif days_held >= config.MOMENTUM_TIME_EXIT_TRADING_DAYS:
         if is_itm:
             deadline = add_trading_days(date.today(), config.MOMENTUM_ITM_EXTENSION_TRADING_DAYS)
@@ -324,8 +392,9 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
             send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: time exit reached but ITM - "
                  f"extending to {deadline.isoformat()}.")
         else:
-            _close_full(client, tt, ticker, position, "time exit", dry_run)
-            return False
+            if _close_full(client, tt, ticker, position, "time exit", dry_run):
+                return False
+            return True  # didn't fully fill - reassess fresh next cycle
 
     return True
 

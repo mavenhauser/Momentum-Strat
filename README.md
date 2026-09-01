@@ -6,9 +6,10 @@ breakout, checked hourly with a trailing 6-candle lookback, swing exit with
 a stop/2R-trim/time-exit) executed as options against an **Interactive
 Brokers paper account**. See
 [`docs/momentum_strategy_backtest_record.html`](docs/momentum_strategy_backtest_record.html)
-for the full backtest/variant history (A through I) this implements, and
-[`docs/momentum_live_trading_dev_tracker.html`](docs/momentum_live_trading_dev_tracker.html)
-for the live-deployment build log (bugs found and fixed, current status).
+for the full backtest/variant history (A through I) this implements, plus
+the live-deployment build log (bugs found and fixed, current status) —
+merged into this single doc 2026-09-01, previously a separate
+`momentum_live_trading_dev_tracker.html`.
 
 This repo was split out of a combined `Algo Trading` repo on 2026-08-06,
 which originally held both this system and an unrelated SPX 0DTE scalping

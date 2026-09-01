@@ -1,4 +1,4 @@
-<title>Momentum Strategy — Backtest Variant Record</title>
+<title>Momentum Strategy — Backtest Record &amp; Live Deployment Log</title>
 <style>
   :root {
     --paper: #eef1f0;
@@ -286,6 +286,37 @@
     margin-bottom: 0.4rem;
   }
 
+  /* Bug-tracker styling, merged in from momentum_live_trading_dev_tracker.html (2026-09-01) */
+  .bug {
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 3px;
+    padding: 1.1rem 1.3rem; margin-top: 1.1rem;
+  }
+  .bug-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+  .bug-id {
+    font-family: ui-monospace, monospace; font-size: 12px; color: var(--neg); border: 1px solid var(--neg);
+    border-radius: 2px; padding: 0.05rem 0.4rem; font-weight: 700;
+  }
+  .bug-head h4 { font-family: Georgia, "Iowan Old Style", serif; font-size: 1.02rem; margin: 0; font-weight: 600; }
+  .bug dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; margin: 0.7rem 0 0; font-size: 14px; }
+  .bug dt {
+    font-family: ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-faint); white-space: nowrap; padding-top: 0.15rem;
+  }
+  .bug dd { margin: 0; color: var(--ink); }
+  .status-list { list-style: none; margin: 0; padding: 0; }
+  .status-list li {
+    display: flex; gap: 0.7rem; padding: 0.55rem 0; border-bottom: 1px solid var(--rule); font-size: 14.5px;
+  }
+  .status-list li:last-child { border-bottom: none; }
+  .badge {
+    flex: 0 0 auto; font-family: ui-monospace, monospace; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.05em; text-transform: uppercase; border-radius: 2px; padding: 0.1rem 0.45rem;
+    height: fit-content; margin-top: 0.1rem;
+  }
+  .badge.done { color: var(--pos); border: 1px solid var(--pos); }
+  .badge.unconfirmed { color: var(--warn); border: 1px solid var(--warn); }
+  .badge.open { color: var(--neg); border: 1px solid var(--neg); }
+
   .final-call {
     margin-top: 2.6rem;
     background: var(--ink);
@@ -293,7 +324,6 @@
     border-radius: 4px;
     padding: 1.7rem 1.9rem;
   }
-  :root[data-theme="dark"] .final-call, @media (prefers-color-scheme: dark) { }
   .final-call .eyebrow {
     font-family: ui-monospace, monospace;
     font-size: 11px;
@@ -326,14 +356,14 @@
 <div class="sheet">
 
   <div class="masthead">
-    <span class="eyebrow">Internal record · strategy research</span>
-    <h1>Momentum Strategy — Variant Backtest Record</h1>
-    <p class="dek">Entry/exit logic tested in TradingView Strategy Tester, from the first (abandoned) pattern-based design through the current live pick, Variant H, plus deployment notes, a premarket-gapper universe test, an exploratory (now parked) day-trade gap strategy, the 10-ticker expansion, and the live options-based swing trading plan for an IBKR paper account.</p>
+    <span class="eyebrow">Internal record · strategy research &amp; live deployment log</span>
+    <h1>Momentum Strategy — Backtest Record &amp; Live Deployment Log</h1>
+    <p class="dek">Merged 2026-09-01 from two previously separate docs into one: entry/exit logic tested in TradingView Strategy Tester (from the first abandoned pattern-based design through the current live pick, Variant H, the 10-ticker expansion, and target-price/stop-loss research), plus the full live-deployment build log &#8212; every infrastructure bug found and fixed getting the autonomous options trader (<code>scripts/run_momentum_paper_trader.py</code>) to genuinely unattended operation against an IBKR paper account. <code>momentum_live_trading_dev_tracker.html</code> is retired; this is now the single record for both.</p>
     <div class="meta-row">
       <span><b>Prepared</b> 2026-07-12</span>
-      <span><b>Updated</b> 2026-08-15 — trim rule refinement: option-premium R (live) + target-price backtest, then a real flaw found in measured-move (NVDA target above its ATH) and fixed with pivot-based swing detection</span>
+      <span><b>Updated</b> 2026-09-01 — merged in the live-deployment dev tracker (retired as a separate doc); previously 2026-08-31, stop-loss/trim redesign + a same-day live bug found and fixed ("closed" wasn't verifying actual fills)</span>
       <span><b>Instrument</b> Pine Script v6 strategy, "Momentum Strategy"</span>
-      <span><b>Method</b> TradingView Strategy Tester (paper simulation)</span>
+      <span><b>Method</b> TradingView Strategy Tester (paper simulation) + live IBKR/TastyTrade paper trading</span>
     </div>
   </div>
 
@@ -903,6 +933,78 @@
   </section>
 
   <section>
+    <h2 class="section-title">Live deployment build log, part 1: getting the autonomous trader running (2026-08-02 to 2026-08-06)</h2>
+    <p style="font-size: 14px; color: var(--ink-soft); max-width: 68ch; margin: 0 0 0.9rem;">Merged in from a separate tracking doc (<code>momentum_live_trading_dev_tracker.html</code>, 2026-09-01) that covered building out the actual autonomous options-execution script — the code path that turns the alert/suggestion pipeline above into real (paper) orders. Kept in its original bug-tracker format rather than rewritten into prose, since it was a genuinely different kind of record (infrastructure failures, not strategy research).</p>
+
+    <h3 style="font-family: Georgia, 'Iowan Old Style', serif; font-size: 1.02rem; margin: 1.6rem 0 0.6rem;">What got built</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>src/momentum_signals.py</code></td><td>Variant H entry logic (SMA200 filter + triple-confirmed breakout, hourly 6-candle lookback) and shared IBKR bar fetchers, extracted from the backtest script so live and backtest can't drift apart.</td></tr>
+          <tr><td><code>src/momentum_option_picker.py</code></td><td>Contract selection: nearest monthly expiry &#8805;45 DTE, filtered by delta&gt;0.25 / volume&gt;500 / OI&gt;1000, cheapest survivor.</td></tr>
+          <tr><td><code>src/momentum_state.py</code></td><td>JSON position persistence across stateless hourly/15-min invocations, plus a PID-based run lock (added 2026-08-06).</td></tr>
+          <tr><td><code>scripts/run_momentum_paper_trader.py</code></td><td>The autonomous entrypoint. <code>--dry-run</code> supported. Manages open positions (stop / catalyst / trim / time-exit) then scans for new entries, respecting concurrency and cluster caps.</td></tr>
+          <tr><td><code>scripts/check_momentum_option_order.py</code> (+ <code>_when_ready.sh</code>)</td><td>One-lot buy/sell smoke test for the equity-option order path, gated to fire once TWS is actually reachable.</td></tr>
+          <tr><td><code>src/ibkr_client.py</code></td><td>Generalized from SPX-index-only to standard equity options (<code>symbol</code>/<code>trading_class</code> params), added <code>get_account_value()</code>.</td></tr>
+          <tr><td><code>src/tastytrade_client.py</code></td><td>Added <code>get_option_market_snapshot()</code> &#8212; DXLink streaming for real-time equity-option greeks/OI/volume (the REST snapshot returns empty for non-index strikes).</td></tr>
+          <tr><td><code>pine/momentum_strategy_variant_h.pine</code></td><td>The live TradingView Pine Script &#8212; turned out to already be live on the account under the name "Momentum Strategy"; pulled the real source and checked it into version control for the first time (an earlier from-scratch reconstruction was discarded in favor of it).</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="verdict"><b>Standing parameters at the time:</b> 10-ticker universe (DELL/AMD/NVDA/MU/TSLA/AVGO/PLTR/MSFT/AAPL/GOOGL), 1% of account NLV per position, max 4 concurrent / 2 in the semis cluster, catalyst exit = <code>abs(theta) &gt; delta</code> OR same calendar week as the contract's own expiry.</div>
+
+    <h3 style="font-family: Georgia, 'Iowan Old Style', serif; font-size: 1.02rem; margin: 1.6rem 0 0.6rem;">Bugs found &#8212; only surfaced under live conditions, not in review</h3>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">BUG 1</span><h4>IBKR client-ID collision (Error 326)</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>Every cron-triggered run of the live trader failed at <code>client.connect()</code> &#8212; "Unable to connect as the client id is already in use."</dd>
+        <dt>Root cause</dt><dd><code>run_paper_trader.py</code> (SPX Scalp) holds <code>clientId=1</code> continuously all session; the momentum trader defaulted to the same ID since none was ever assigned.</dd>
+        <dt>Fix</dt><dd>Distinct client IDs added to config: 45 (live trader), 46 (smoke test), 47+ used ad hoc for diagnostics.</dd>
+      </dl>
+    </div>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">BUG 2</span><h4>Price-reasonability collar rejection (Error 202)</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>Orders submitted then immediately auto-cancelled. An early red herring (Error 10349, "TIF set to DAY") looked like the cause but wasn't.</dd>
+        <dt>Root cause</dt><dd>The shared <code>MARKETABLE_LIMIT_SLIPPAGE_PCT</code> (10%, tuned for SPX 0DTE options) is far more aggressive than IBKR's price-collar tolerance for a normal equity option (~3.5% observed on a live DELL test).</dd>
+        <dt>Fix</dt><dd>New <code>MOMENTUM_LIMIT_SLIPPAGE_PCT = 0.03</code>, scoped to the momentum system only &#8212; the shared SPX constant was deliberately left untouched since it's unverified against this same collar and the SPX trader is already live.</dd>
+      </dl>
+    </div>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">BUG 3</span><h4>TWS order-processing stall</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>A live DELL close order sat at "Submitted"/no-response indefinitely across 3 separate attempts (minutes each) despite reads (positions, NLV, quotes) working fine and fast throughout.</dd>
+        <dt>Root cause</dt><dd>TWS's own order-processing got stuck &#8212; "Error 322: Maximum number of account summary requests exceeded" after prolonged uptime. First occurrence of a pattern that recurred at much larger scale later this session &#8212; see BUG 5 below.</dd>
+        <dt>Fix</dt><dd>Manual TWS restart. Not a code fix at the time &#8212; flagged as an operational hazard the scripts couldn't self-heal, which is exactly what BUG 5's watchdog was eventually built to bound.</dd>
+      </dl>
+    </div>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">RESOLVED</span><h4>Cron not reliably firing at all</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>Zero confirmed successful <em>unattended</em> cron-triggered runs as of 2026-08-06, across multiple trading days. Every successful run had been a manual invocation.</dd>
+        <dt>Root cause</dt><dd>Two compounding issues found later: (1) the crontab's <code>TZ=America/New_York</code> line has no effect on macOS <code>cron</code> scheduling &#8212; it only sets the job's environment, so <code>*/15 9-14 * * 1-5</code> was actually firing during those hours in the machine's local timezone, nowhere near the real market session; (2) the MacBook sleeping while unattended, which silently skips a tick with no error logged.</dd>
+        <dt>Fix</dt><dd>Removed the hour/weekday restriction entirely &#8212; cron now fires every 15 minutes, every day, and the script's own timezone-aware window check (real <code>America/New_York</code> time, computed in Python regardless of system clock) does the actual gating. This is immune to both the TZ-handling bug and to DST changes. Sleep is addressed by a recurring <code>caffeinate</code> cron entry timed around the trading window. Confirmed reliably firing since &#8212; see BUG 5-9 below, all of which are real bugs found <em>because</em> the system was finally running unattended for real.</dd>
+      </dl>
+    </div>
+
+    <div class="verdict" style="border-left-color: var(--warn);"><b>Also discovered, unrelated to any of the above:</b> another session/actor had been working on the SPX Scalp system in parallel in this same repo (rewrote <code>get_quote()</code> to use DXLink, added several new signal modules, a <code>launch_paper_trader_if_needed.py</code> reliability script). Confirmed via file-watcher diffs showing up mid-session that weren't authored here. The repo split into its own <code>Momentum-Strat</code> project on 2026-08-06 specifically to stop this kind of cross-project drift.</div>
+
+    <h3 style="font-family: Georgia, 'Iowan Old Style', serif; font-size: 1.02rem; margin: 1.6rem 0 0.6rem;">Status as of 2026-08-06 (superseded &#8212; see the current status section at the end of this doc)</h3>
+    <ul class="status-list">
+      <li><span class="badge done">Done</span><span>Strategy logic correct and matches the backtest record (verified: real live signals found on NVDA/GOOGL in a dry-run 2026-08-03).</span></li>
+      <li><span class="badge done">Done</span><span>Real order fill confirmed end-to-end (DELL smoke test: bought and sold a real paper contract, 2026-08-03/05).</span></li>
+      <li><span class="badge done">Done</span><span>Overlap-safe: PID-based run lock added 2026-08-06 before shortening the cron interval.</span></li>
+      <li><span class="badge unconfirmed">Unconfirmed at the time</span><span>Cron firing reliably unattended &#8212; see BUG (resolved) above for how this actually got fixed, well after this date.</span></li>
+      <li><span class="badge open">Open at the time</span><span>TWS stability under prolonged uptime &#8212; still true today; no automatic recovery exists, still needs a human to notice and restart. The watchdog added later (BUG 5) bounds the damage but doesn't fix the underlying TWS issue.</span></li>
+    </ul>
+  </section>
+
+  <section>
     <h2 class="section-title">Trim rule refinement: option-premium R + target-price candidates (2026-08-15)</h2>
     <p style="font-size: 14px; color: var(--ink-soft); max-width: 68ch; margin: 0 0 0.9rem;">Two changes to the live 2R trim, prompted by the trim never having fired on the first two live positions (NVDA, PLTR) despite the underlying being up: the underlying was moving, but the option premium — what the account's P&amp;L actually depends on — was still negative from theta decay, so an underlying-based trigger was measuring the wrong thing.</p>
 
@@ -959,6 +1061,95 @@
     <div class="verdict"><b>Pivot-based measured-move does exactly what it's supposed to: it structurally can't repeat the NVDA problem, and the numbers confirm it's meaningfully different from the plain-window version, not just a cosmetic fix.</b> Target-hit rate jumps from 15.3% to 37.5% (2.4x) &#8212; the pivot targets are genuinely more achievable, not just theoretically safer &#8212; and win rate improves too (62.5% vs. 58.3% plain, and vs. 55.6% baseline), with a slightly better max drawdown than the plain version (50.3% vs. 50.9%). The cost: total return lands almost exactly at parity with baseline (+1,350.58% vs. +1,363.30%, essentially a wash) rather than beating it the way the plain version appeared to (+1,566%) &#8212; but the plain version's edge was partly built on exactly the kind of ungrounded, sometimes-impossible target this fix removes, so that comparison was never apples-to-apples to begin with. This is a much smaller, more honest trade-off than ATR-multiple's (which gave up 29% of baseline's return for its risk reduction) &#8212; pivot-based measured-move gives up almost nothing on return while fixing a real structural flaw and improving win rate/drawdown.</div>
   </section>
 
+  <section>
+    <h2 class="section-title">Stop-loss &amp; trim redesign: option-primary, underlying as secondary filter only (2026-08-31)</h2>
+    <p style="font-size: 14px; color: var(--ink-soft); max-width: 68ch; margin: 0 0 0.9rem;">Motivating case: NVDA's option premium dropped 54% (theta decay) while the underlying was barely down 2% &#8212; nowhere near the old -10% underlying-only stop, which had zero mechanism to see premium at all. Around the same time, the live trim's target-price leg was still an independent underlying-based trigger, not a "secondary filter" &#8212; inconsistent with the principle set this session: <b>for an option position, the option's own premium is the primary basis for both stop and trim; the underlying only ever gates or confirms a premium-triggered decision, never triggers independently.</b></p>
+
+    <h3 style="font-family: Georgia, 'Iowan Old Style', serif; font-size: 1.02rem; margin: 1.4rem 0 0.6rem;">New stop-loss: premium -25% primary, EMA/LoD as the gate</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Step</th><th>Rule</th></tr></thead>
+        <tbody>
+          <tr><td style="text-align:left;">1. Primary trigger</td><td style="text-align:left;">Option premium &le; -2.5R (-25% from entry)</td></tr>
+          <tr><td style="text-align:left;">2a. Gate: hold</td><td style="text-align:left;">Underlying &ge; its daily 8 EMA &#8594; still at support, don't sell yet</td></tr>
+          <tr><td style="text-align:left;">2b. Gate: confirm</td><td style="text-align:left;">Underlying &le; LoD reference (min of prev-day low and today's low-so-far, trailing &#8212; only ever tightens) &#8594; confirmed breakdown, close</td></tr>
+          <tr><td style="text-align:left;">2c. Gate: neither</td><td style="text-align:left;">Default hold &#8212; premium alone isn't enough without underlying confirmation</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="verdict" style="border-left-color: var(--warn);"><b>Set by judgment, not backtested.</b> A real backtest needs historical option premiums, which don't exist anywhere in this pipeline: confirmed live that IBKR's <code>reqHistoricalData</code> returns <code>Error 162: No data of type EODChart is available</code> for option contracts on this account, and TastyTrade's DXLink is live-streaming only, no archive. A Black-Scholes-modeled synthetic premium path was explored as a workaround (reusing <code>src/options_pricing.py:black_scholes_price</code>, which already existed for a different system) but abandoned: reconstructing which strike the live picker would have selected requires replicating its volume/OI liquidity filter, which isn't backtestable either &#8212; a direct check against NVDA's real fill showed the pure delta-threshold approximation landing at 14.8% OTM vs. the real 3.5%, and the 5 real fills observed this session ranged +3.5% to +17.3% OTM at entry, too wide a spread for any single synthetic-strike rule to trust. -25% was chosen as a primary threshold specifically because the EMA/LoD gate is what supplies the "leeway" instead &#8212; a normal pullback gets held via the EMA check even after premium craters, rather than needing the raw percentage itself to be wide.</div>
+
+    <h3 style="font-family: Georgia, 'Iowan Old Style', serif; font-size: 1.02rem; margin: 1.6rem 0 0.6rem;">New trim ladder: pure premium R-multiples</h3>
+    <p style="font-size: 14px; color: var(--ink-soft); max-width: 68ch; margin: 0 0 0.9rem;">Three levels, each taking 25% of whatever remains at the time: <b>+2R (+20%)</b>, <b>+5R (+50%)</b>, <b>+8R (+80%)</b> &#8212; leaving a final ~25% of the original size to ride uncapped, still protected by the stop above and the time exit. The measured-move <code>target_price</code> from the 2026-08-15 work above stays alive, but demoted to a secondary confirmation noted in the first level's alert only ("target X also hit") &#8212; it no longer independently fires a trim on its own.</p>
+
+    <h3 style="font-family: Georgia, 'Iowan Old Style', serif; font-size: 1.02rem; margin: 1.6rem 0 0.6rem;">Bug found live, same day: "closed" didn't mean closed</h3>
+    <p style="font-size: 14px; color: var(--ink-soft); max-width: 68ch; margin: 0 0 0.9rem;"><code>_close_full()</code>/<code>_trim_one_quarter()</code> sent their Telegram alert and let the caller drop/reduce the tracked quantity <em>unconditionally</em>, regardless of what the order actually did. Caught live, within the first cycle after the redesign shipped: <b>NVDA</b>'s close order was fully <code>Cancelled</code> (0 filled) but was reported "closed 8x" and dropped from state anyway &#8212; the position was still fully open and now completely untracked. <b>GOOGL</b>'s close order filled only 1 of 13 contracts but was reported "closed 13x" the same way. <b>MU</b>'s close hit the identical pattern. Same root failure mode as the AAPL orphan found earlier this session, but on the exit side this time instead of entry.</p>
+    <div class="verdict"><b>Fix:</b> both functions now check <code>orderStatus.filled</code> against what was actually attempted and return whether the level is genuinely complete. A full fill closes/records as before; a partial fill reduces the tracked quantity by only the real filled amount and leaves the rest for the next cycle to retry; a zero fill changes nothing and retries fresh. Every call site in <code>manage_position()</code> updated to respect this instead of assuming success. Reconciled the three real positions this broke: NVDA and MU restored to state with verified data (NVDA's original entry was still fully intact and untouched; MU was a same-day real entry with full logged detail); GOOGL's stale leftover order was found to have fully self-filled by end of day on its own, so no manual cancellation was needed after all; AAPL's earlier close was confirmed genuinely complete (0 qty, no open order).</div>
+  </section>
+
+  <section>
+    <h2 class="section-title">Live deployment build log, part 2: this session's bugs (2026-08-15 to 2026-08-31)</h2>
+    <p style="font-size: 14px; color: var(--ink-soft); max-width: 68ch; margin: 0 0 0.9rem;">Continuing the numbering from part 1 above. All of these were only findable because the cron-firing fix (see the RESOLVED entry in part 1) finally got the system running unattended for real &#8212; every one of them is a live-conditions bug, not something review would have caught.</p>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">BUG 5</span><h4>44-hour stuck-run hang, self-perpetuated by unclean kills</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>A single cron invocation held the run lock continuously from Monday to Wednesday &#8212; every subsequent 15-minute tick for two full trading days skipped with "another instance is still running," with no alert of any kind.</dd>
+        <dt>Root cause</dt><dd>An earlier stuck run had been killed with <code>kill -9</code>, which doesn't run Python's <code>finally</code> cleanup &#8212; the script's IBKR account-summary subscription was never released. The next connection under the same <code>clientId</code> collided with it (<code>Error 322: Maximum number of account summary requests exceeded</code>), triggering repeated <code>Error 1100</code>/<code>1102</code> connectivity flapping that never resolved on its own. Compounding factor: the machine sleeping for stretches in between meant the stuck process just sat frozen rather than progressing, so 44 hours of wall-clock time doesn't mean 44 hours of active looping.</dd>
+        <dt>Fix</dt><dd>Two parts. Immediate: a full TWS restart, which clears all accumulated stale subscriptions at once &#8212; confirmed this is what actually breaks the loop, not just killing the script. Durable: <code>scripts/watchdog_stuck_run.py</code>, a new cron entry (every 5 min, independent schedule) that kills any run holding the lock past 10 minutes and sends a Telegram alert, bounding future incidents of this class to minutes instead of days. Caveat found later: the watchdog's own kill is <em>also</em> <code>kill -9</code>, so it can't fully break a TWS-side subscription jam by itself either &#8212; it contains the blast radius but a genuine TWS restart is still the real fix if the pattern recurs.</dd>
+      </dl>
+    </div>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">BUG 6</span><h4>Orphaned position from a delayed fill (PLTR)</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>A real, filled 13-contract PLTR position existed on IBKR with zero record of it in <code>state/momentum_positions.json</code> &#8212; completely unmanaged, no stop/trim/time-exit ever applied.</dd>
+        <dt>Root cause</dt><dd><code>wait_for_fill()</code>'s timeout expired before a real (paper-account-slow) fill confirmed; the code logged "did not fill in time" and moved on <em>without cancelling the order</em>. It filled anyway a few seconds later, orphaned from state. A later cycle then re-scanned the ticker as still flat and opened a second, independent position &#8212; the account ended up holding two separate lots on the same ticker at two different strikes.</dd>
+        <dt>Fix</dt><dd>State schema changed from one slot per ticker to a list of lots per ticker (<code>src/momentum_state.py</code>), so a second real fill on an already-tracked ticker gets appended instead of silently lost or overwritten. Manually reconstructed the orphaned lot's entry data from IBKR's fill/execution history and backfilled it.</dd>
+      </dl>
+    </div>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">BUG 7</span><h4>Same failure mode again (AAPL)</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>A real, filled 22-contract AAPL position existed on IBKR with no record in state &#8212; same signature as BUG 6.</dd>
+        <dt>Root cause</dt><dd>Identical to BUG 6: <code>wait_for_fill()</code> gave up, the order filled later anyway, nothing recorded. The BUG 6 fix (list-based state) prevents a <em>second</em> fill on the same ticker from clobbering the first, but doesn't retroactively catch a <em>first</em> fill that arrives after the timeout already gave up &#8212; that gap is still open.</dd>
+        <dt>Fix</dt><dd>Same manual reconstruction approach as BUG 6: pulled real fill data from IBKR's execution history (where still available &#8212; retention is limited, so exact per-fill data isn't always recoverable after enough time passes) and backfilled the position into state.</dd>
+      </dl>
+    </div>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">BUG 8</span><h4>Measured-move target projected above NVDA's own all-time high</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>The backtest-validated measured-move trim target computed a live target price for NVDA that was 7.5% <em>above</em> its actual 5-year all-time high.</dd>
+        <dt>Root cause</dt><dd>The target formula used a plain N-day high/low window, which doesn't distinguish a clean prior swing from "the exact rally that already used up the room to run" &#8212; see the "Trim rule refinement" section above for the full write-up and the pivot-based fix, plus the re-backtested before/after comparison.</dd>
+        <dt>Fix</dt><dd><code>find_swing_leg()</code> &#8212; real local pivots instead of a plain window. Full detail and results table are in the section above; not repeated here.</dd>
+      </dl>
+    </div>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">BUG 9</span><h4>"Closed"/"trimmed" alerts didn't verify actual fills</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>Real close/trim orders on NVDA, GOOGL, and MU were reported as successful and dropped from tracking regardless of whether they actually filled &#8212; one was fully <code>Cancelled</code> (0 filled, position still fully open), one filled only 1 of 13 contracts.</dd>
+        <dt>Root cause</dt><dd>Same failure class as BUG 6/7 but on the exit side: the code never checked <code>orderStatus.filled</code> before declaring success. See the "Stop-loss &amp; trim redesign" section above for the full write-up.</dd>
+        <dt>Fix</dt><dd>Both close/trim functions now verify the real fill amount before touching state. Full detail above; not repeated here.</dd>
+      </dl>
+    </div>
+
+    <div class="verdict" style="border-left-color: var(--warn);"><b>Also discovered, unrelated to the trading code:</b> a <code>~/Library/LaunchAgents/*.plist</code> for an unrelated premarket-scanner cron job was found to contain a live Anthropic OAuth token in plaintext, which then got echoed into a terminal session while investigating it &#8212; flagged for rotation immediately. Unrelated finding, but worth a standing reminder to check file contents for secrets before displaying them, plist files included.</div>
+
+    <h3 style="font-family: Georgia, 'Iowan Old Style', serif; font-size: 1.02rem; margin: 1.6rem 0 0.6rem;">Current status (2026-08-31, supersedes the 2026-08-06 snapshot in part 1 above)</h3>
+    <ul class="status-list">
+      <li><span class="badge done">Done</span><span>Cron firing reliably unattended, confirmed over many real trading days &#8212; real trims, stops, and entries have executed automatically without manual triggering (BUG in part 1, resolved).</span></li>
+      <li><span class="badge done">Done</span><span>Stuck-run watchdog live (BUG 5) &#8212; bounds any future IBKR-connection jam to ~10 minutes with an alert, instead of days silently.</span></li>
+      <li><span class="badge done">Done</span><span>State schema supports multiple lots per ticker (BUG 6) &#8212; a repeat of that exact failure mode can no longer silently lose a position.</span></li>
+      <li><span class="badge done">Done</span><span>Stop-loss and trim redesigned to option-premium-primary, underlying-as-secondary-filter, per current live rules (2026-08-31 section above).</span></li>
+      <li><span class="badge done">Done</span><span>Close/trim order fills verified before state is touched (BUG 9) &#8212; the most severe tracking-corruption bug found this session, fixed same day.</span></li>
+      <li><span class="badge unconfirmed">Unconfirmed</span><span>Whether a first-fill-after-timeout (the BUG 7 gap, distinct from BUG 6's now-fixed second-fill case) can still orphan a brand-new entry &#8212; no code fix yet, caught twice so far via manual reconciliation.</span></li>
+      <li><span class="badge open">Open</span><span>TWS stability under prolonged uptime &#8212; still no automatic recovery; the watchdog bounds the damage but a human still has to notice and restart TWS itself when the underlying jam recurs.</span></li>
+    </ul>
+  </section>
+
   <div class="final-call">
     <span class="eyebrow">Standing decision</span>
     <h2>Variant H is live; option picker + enriched alert working end-to-end (TastyTrade data)</h2>
@@ -966,6 +1157,6 @@
     <p class="caveat">Corrected the blended win rate this round: <b>45.9%</b> at the position level (not the earlier 63.0%, which double-counted trimmed winners as two legs), with avg win +20.84% vs. avg loss -7.82% (underlying price-move terms) — positive expectancy, but more than half of all signals lose, so sizing and psychology need to assume that going in. Two things tested but intentionally left undecided, not deployed on the stock backtest: <b>position sizing</b> (20% vs. 100% of equity) and the <b>R:R trim threshold</b> (swept 1.5R–3.5R). The 10-ticker expansion confirmed this entry logic works best on established, liquid, high-volatility large-caps, not steadier mega-cap tech. The day-trade gap strategy thread is parked (opening-range rejected, gap-short reverted for fighting the gap-fill tendency, gap-down long not yet tested) — explicitly deprioritized in favor of the core options plan above. NVDA and AVGO remain the weakest tickers across every variant tested.</p>
   </div>
 
-  <footer>momentum-strategy · pine v6 · tradingview strategy tester · 10-ticker universe · option picker live (tastytrade data) · IBKR paper · variant H live 2026-07-12</footer>
+  <footer>momentum-strategy · pine v6 · tradingview strategy tester · 10-ticker universe · IBKR paper + TastyTrade live · variant H live 2026-07-12 · merged backtest record + deployment log 2026-09-01</footer>
 
 </div>

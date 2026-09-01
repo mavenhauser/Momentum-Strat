@@ -203,6 +203,24 @@ def find_swing_leg(daily_bars, as_of_date, pivot_width=3, max_lookback_days=60):
     return daily_bars[swing_high_idx].high, daily_bars[swing_low_idx].low
 
 
+def build_ema_context(daily_bars, period=8):
+    """Per completed trading day: {date: EMA(period)}, lookahead-safe (same
+    convention as build_daily_context/build_atr_context - a value "as of"
+    day D only ever uses bars strictly before D). Seeded with a simple
+    average of the first `period` closes, standard EMA smoothing after
+    that. Used for the stop-loss's underlying secondary filter (2026-08-31)
+    - see MOMENTUM_STOP_EMA_PERIOD in src/config.py."""
+    if len(daily_bars) <= period:
+        return {}
+    multiplier = 2 / (period + 1)
+    ema = sum(b.close for b in daily_bars[:period]) / period
+    context = {daily_bars[period].date: ema}
+    for i in range(period + 1, len(daily_bars)):
+        ema = daily_bars[i - 1].close * multiplier + ema * (1 - multiplier)
+        context[daily_bars[i].date] = ema
+    return context
+
+
 # ---- Variant H entry condition (long-only) ----------------------------------
 
 def _daily_breakout_flags(prev_day_high, premarket_high, regular_bars_so_far):
