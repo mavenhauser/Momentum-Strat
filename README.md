@@ -24,8 +24,12 @@ above for why.
   high, fresh high-of-day), evaluated only at the top of each hour over the
   trailing 6 x 10-min bars, plus the shared IBKR daily/intraday bar fetchers.
 - **Contract selection**: [`src/momentum_option_picker.py`](src/momentum_option_picker.py) —
-  nearest monthly expiry ≥45 days out, filtered to delta>0.25 / volume>500 /
-  open interest>1000, cheapest survivor.
+  nearest monthly expiry ≥10 days out, filtered to delta>0.25 / volume>500 /
+  open interest>1000, cheapest survivor. On a "strong" setup (an
+  intraday undercut-and-rally of the prior day's low, same day as the
+  normal entry signal), also layers a second, much shorter-dated weekly
+  contract (2-9 days out) alongside the primary, sized smaller (1% NLV
+  vs. the primary's 2%) and managed by the same stop/trim ladder.
 - **Live trader**: [`scripts/run_momentum_paper_trader.py`](scripts/run_momentum_paper_trader.py) —
   the autonomous entrypoint. Stateless per invocation (state persisted to
   `state/momentum_positions.json`); manages open positions first (stop /

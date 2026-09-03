@@ -237,6 +237,16 @@ MOMENTUM_TRIM_FRACTION = 0.25
 MOMENTUM_PREMIUM_STOP_R = -2.5  # -25%
 MOMENTUM_STOP_EMA_PERIOD = 8
 
+# Breakeven stop after the first trim (2026-09-01, Qullamaggie-inspired):
+# "sell 1/3-1/2 at 2-3R, move the stop to breakeven, trail the rest." The
+# state schema already had a breakeven_active flag - _trim_one_quarter()
+# has set it True on the first trim since 2026-08-31 - but nothing ever
+# read it, so it was a dead field. Once true, the stop's R threshold
+# tightens from MOMENTUM_PREMIUM_STOP_R to this (0R = entry premium) on
+# the remaining size; the same EMA/LoD gate below still applies, so a
+# normal pullback still isn't sold into.
+MOMENTUM_BREAKEVEN_STOP_R = 0.0
+
 # Trim ladder (2026-08-31 redesign): pure option-premium R-multiples, three
 # levels, each taking MOMENTUM_TRIM_FRACTION of whatever remains at the
 # time - 2R/5R/8R (+20%/+50%/+80%) leaves a final ~25% of the original
@@ -269,8 +279,21 @@ MOMENTUM_TRIM_LEVELS = [2.0, 5.0, 8.0]
 # for the full comparison.
 MOMENTUM_SWING_PIVOT_WIDTH = 3  # bars needed on each side to confirm a local high/low
 MOMENTUM_SWING_PIVOT_MAX_LOOKBACK_DAYS = 60
+
+# 2026-09-01: removed from live code. Originated in Variant A's backtest
+# ("close at 20 trading days") and was carried forward unchanged through
+# G and H - the option-primary redesign on 2026-08-31 deliberately left
+# it in place, but on review its rationale (calibrated to A/G/H's single
+# 2R-trim design) was never re-validated against the current 3-level
+# premium trim ladder, and the one backtest that removed a time exit
+# (Variant I) confounded it with also removing the trim entirely, so it
+# doesn't isolate the time exit's own contribution either way. Exits are
+# now purely stop / trim ladder / catalyst (theta>delta or expiry week) -
+# no hold-duration exit. Kept only for
+# scripts/momentum_target_price_backtest.py, which already ran and whose
+# results are recorded in the docs - not touching it keeps that backtest
+# reproducible.
 MOMENTUM_TIME_EXIT_TRADING_DAYS = 20
-MOMENTUM_ITM_EXTENSION_TRADING_DAYS = 10  # extra runway if still ITM at the time exit
 
 # "Catalyst" exit - user-specified concrete definition (2026-08-02),
 # replacing the doc's vaguer "no catalyst ahead" language: exit
@@ -280,21 +303,48 @@ MOMENTUM_ITM_EXTENSION_TRADING_DAYS = 10  # extra runway if still ITM at the tim
 #       sides, so this is just abs(theta) > delta, no threshold to tune)
 #   (b) the position is still open the same calendar week as its own
 #       monthly expiry (src.momentum_signals.is_same_week) - this also
-#       fully subsumes the old "N days before expiry" idea, including
-#       during an ITM time-exit extension.
+#       fully subsumes the old "N days before expiry" idea.
 
 # Contract selection (src/momentum_option_picker.py)
 MOMENTUM_MIN_DELTA = 0.25
 MOMENTUM_MIN_VOLUME = 500
 MOMENTUM_MIN_OPEN_INTEREST = 1000
-MOMENTUM_TARGET_DTE_MIN = 45  # calendar days out, nearest monthly OpEx
+# 2026-09-01: lowered from 45 - at 45+ days, the option's lower gamma meant
+# it barely responded to the kind of fast IV pop a real breakout produces
+# ("doesn't get the IV flush"), and cost more premium for it. 10 keeps
+# picking the nearest actual monthly OpEx (matches is_monthly_expiry's
+# existing "fall back to the next monthly if this one fails the filters"
+# behavior) while guaranteeing at least a week of runway before the
+# contract enters its own expiry week and gets catalyst-closed.
+MOMENTUM_TARGET_DTE_MIN = 10  # calendar days out, nearest monthly OpEx
 
-# Sizing: 1% of current IBKR paper account NLV spent as premium budget per
+# Sizing: 2% of current IBKR paper account NLV spent as premium budget per
 # position (2026-08-02: corrected down from an initial 20%, which was a
 # mistranslation of the share-backtest's sizing sweep onto options - 1%
-# matches the doc's own live-trading-plan proposal). With
-# MOMENTUM_MAX_CONCURRENT=4, this means up to ~4% of NLV in premium at once.
-MOMENTUM_SIZING_PCT_NLV = 0.01
+# matched the doc's own live-trading-plan proposal; bumped to 2% on
+# 2026-09-01 by explicit choice once live results supported more size).
+# With MOMENTUM_MAX_CONCURRENT=4, this means up to ~8% of NLV in premium at
+# once.
+MOMENTUM_SIZING_PCT_NLV = 0.02
+
+# Weekly-layer add-on (2026-09-01): on a "strong" setup - Variant H's
+# normal trigger firing AND an intraday undercut-and-rally of the prior
+# day's low earlier the same day (see check_undercut_and_rally in
+# momentum_signals.py - a sweep below prev_day_low followed by a bar
+# closing back at/above it) - also buy a second, much shorter-dated
+# contract on the same ticker alongside the primary. Sized smaller and
+# managed by the same premium stop/trim ladder as any other lot (list-
+# based state already supports multiple lots per ticker). This lot is
+# exempted from the normal "expiry week" catalyst check in
+# manage_position() - that rule assumes a monthly's 30-45+ day runway,
+# but a real weekly is inside its own expiry week from the moment it's
+# bought - and instead force-closed at MOMENTUM_LAYER_EXPIRY_FLOOR_DAYS
+# to expiry as a backstop, so it never rides ungoverned all the way to
+# actual physical expiration if neither the stop nor a trim level fires.
+MOMENTUM_LAYER_SIZING_PCT_NLV = 0.01  # 1% NLV, half the primary's 2%
+MOMENTUM_LAYER_MIN_DTE = 2  # calendar days - don't buy on its own expiry day
+MOMENTUM_LAYER_MAX_DTE = 9  # calendar days - keeps it a genuine "weekly"
+MOMENTUM_LAYER_EXPIRY_FLOOR_DAYS = 1  # force-close backstop, see note above
 
 # Live order execution (paper trading). Reuses ORDER_FILL_TIMEOUT_SECONDS
 # above, but NOT MARKETABLE_LIMIT_SLIPPAGE_PCT - that 10% buffer, live-tested

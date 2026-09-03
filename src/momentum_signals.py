@@ -257,6 +257,24 @@ def check_variant_h_entry(prev_day_close, sma200, prev_day_high, premarket_high,
     return any(flags[-lookback:])
 
 
+def check_undercut_and_rally(prev_day_low, regular_bars_so_far):
+    """"Strong setup" flag for the weekly-layer add-on (src/config.py
+    MOMENTUM_LAYER_*): true if, within today's regular-session bars so far
+    (chronological order), price traded below prev_day_low (the undercut)
+    and a LATER bar's close reclaimed back to/above prev_day_low (the
+    rally) - a same-day sweep-and-reclaim of yesterday's low, independent
+    of whether Variant H's own breakout condition has fired yet."""
+    if prev_day_low is None:
+        return False
+    undercut_seen = False
+    for bar in regular_bars_so_far:
+        if bar.low < prev_day_low:
+            undercut_seen = True
+        if undercut_seen and bar.close >= prev_day_low:
+            return True  # a bar that dips below and closes back above counts too
+    return False
+
+
 # ---- Exit thresholds (pure functions) ----------------------------------------
 
 def pct_move(entry_price, current_price):
@@ -298,22 +316,15 @@ def is_same_week(date_a, date_b):
     return monday_a == monday_b
 
 
-def add_trading_days(start_date, n):
-    """`start_date` plus `n` US market business days (same approximation as
-    trading_days_since - see its docstring). Used for the ITM time-exit
-    extension deadline."""
-    if n <= 0:
-        return start_date
-    rng = pd.bdate_range(start=start_date, periods=n + 1, freq=US_BUSINESS_DAY)
-    return rng[-1].date()
-
-
 def trading_days_since(entry_date, as_of_date):
     """Count of US market business days from entry_date to as_of_date
-    (inclusive of as_of_date, exclusive of entry_date) - used for the
-    20-trading-day time exit. Uses pandas' federal holiday calendar as an
-    approximation of the market calendar (doesn't special-case the handful
-    of days that differ, e.g. Good Friday isn't a federal holiday)."""
+    (inclusive of as_of_date, exclusive of entry_date) - used by
+    scripts/momentum_target_price_backtest.py's 20-trading-day time exit
+    (removed from live code 2026-09-01, see config.py
+    MOMENTUM_TIME_EXIT_TRADING_DAYS). Uses pandas' federal holiday
+    calendar as an approximation of the market calendar (doesn't
+    special-case the handful of days that differ, e.g. Good Friday isn't
+    a federal holiday)."""
     if as_of_date <= entry_date:
         return 0
     return len(pd.bdate_range(entry_date, as_of_date, freq=US_BUSINESS_DAY)) - 1

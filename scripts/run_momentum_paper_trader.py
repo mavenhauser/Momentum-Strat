@@ -7,11 +7,12 @@ against an IBKR paper account.
 Meant to be invoked once per hour, 9:45-14:00 ET on weekdays, by cron/
 launchd (see scripts/run_momentum_paper_trader.sh) - NOT a long-lived
 process like scripts/run_paper_trader.py. Each invocation: loads position
-state from disk, manages any open positions (stop / catalyst / trim /
-time-exit - the doc's underlying-price swing exit, translated into option
-sell orders), scans flat tickers in the 10-ticker universe for a fresh
-Variant H entry (SMA200 + triple-confirmed breakout, trailing 6-candle
-lookback), places option buy orders as triggered, persists state, exits.
+state from disk, manages any open positions (premium stop / catalyst /
+trim ladder - no hold-duration time exit as of 2026-09-01, see
+config.MOMENTUM_TIME_EXIT_TRADING_DAYS), scans flat tickers in the
+10-ticker universe for a fresh Variant H entry (SMA200 + triple-confirmed
+breakout, trailing 6-candle lookback), places option buy orders as
+triggered, persists state, exits.
 
 Order execution is entirely on IBKR (paper account). TastyTrade supplies
 real-time option quotes/greeks only - it never places an order (same split
@@ -50,12 +51,12 @@ from ib_insync import Stock  # noqa: E402
 
 from src import config  # noqa: E402
 from src.ibkr_client import IBKRClient  # noqa: E402
-from src.momentum_option_picker import pick_contract  # noqa: E402
+from src.momentum_option_picker import pick_contract, pick_weekly_contract  # noqa: E402
 from src.momentum_signals import (  # noqa: E402
     ET,
-    add_trading_days,
     build_daily_context,
     build_ema_context,
+    check_undercut_and_rally,
     check_variant_h_entry,
     fetch_daily_bars,
     fetch_intraday_bars,
@@ -63,7 +64,6 @@ from src.momentum_signals import (  # noqa: E402
     is_same_week,
     r_multiple,
     split_session_bars,
-    trading_days_since,
 )
 from src.momentum_state import acquire_lock, load_state, release_lock, save_state  # noqa: E402
 from src.tastytrade_client import TastytradeClient  # noqa: E402
@@ -104,10 +104,14 @@ def within_entry_window(now_et):
 def scan_for_entry(ib, ticker):
     """Fetch daily+intraday bars for `ticker` and check Variant H's entry
     condition against today's regular-session bars so far. Returns
-    (triggered: bool, current_price: float | None, target_price: float | None).
+    (triggered: bool, current_price: float | None, target_price: float | None,
+    is_strong: bool).
     target_price is the measured-move trim target, pivot-based (None if no
     confirmed prior swing leg is found within
-    config.MOMENTUM_SWING_PIVOT_MAX_LOOKBACK_DAYS) - see find_swing_leg()."""
+    config.MOMENTUM_SWING_PIVOT_MAX_LOOKBACK_DAYS) - see find_swing_leg().
+    is_strong (2026-09-01) flags a same-day undercut-and-rally of the prior
+    day's low (see check_undercut_and_rally) alongside the normal trigger -
+    used by try_open_position() to also add the weekly-layer position."""
     contract = Stock(ticker, "SMART", "USD")
     ib.qualifyContracts(contract)
 
@@ -115,13 +119,13 @@ def scan_for_entry(ib, ticker):
     context = build_daily_context(daily_bars, sma_window=config.MOMENTUM_SMA_WINDOW)
     ctx = context.get(date.today())
     if ctx is None:
-        return False, None, None
-    prev_day_high, _prev_day_low, prev_day_close, sma = ctx
+        return False, None, None, False
+    prev_day_high, prev_day_low, prev_day_close, sma = ctx
 
     intraday_bars = fetch_intraday_bars(ib, contract, date.today(), date.today())
     premarket_bars, regular_bars = split_session_bars(intraday_bars)
     if not regular_bars:
-        return False, None, None
+        return False, None, None, False
     premarket_high = max((b.high for b in premarket_bars), default=None)
 
     triggered = check_variant_h_entry(
@@ -130,6 +134,7 @@ def scan_for_entry(ib, ticker):
     )
     current_price = regular_bars[-1].close
     target_price = None
+    is_strong = False
     if triggered:
         swing_high, swing_low = find_swing_leg(
             daily_bars, date.today(),
@@ -137,15 +142,43 @@ def scan_for_entry(ib, ticker):
         )
         if swing_high is not None:
             target_price = current_price + (swing_high - swing_low)
-    return triggered, current_price, target_price
+        is_strong = check_undercut_and_rally(prev_day_low, regular_bars)
+    return triggered, current_price, target_price, is_strong
 
 
 def cluster_open_count(state, cluster):
     return sum(1 for t in cluster if t in state)
 
 
+def _buy_lot(client, ticker, contract_info, contracts, current_price, target_price, is_weekly_layer):
+    """Places the buy-to-open, waits for fill, and returns the state entry
+    dict on success or None if the order didn't fill in time."""
+    ask = contract_info["ask"]
+    limit_price = ask * (1 + config.MOMENTUM_LIMIT_SLIPPAGE_PCT)
+    trade = client.buy_to_open(
+        contract_info["expiry"], contract_info["strike"], "C", contracts, limit_price,
+        trading_class=None, symbol=ticker,
+    )
+    trade = client.wait_for_fill(trade)
+    if trade.orderStatus.status != "Filled":
+        return None
+    return {
+        "strike": contract_info["strike"],
+        "expiry": contract_info["expiry"].strftime("%Y%m%d"),
+        "streamer_symbol": contract_info["streamer_symbol"],
+        "contracts_remaining": contracts,
+        "entry_premium": trade.orderStatus.avgFillPrice,
+        "entry_underlying_price": current_price,
+        "target_price": target_price,
+        "entry_date": date.today().isoformat(),
+        "trims_done": [],
+        "breakeven_active": False,
+        "is_weekly_layer": is_weekly_layer,
+    }
+
+
 def try_open_position(client, tt, ib, ticker, state, nlv, dry_run=False):
-    triggered, current_price, target_price = scan_for_entry(ib, ticker)
+    triggered, current_price, target_price, is_strong = scan_for_entry(ib, ticker)
     if not triggered or current_price is None:
         return
 
@@ -163,41 +196,65 @@ def try_open_position(client, tt, ib, ticker, state, nlv, dry_run=False):
              f"NLV budget (${premium_budget:,.0f}) doesn't cover even 1 contract at ${ask:.2f} - skipped.")
         return
 
+    strong_note = " [STRONG: undercut-and-rally]" if is_strong else ""
+
     if dry_run:
         print(f"[dry-run] would BUY {ticker} {contract_info['strike']:.0f}C {contract_info['expiry']} "
               f"x{contracts} @ ~{ask:.2f} (underlying {current_price:.2f}, target {target_price}, "
-              f"delta {contract_info['delta']})")
+              f"delta {contract_info['delta']}){strong_note}")
+        if is_strong:
+            layer_info = pick_weekly_contract(tt, ticker)
+            if layer_info is not None:
+                print(f"[dry-run] would also LAYER {ticker} {layer_info['strike']:.0f}C "
+                      f"{layer_info['expiry']} @ ~{layer_info['ask']:.2f}")
         return
 
-    limit_price = ask * (1 + config.MOMENTUM_LIMIT_SLIPPAGE_PCT)
-    trade = client.buy_to_open(
-        contract_info["expiry"], contract_info["strike"], "C", contracts, limit_price,
-        trading_class=None, symbol=ticker,
-    )
-    trade = client.wait_for_fill(trade)
-    if trade.orderStatus.status != "Filled":
+    entry = _buy_lot(client, ticker, contract_info, contracts, current_price, target_price, False)
+    if entry is None:
         send(f"*Momentum Trader* - *{ticker}*: entry order did not fill in time - skipped, check TWS.")
         return
 
-    state.setdefault(ticker, []).append({
-        "strike": contract_info["strike"],
-        "expiry": contract_info["expiry"].strftime("%Y%m%d"),
-        "streamer_symbol": contract_info["streamer_symbol"],
-        "contracts_remaining": contracts,
-        "entry_premium": trade.orderStatus.avgFillPrice,
-        "entry_underlying_price": current_price,
-        "target_price": target_price,
-        "entry_date": date.today().isoformat(),
-        "trims_done": [],
-        "breakeven_active": False,
-        "itm_extension_deadline": None,
-    })
+    state.setdefault(ticker, []).append(entry)
     target_line = f"\nTarget: {target_price:.2f}" if target_price is not None else "\nTarget: n/a (no confirmed swing leg at entry)"
     send(
         f"*Momentum Trader* - Entered *{ticker}* *{contract_info['strike']:.0f}C* {contract_info['expiry']} "
-        f"x{contracts} @ {trade.orderStatus.avgFillPrice:.2f} (underlying {current_price:.2f})\n"
+        f"x{contracts} @ {entry['entry_premium']:.2f} (underlying {current_price:.2f}){strong_note}\n"
         f"Reason: SMA200 uptrend + triple-confirmed breakout (close above prior-day high, premarket high, "
         f"and fresh high-of-day){target_line}"
+    )
+
+    # Weekly-layer add-on (2026-09-01): only on a "strong" setup, alongside
+    # the primary above - a much shorter-dated contract, sized smaller, same
+    # premium stop/trim ladder (manage_position() exempts it from the
+    # normal expiry-week catalyst check - see config.py MOMENTUM_LAYER_*).
+    if not is_strong:
+        return
+
+    layer_info = pick_weekly_contract(tt, ticker)
+    if layer_info is None:
+        send(f"*Momentum Trader* - *{ticker}*: strong setup, but no weekly contract cleared the "
+             f"delta/volume/OI filters in the {config.MOMENTUM_LAYER_MIN_DTE}-{config.MOMENTUM_LAYER_MAX_DTE} "
+             f"day window - layer skipped.")
+        return
+
+    layer_ask = layer_info["ask"]
+    layer_budget = nlv * config.MOMENTUM_LAYER_SIZING_PCT_NLV
+    layer_contracts = int(layer_budget // (layer_ask * 100))
+    if layer_contracts < 1:
+        send(f"*Momentum Trader* - *{ticker}*: strong setup, but the {config.MOMENTUM_LAYER_SIZING_PCT_NLV:.0%} "
+             f"NLV layer budget (${layer_budget:,.0f}) doesn't cover even 1 contract at ${layer_ask:.2f} - "
+             f"layer skipped.")
+        return
+
+    layer_entry = _buy_lot(client, ticker, layer_info, layer_contracts, current_price, target_price, True)
+    if layer_entry is None:
+        send(f"*Momentum Trader* - *{ticker}*: weekly-layer order did not fill in time - skipped, check TWS.")
+        return
+
+    state[ticker].append(layer_entry)
+    send(
+        f"*Momentum Trader* - Layered *{ticker}* *{layer_info['strike']:.0f}C* {layer_info['expiry']} "
+        f"x{layer_contracts} @ {layer_entry['entry_premium']:.2f} (weekly add-on alongside the primary above)"
     )
 
 
@@ -284,9 +341,12 @@ def _trim_one_quarter(client, tt, ticker, position, level, reason, dry_run=False
 
 
 def manage_position(client, tt, ib, ticker, position, dry_run=False):
-    """Evaluates the swing exit in priority order: stop -> theta-decay ->
-    pending trim -> time-exit/ITM extension. Returns True if the position
-    is still open afterward.
+    """Evaluates the swing exit in priority order: stop -> catalyst
+    (theta-decay or expiry week) -> pending trim. No hold-duration time
+    exit as of 2026-09-01 (see config.MOMENTUM_TIME_EXIT_TRADING_DAYS) -
+    a position only closes via the stop, the catalyst rule, or running
+    out of size on the trim ladder. Returns True if the position is
+    still open afterward.
 
     2026-08-31 redesign: option premium is the PRIMARY basis for both stop
     and trim; the underlying is only ever a secondary filter/confirmation
@@ -313,38 +373,63 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
     snapshot = tt.get_option_market_snapshot([position["streamer_symbol"]]).get(position["streamer_symbol"]) or {}
     theta, delta, current_bid = snapshot.get("theta"), snapshot.get("delta"), snapshot.get("bid")
 
-    # 1. Stop - the option's own premium collapsing MOMENTUM_PREMIUM_STOP_R
-    # is the PRIMARY trigger; the underlying only ever gates whether a
-    # triggered stop actually executes, never triggers on its own:
+    # 1. Stop - the option's own premium collapsing to the active R
+    # threshold is the PRIMARY trigger; the underlying only ever gates
+    # whether a triggered stop actually executes, never triggers on its
+    # own:
     #   underlying >= its EMA(period) -> HOLD (still at support, don't sell)
     #   underlying <= LoD reference (trailing: min of prev-day low and
     #     today's low-so-far, only ever tightens) -> CLOSE (confirmed
     #     breakdown)
     #   neither -> HOLD (premium alone isn't enough without confirmation)
+    # Breakeven stop after the first trim (2026-09-01, Qullamaggie-inspired
+    # "scale out, move stop to breakeven, trail the rest"): once
+    # breakeven_active is set (by _trim_one_quarter() on the first trim),
+    # the threshold tightens from MOMENTUM_PREMIUM_STOP_R to
+    # MOMENTUM_BREAKEVEN_STOP_R (0R) on the remaining size - the EMA/LoD
+    # gate below still applies either way.
+    active_stop_r = (
+        config.MOMENTUM_BREAKEVEN_STOP_R if position.get("breakeven_active", False)
+        else config.MOMENTUM_PREMIUM_STOP_R
+    )
     premium_stop_hit = (
         current_bid is not None
-        and r_multiple(position["entry_premium"], current_bid, config.MOMENTUM_R_PCT) <= config.MOMENTUM_PREMIUM_STOP_R
+        and r_multiple(position["entry_premium"], current_bid, config.MOMENTUM_R_PCT) <= active_stop_r
     )
     if premium_stop_hit:
         at_or_above_support = ema is not None and current_underlying >= ema
         broke_down = current_underlying <= lod_reference
         if broke_down and not at_or_above_support:
-            if _close_full(client, tt, ticker, position, "premium stop (LoD break)", dry_run):
+            stop_label = "breakeven stop" if position.get("breakeven_active", False) else "premium stop"
+            if _close_full(client, tt, ticker, position, f"{stop_label} (LoD break)", dry_run):
                 return False
             return True  # didn't fully fill - reassess fresh next cycle
         # else: at/above the EMA, or no LoD confirmation yet - hold
 
     expiry_date = datetime.strptime(position["expiry"], "%Y%m%d").date()
-    is_itm = current_underlying > position["strike"]
+    is_weekly_layer = position.get("is_weekly_layer", False)
 
-    # 2. "Catalyst" exit - fires unconditionally, ahead of trim/time-exit,
+    # 2. "Catalyst" exit - fires unconditionally, ahead of the trim ladder,
     # if either holds (user-specified definition, 2026-08-02):
     #   (a) theta exceeds delta
     #   (b) still holding into the contract's own expiry week
+    # The weekly-layer add-on (2026-09-01) is exempt from (b): that rule
+    # assumes a monthly's 30-45+ day runway, but a real weekly is inside
+    # its own expiry week from the moment it's bought. In its place, a
+    # tighter DTE floor force-closes it as a backstop so it never rides
+    # ungoverned all the way to actual physical expiration if neither the
+    # stop nor a trim level fires first (see config.py MOMENTUM_LAYER_*).
     theta_exceeds_delta = theta is not None and delta is not None and abs(theta) > delta
-    in_expiry_week = is_same_week(date.today(), expiry_date)
-    if theta_exceeds_delta or in_expiry_week:
-        reason = "theta > delta" if theta_exceeds_delta else "expiry week"
+    in_expiry_week = (not is_weekly_layer) and is_same_week(date.today(), expiry_date)
+    days_to_expiry = (expiry_date - date.today()).days
+    layer_expiry_floor_hit = is_weekly_layer and days_to_expiry <= config.MOMENTUM_LAYER_EXPIRY_FLOOR_DAYS
+    if theta_exceeds_delta or in_expiry_week or layer_expiry_floor_hit:
+        if theta_exceeds_delta:
+            reason = "theta > delta"
+        elif in_expiry_week:
+            reason = "expiry week"
+        else:
+            reason = "weekly layer expiry floor"
         if _close_full(client, tt, ticker, position, reason, dry_run):
             return False
         return True  # didn't fully fill - reassess fresh next cycle
@@ -371,30 +456,6 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
                 return False
             if not filled_ok:
                 break  # this attempt didn't fill - don't stack more orders this cycle
-
-    # 4. Time exit, with a bounded ITM extension. The expiry-week catalyst
-    # check above already guarantees this never runs past expiry week, so
-    # no separate calendar-day floor is needed here.
-    entry_date = date.fromisoformat(position["entry_date"])
-    days_held = trading_days_since(entry_date, date.today())
-
-    if position["itm_extension_deadline"] is not None:
-        deadline = date.fromisoformat(position["itm_extension_deadline"])
-        if date.today() >= deadline:
-            if _close_full(client, tt, ticker, position, "time exit (ITM extension expired)", dry_run):
-                return False
-            return True  # didn't fully fill - reassess fresh next cycle
-    elif days_held >= config.MOMENTUM_TIME_EXIT_TRADING_DAYS:
-        if is_itm:
-            deadline = add_trading_days(date.today(), config.MOMENTUM_ITM_EXTENSION_TRADING_DAYS)
-            if not dry_run:
-                position["itm_extension_deadline"] = deadline.isoformat()
-            send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: time exit reached but ITM - "
-                 f"extending to {deadline.isoformat()}.")
-        else:
-            if _close_full(client, tt, ticker, position, "time exit", dry_run):
-                return False
-            return True  # didn't fully fill - reassess fresh next cycle
 
     return True
 

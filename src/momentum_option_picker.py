@@ -6,6 +6,12 @@ Algo Trading/docs/momentum_strategy_backtest_record.html: nearest monthly
 filtered to delta > MIN_DELTA / volume > MIN_VOLUME / open interest >
 MIN_OPEN_INTEREST, cheapest surviving call (long-only - Variant H never
 shorts, so puts are never considered).
+
+pick_weekly_contract() is the 2026-09-01 weekly-layer add-on: same filters
+and cheapest-survivor selection, but over any expiry (not just monthly
+OpEx) within config.MOMENTUM_LAYER_MIN_DTE/MAX_DTE - used only alongside
+a primary position, on a "strong" setup (see check_undercut_and_rally in
+src/momentum_signals.py).
 """
 from datetime import date, timedelta
 
@@ -28,22 +34,19 @@ def _monthly_expiries_on_or_after(chain, min_dte_days, today=None):
     return [d for d in monthlies if d >= cutoff]
 
 
-def pick_contract(tt_client, ticker, target_dte_min=None):
-    """Returns a dict describing the cheapest call clearing the delta/
-    volume/open-interest filters at the nearest qualifying monthly expiry:
-        {strike, expiry (date), streamer_symbol, ask, bid, delta, theta,
-         iv, open_interest, volume}
-    or None if nothing qualifies at either of the first two monthly
-    expiries tried (matches the doc's "fall back to the next monthly
-    expiry once, otherwise skip" rule).
-    """
-    target_dte_min = target_dte_min if target_dte_min is not None else config.MOMENTUM_TARGET_DTE_MIN
-    chain = tt_client.get_option_chain(symbol=ticker)
-    candidates = _monthly_expiries_on_or_after(chain, target_dte_min)
-    if not candidates:
-        return None
+def _expiries_in_dte_window(chain, min_dte_days, max_dte_days, today=None):
+    today = today or date.today()
+    lo = today + timedelta(days=min_dte_days)
+    hi = today + timedelta(days=max_dte_days)
+    return sorted(d for d in chain.keys() if lo <= d <= hi)
 
-    for expiry in candidates[:2]:
+
+def _cheapest_survivor(tt_client, chain, candidates):
+    """Shared by pick_contract/pick_weekly_contract: tries each expiry in
+    `candidates` in order, returns the cheapest call clearing the delta/
+    volume/open-interest filters at the first expiry with any survivors,
+    or None if none of `candidates` (already capped by the caller) has one."""
+    for expiry in candidates:
         calls = [o for o in chain[expiry] if o.option_type == OptionType.CALL]
         if not calls:
             continue
@@ -83,3 +86,36 @@ def pick_contract(tt_client, ticker, target_dte_min=None):
         }
 
     return None
+
+
+def pick_contract(tt_client, ticker, target_dte_min=None):
+    """Returns a dict describing the cheapest call clearing the delta/
+    volume/open-interest filters at the nearest qualifying monthly expiry:
+        {strike, expiry (date), streamer_symbol, ask, bid, delta, theta,
+         iv, open_interest, volume}
+    or None if nothing qualifies at either of the first two monthly
+    expiries tried (matches the doc's "fall back to the next monthly
+    expiry once, otherwise skip" rule).
+    """
+    target_dte_min = target_dte_min if target_dte_min is not None else config.MOMENTUM_TARGET_DTE_MIN
+    chain = tt_client.get_option_chain(symbol=ticker)
+    candidates = _monthly_expiries_on_or_after(chain, target_dte_min)
+    if not candidates:
+        return None
+    return _cheapest_survivor(tt_client, chain, candidates[:2])
+
+
+def pick_weekly_contract(tt_client, ticker, min_dte=None, max_dte=None):
+    """Weekly-layer add-on (src/config.py MOMENTUM_LAYER_*): same
+    cheapest-survivor selection as pick_contract, but over ANY expiry
+    (not just monthly OpEx) within [min_dte, max_dte] calendar days -
+    i.e. a genuine short-dated weekly, not the same monthly the primary
+    position already holds. Returns None if nothing qualifies at either
+    of the first two expiries in that window."""
+    min_dte = min_dte if min_dte is not None else config.MOMENTUM_LAYER_MIN_DTE
+    max_dte = max_dte if max_dte is not None else config.MOMENTUM_LAYER_MAX_DTE
+    chain = tt_client.get_option_chain(symbol=ticker)
+    candidates = _expiries_in_dte_window(chain, min_dte, max_dte)
+    if not candidates:
+        return None
+    return _cheapest_survivor(tt_client, chain, candidates[:2])

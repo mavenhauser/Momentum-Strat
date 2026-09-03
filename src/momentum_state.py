@@ -24,11 +24,26 @@ would silently lose track of one of them):
                                              # positions opened before this
                                              # existed, or if there wasn't
                                              # enough daily history at entry
-          "entry_date": "YYYY-MM-DD",
+          "entry_date": "YYYY-MM-DD",       # record-keeping only since the
+                                             # 2026-09-01 time-exit removal -
+                                             # no longer read by any exit rule
           "trims_done": [float, ...],       # R-multiples already trimmed at
-          "breakeven_active": bool,
-          "itm_extension_deadline": "YYYY-MM-DD" | null,  # set once the time
-                                                           # exit is reached ITM
+          "breakeven_active": bool,         # set True by the first trim; once
+                                             # true, manage_position()'s premium
+                                             # stop tightens from
+                                             # MOMENTUM_PREMIUM_STOP_R to
+                                             # MOMENTUM_BREAKEVEN_STOP_R (0R) on
+                                             # the remaining size (2026-09-01)
+          "is_weekly_layer": bool,          # 2026-09-01: true for the weekly
+                                             # add-on lot bought alongside a
+                                             # "strong" setup (see
+                                             # check_undercut_and_rally) -
+                                             # exempts it from the normal
+                                             # expiry-week catalyst check in
+                                             # manage_position(), which uses a
+                                             # tighter DTE floor instead.
+                                             # False/absent (.get default) on
+                                             # every ordinary primary lot.
         },
         ...
       ]
