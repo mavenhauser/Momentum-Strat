@@ -356,5 +356,12 @@ MOMENTUM_LAYER_EXPIRY_FLOOR_DAYS = 1  # force-close backstop, see note above
 # MARKETABLE_LIMIT_SLIPPAGE_PCT is also used by the already-running SPX
 # Scalp trader (SPX index options, untested against this same collar and
 # not to be touched without separately verifying it there).
+#
+# 2026-09-03: no longer used by the live trader itself - for a multi-day
+# swing strategy, an aggressive marketable-limit buffer isn't needed the
+# way it is for SPX 0DTE scalps, so every order now prices at IBKR's own
+# live mid-of-bid-ask instead (see IBKRClient.get_option_mid_price). Kept
+# only for scripts/check_momentum_option_order.py, the standalone
+# order-path smoke test.
 MOMENTUM_LIMIT_SLIPPAGE_PCT = 0.03
 MOMENTUM_STATE_PATH = "state/momentum_positions.json"

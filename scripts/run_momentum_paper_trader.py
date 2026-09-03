@@ -151,22 +151,46 @@ def cluster_open_count(state, cluster):
 
 
 def _buy_lot(client, ticker, contract_info, contracts, current_price, target_price, is_weekly_layer):
-    """Places the buy-to-open, waits for fill, and returns the state entry
-    dict on success or None if the order didn't fill in time."""
-    ask = contract_info["ask"]
-    limit_price = ask * (1 + config.MOMENTUM_LIMIT_SLIPPAGE_PCT)
+    """Places the buy-to-open, waits for fill, and returns (entry, fully_filled):
+    entry is the state dict to record, sized to the ACTUAL filled quantity -
+    or None if nothing filled at all. fully_filled is True only when the
+    full requested `contracts` filled.
+
+    2026-09-03: fixed a real bug found live - this used to trust
+    orderStatus.status == "Filled" alone, the same mistake BUG 9 (2026-08-31)
+    already fixed on the exit side. A DELL entry got recorded as a full
+    12-contract fill on that basis with NO matching real fill on IBKR's
+    books (confirmed via execution history - zero BOT executions existed
+    before the position went negative). The later catalyst-exit's
+    sell_to_close() then sold 12 contracts against a real position of 0,
+    opening a naked short - sell_to_close() has no independent check of
+    its own, since it trusts whatever contracts_remaining state already
+    says. Checking orderStatus.filled here is what would have caught the
+    phantom entry at the source.
+
+    2026-09-03: priced off IBKR's own live mid-of-bid-ask instead of a
+    TastyTrade-ask-plus-slippage-buffer - contract selection stays on
+    TastyTrade's greeks/volume/OI data, but execution happens on IBKR, so
+    the execution price should reference IBKR's own live quote (see
+    IBKRClient.get_option_mid_price). Falls back to TastyTrade's ask only
+    if IBKR has no live quote available this moment."""
+    mid = client.get_option_mid_price(
+        contract_info["expiry"], contract_info["strike"], "C", trading_class=None, symbol=ticker,
+    )
+    limit_price = mid if mid is not None else contract_info["ask"]
     trade = client.buy_to_open(
         contract_info["expiry"], contract_info["strike"], "C", contracts, limit_price,
         trading_class=None, symbol=ticker,
     )
     trade = client.wait_for_fill(trade)
-    if trade.orderStatus.status != "Filled":
-        return None
-    return {
+    filled = trade.orderStatus.filled
+    if filled <= 0:
+        return None, False
+    entry = {
         "strike": contract_info["strike"],
         "expiry": contract_info["expiry"].strftime("%Y%m%d"),
         "streamer_symbol": contract_info["streamer_symbol"],
-        "contracts_remaining": contracts,
+        "contracts_remaining": filled,
         "entry_premium": trade.orderStatus.avgFillPrice,
         "entry_underlying_price": current_price,
         "target_price": target_price,
@@ -175,6 +199,7 @@ def _buy_lot(client, ticker, contract_info, contracts, current_price, target_pri
         "breakeven_active": False,
         "is_weekly_layer": is_weekly_layer,
     }
+    return entry, filled >= contracts
 
 
 def try_open_position(client, tt, ib, ticker, state, nlv, dry_run=False):
@@ -209,16 +234,17 @@ def try_open_position(client, tt, ib, ticker, state, nlv, dry_run=False):
                       f"{layer_info['expiry']} @ ~{layer_info['ask']:.2f}")
         return
 
-    entry = _buy_lot(client, ticker, contract_info, contracts, current_price, target_price, False)
+    entry, fully_filled = _buy_lot(client, ticker, contract_info, contracts, current_price, target_price, False)
     if entry is None:
         send(f"*Momentum Trader* - *{ticker}*: entry order did not fill in time - skipped, check TWS.")
         return
 
     state.setdefault(ticker, []).append(entry)
     target_line = f"\nTarget: {target_price:.2f}" if target_price is not None else "\nTarget: n/a (no confirmed swing leg at entry)"
+    fill_note = "" if fully_filled else f" (PARTIAL - {contracts} requested)"
     send(
         f"*Momentum Trader* - Entered *{ticker}* *{contract_info['strike']:.0f}C* {contract_info['expiry']} "
-        f"x{contracts} @ {entry['entry_premium']:.2f} (underlying {current_price:.2f}){strong_note}\n"
+        f"x{entry['contracts_remaining']}{fill_note} @ {entry['entry_premium']:.2f} (underlying {current_price:.2f}){strong_note}\n"
         f"Reason: SMA200 uptrend + triple-confirmed breakout (close above prior-day high, premarket high, "
         f"and fresh high-of-day){target_line}"
     )
@@ -246,21 +272,23 @@ def try_open_position(client, tt, ib, ticker, state, nlv, dry_run=False):
              f"layer skipped.")
         return
 
-    layer_entry = _buy_lot(client, ticker, layer_info, layer_contracts, current_price, target_price, True)
+    layer_entry, layer_fully_filled = _buy_lot(client, ticker, layer_info, layer_contracts, current_price, target_price, True)
     if layer_entry is None:
         send(f"*Momentum Trader* - *{ticker}*: weekly-layer order did not fill in time - skipped, check TWS.")
         return
 
     state[ticker].append(layer_entry)
+    layer_fill_note = "" if layer_fully_filled else f" (PARTIAL - {layer_contracts} requested)"
     send(
         f"*Momentum Trader* - Layered *{ticker}* *{layer_info['strike']:.0f}C* {layer_info['expiry']} "
-        f"x{layer_contracts} @ {layer_entry['entry_premium']:.2f} (weekly add-on alongside the primary above)"
+        f"x{layer_entry['contracts_remaining']}{layer_fill_note} @ {layer_entry['entry_premium']:.2f} "
+        f"(weekly add-on alongside the primary above)"
     )
 
 
 # --- exit side -----------------------------------------------------------------
 
-def _close_full(client, tt, ticker, position, reason, dry_run=False):
+def _close_full(client, ticker, position, reason, dry_run=False):
     """Attempts to close the full remaining position. Returns True if fully
     closed (caller should drop this ticker from state), False if the order
     didn't fully fill (position stays open, contracts_remaining corrected
@@ -271,14 +299,16 @@ def _close_full(client, tt, ticker, position, reason, dry_run=False):
     actually did. Caught it corrupting 3 real positions in one cycle: a
     GOOGL sell that filled only 1 of 13 (reported as fully closed, 12 left
     completely untracked), and NVDA/MU sells that were fully Cancelled (0
-    filled) but still reported as closed and dropped."""
+    filled) but still reported as closed and dropped.
+
+    2026-09-03: priced off IBKR's own live mid-of-bid-ask instead of
+    TastyTrade's - see _buy_lot()'s docstring for why."""
     qty_attempted = position["contracts_remaining"]
     if dry_run:
         print(f"[dry-run] would CLOSE {ticker} ({reason}) {qty_attempted}x")
         return True
-    quote = tt.get_option_market_snapshot([position["streamer_symbol"]]).get(position["streamer_symbol"]) or {}
-    bid = quote.get("bid")
-    limit_price = bid * (1 - config.MOMENTUM_LIMIT_SLIPPAGE_PCT) if bid else position["entry_premium"]
+    mid = client.get_option_mid_price(position["expiry"], position["strike"], "C", trading_class=None, symbol=ticker)
+    limit_price = mid if mid is not None else position["entry_premium"]
     trade = client.sell_to_close(
         position["expiry"], position["strike"], "C", qty_attempted, limit_price,
         trading_class=None, symbol=ticker,
@@ -301,21 +331,25 @@ def _close_full(client, tt, ticker, position, reason, dry_run=False):
     return fully_closed
 
 
-def _trim_one_quarter(client, tt, ticker, position, level, reason, dry_run=False):
+def _trim_one_quarter(client, ticker, position, level, reason, dry_run=False):
     """Returns True if this level is fully done (trims_done should record
     it), False if it didn't fill at all this cycle (nothing changed,
     retries next cycle) - same fill-verification fix as _close_full
-    (2026-08-31)."""
+    (2026-08-31).
+
+    2026-09-03: priced off IBKR's own live mid-of-bid-ask instead of
+    TastyTrade's - see _buy_lot()'s docstring for why. No fallback price
+    here (unlike _close_full's fallback to entry_premium) - if IBKR has
+    no live quote this moment, skip and retry next cycle rather than
+    trim at a fabricated price."""
     trim_qty_target = max(1, int(round(position["contracts_remaining"] * config.MOMENTUM_TRIM_FRACTION)))
     trim_qty_target = min(trim_qty_target, position["contracts_remaining"])
     if dry_run:
         print(f"[dry-run] would TRIM {ticker} {trim_qty_target}x ({reason})")
         return True
-    quote = tt.get_option_market_snapshot([position["streamer_symbol"]]).get(position["streamer_symbol"]) or {}
-    bid = quote.get("bid")
-    if bid is None:
+    limit_price = client.get_option_mid_price(position["expiry"], position["strike"], "C", trading_class=None, symbol=ticker)
+    if limit_price is None:
         return False
-    limit_price = bid * (1 - config.MOMENTUM_LIMIT_SLIPPAGE_PCT)
     trade = client.sell_to_close(
         position["expiry"], position["strike"], "C", trim_qty_target, limit_price,
         trading_class=None, symbol=ticker,
@@ -401,7 +435,7 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
         broke_down = current_underlying <= lod_reference
         if broke_down and not at_or_above_support:
             stop_label = "breakeven stop" if position.get("breakeven_active", False) else "premium stop"
-            if _close_full(client, tt, ticker, position, f"{stop_label} (LoD break)", dry_run):
+            if _close_full(client, ticker, position, f"{stop_label} (LoD break)", dry_run):
                 return False
             return True  # didn't fully fill - reassess fresh next cycle
         # else: at/above the EMA, or no LoD confirmation yet - hold
@@ -430,7 +464,7 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
             reason = "expiry week"
         else:
             reason = "weekly layer expiry floor"
-        if _close_full(client, tt, ticker, position, reason, dry_run):
+        if _close_full(client, ticker, position, reason, dry_run):
             return False
         return True  # didn't fully fill - reassess fresh next cycle
 
@@ -451,7 +485,7 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
                 target_price = position.get("target_price")
                 if target_price is not None and current_underlying >= target_price:
                     reasons.append(f"target {target_price:.2f} also hit")
-            filled_ok = _trim_one_quarter(client, tt, ticker, position, level, " & ".join(reasons), dry_run)
+            filled_ok = _trim_one_quarter(client, ticker, position, level, " & ".join(reasons), dry_run)
             if position["contracts_remaining"] <= 0:
                 return False
             if not filled_ok:
