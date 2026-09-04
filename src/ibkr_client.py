@@ -110,6 +110,31 @@ class IBKRClient:
             return None
         return (bid + ask) / 2
 
+    def get_option_position(self, expiry, strike, right, symbol):
+        """Current REAL position size for one option contract, straight
+        from IBKR's own account data - never from any internal state
+        file. 0.0 if no position exists for this contract.
+
+        2026-09-04 (BUG 10 in the tracker): a phantom entry once got
+        recorded in state with no matching real fill on IBKR's books; a
+        later close then blindly sold the believed quantity against a
+        real position of 0 and opened a naked short. This is the
+        hard safety check that closes that gap for good - callers must
+        check this against what they believe they hold and never sell
+        more than what this returns, no matter what state says or how
+        state and reality diverged in the first place."""
+        if hasattr(expiry, "strftime"):
+            expiry = expiry.strftime("%Y%m%d")
+        for p in self.ib.positions():
+            c = p.contract
+            if (
+                c.secType == "OPT" and c.symbol == symbol
+                and c.lastTradeDateOrContractMonth == expiry
+                and float(c.strike) == float(strike) and c.right == right
+            ):
+                return p.position
+        return 0.0
+
     def _qualify_option(self, expiry, strike, right, trading_class="SPXW", symbol="SPX"):
         """expiry: 'YYYYMMDD' string, or a date/datetime (e.g. from
         tastytrade_client.today_expiry()) - normalized to IBKR's required
@@ -175,11 +200,27 @@ class IBKRClient:
     def wait_for_fill(self, trade, timeout_seconds=None):
         """Poll a Trade until it's filled or cancelled, or timeout_seconds
         elapses (default config.ORDER_FILL_TIMEOUT_SECONDS). Matches this
-        codebase's synchronous polling style rather than async order events."""
+        codebase's synchronous polling style rather than async order events.
+
+        2026-09-04: on timeout, actively cancels the order instead of just
+        walking away from it. A prior version left an unfilled order
+        resting live on IBKR's book indefinitely (until its own TIF
+        expired - end of day for a DAY order) - a real incident (DELL)
+        had exactly this happen: an abandoned BUY order sat open all day,
+        then blocked every later close attempt on the same contract with
+        Error 201 ("Cannot have open orders on both sides of the same US
+        Option contract"), since IBKR won't allow a resting buy and a
+        resting sell open on the same contract at once. If the order had
+        already partially filled before the timeout, cancelling only
+        cancels the unfilled remainder - the partial fill stands, and
+        orderStatus.filled correctly reflects just that partial amount."""
         timeout_seconds = timeout_seconds or config.ORDER_FILL_TIMEOUT_SECONDS
         elapsed = 0
         terminal_states = ("Filled", "Cancelled", "ApiCancelled")
         while trade.orderStatus.status not in terminal_states and elapsed < timeout_seconds:
             self.ib.sleep(1)
             elapsed += 1
+        if trade.orderStatus.status not in terminal_states:
+            self.ib.cancelOrder(trade.order)
+            self.ib.sleep(2)  # let the cancellation register before the caller reads orderStatus
         return trade

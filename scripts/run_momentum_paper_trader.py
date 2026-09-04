@@ -302,22 +302,43 @@ def _close_full(client, ticker, position, reason, dry_run=False):
     filled) but still reported as closed and dropped.
 
     2026-09-03: priced off IBKR's own live mid-of-bid-ask instead of
-    TastyTrade's - see _buy_lot()'s docstring for why."""
+    TastyTrade's - see _buy_lot()'s docstring for why.
+
+    2026-09-04 (BUG 10): hard safety check before selling anything -
+    verifies against IBKR.get_option_position() (the real account, never
+    state) and never sells more than what's genuinely held. This is what
+    would have stopped BUG 10 outright: a phantom entry made state
+    believe 12 contracts existed when IBKR's real position was 0, and
+    the blind sell that followed opened a naked short. Now, if state and
+    IBKR disagree, IBKR's real number wins - contracts_remaining is
+    corrected to match before anything is sold, and the mismatch is
+    always alerted rather than passing by silently."""
     qty_attempted = position["contracts_remaining"]
     if dry_run:
         print(f"[dry-run] would CLOSE {ticker} ({reason}) {qty_attempted}x")
         return True
+    real_position = client.get_option_position(position["expiry"], position["strike"], "C", ticker)
+    if real_position != qty_attempted:
+        send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: state/IBKR mismatch before closing "
+             f"({reason}) - state shows {qty_attempted}x, IBKR shows {real_position:.0f}x actually held. "
+             f"Using IBKR's real number, not state's.")
+    qty_to_close = max(0, real_position)
+    position["contracts_remaining"] = qty_to_close
+    if qty_to_close <= 0:
+        send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: nothing left to close ({reason}) - "
+             f"IBKR shows 0 actually held. Dropping from tracking.")
+        return True
     mid = client.get_option_mid_price(position["expiry"], position["strike"], "C", trading_class=None, symbol=ticker)
     limit_price = mid if mid is not None else position["entry_premium"]
     trade = client.sell_to_close(
-        position["expiry"], position["strike"], "C", qty_attempted, limit_price,
+        position["expiry"], position["strike"], "C", qty_to_close, limit_price,
         trading_class=None, symbol=ticker,
     )
     trade = client.wait_for_fill(trade)
     filled = trade.orderStatus.filled
     if filled <= 0:
         send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: close attempt ({reason}) did not "
-             f"fill (status={trade.orderStatus.status}) - still holding {qty_attempted}x, will retry.")
+             f"fill (status={trade.orderStatus.status}) - still holding {qty_to_close}x, will retry.")
         return False
     position["contracts_remaining"] -= filled
     fully_closed = position["contracts_remaining"] <= 0
@@ -341,12 +362,31 @@ def _trim_one_quarter(client, ticker, position, level, reason, dry_run=False):
     TastyTrade's - see _buy_lot()'s docstring for why. No fallback price
     here (unlike _close_full's fallback to entry_premium) - if IBKR has
     no live quote this moment, skip and retry next cycle rather than
-    trim at a fabricated price."""
-    trim_qty_target = max(1, int(round(position["contracts_remaining"] * config.MOMENTUM_TRIM_FRACTION)))
-    trim_qty_target = min(trim_qty_target, position["contracts_remaining"])
+    trim at a fabricated price.
+
+    2026-09-04 (BUG 10): hard safety check before selling anything - see
+    _close_full()'s docstring for the full rationale. If state and IBKR
+    disagree, IBKR's real number wins and contracts_remaining is
+    corrected to match before computing how much to trim."""
     if dry_run:
+        trim_qty_target = max(1, int(round(position["contracts_remaining"] * config.MOMENTUM_TRIM_FRACTION)))
+        trim_qty_target = min(trim_qty_target, position["contracts_remaining"])
         print(f"[dry-run] would TRIM {ticker} {trim_qty_target}x ({reason})")
         return True
+
+    real_position = client.get_option_position(position["expiry"], position["strike"], "C", ticker)
+    if real_position != position["contracts_remaining"]:
+        send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: state/IBKR mismatch before trimming "
+             f"({reason}) - state shows {position['contracts_remaining']}x, IBKR shows {real_position:.0f}x "
+             f"actually held. Using IBKR's real number, not state's.")
+        position["contracts_remaining"] = max(0, real_position)
+    if position["contracts_remaining"] <= 0:
+        send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: nothing left to trim ({reason}) - "
+             f"IBKR shows 0 actually held.")
+        return False
+
+    trim_qty_target = max(1, int(round(position["contracts_remaining"] * config.MOMENTUM_TRIM_FRACTION)))
+    trim_qty_target = min(trim_qty_target, position["contracts_remaining"])
     limit_price = client.get_option_mid_price(position["expiry"], position["strike"], "C", trading_class=None, symbol=ticker)
     if limit_price is None:
         return False
