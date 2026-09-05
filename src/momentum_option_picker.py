@@ -88,7 +88,7 @@ def _cheapest_survivor(tt_client, chain, candidates):
     return None
 
 
-def pick_contract(tt_client, ticker, target_dte_min=None):
+def pick_contract(tt_client, ticker, target_dte_min=None, skip_nearest=False):
     """Returns a dict describing the cheapest call clearing the delta/
     volume/open-interest filters at the nearest qualifying monthly expiry:
         {strike, expiry (date), streamer_symbol, ask, bid, delta, theta,
@@ -96,10 +96,21 @@ def pick_contract(tt_client, ticker, target_dte_min=None):
     or None if nothing qualifies at either of the first two monthly
     expiries tried (matches the doc's "fall back to the next monthly
     expiry once, otherwise skip" rule).
+
+    skip_nearest (2026-09-05): if True, drops the nearest qualifying
+    monthly and starts from the one after it instead - used for a
+    "normal" (not "strong") entry signal, which always gets the next
+    month's OpEx rather than whichever monthly happens to clear
+    target_dte_min. Short-dated primaries are reserved for setups with
+    real conviction behind them (see is_strong in
+    scripts/run_momentum_paper_trader.py); a normal signal gets more
+    runway by default instead.
     """
     target_dte_min = target_dte_min if target_dte_min is not None else config.MOMENTUM_TARGET_DTE_MIN
     chain = tt_client.get_option_chain(symbol=ticker)
     candidates = _monthly_expiries_on_or_after(chain, target_dte_min)
+    if skip_nearest:
+        candidates = candidates[1:]
     if not candidates:
         return None
     return _cheapest_survivor(tt_client, chain, candidates[:2])

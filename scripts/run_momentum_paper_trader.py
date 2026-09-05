@@ -245,7 +245,11 @@ def try_open_position(client, tt, ib, ticker, state, nlv, dry_run=False):
     if not triggered or current_price is None:
         return
 
-    contract_info = pick_contract(tt, ticker)
+    # 2026-09-05: a "strong" setup (undercut-and-rally) uses the nearest
+    # qualifying monthly as before; a normal signal always skips ahead to
+    # the next month's OpEx instead - short-dated primaries are reserved
+    # for setups with real conviction behind them.
+    contract_info = pick_contract(tt, ticker, skip_nearest=not is_strong)
     if contract_info is None:
         send(f"*Momentum Trader* - *{ticker}*: entry signal fired but no contract cleared the "
              f"delta/volume/OI filters - skipped, no order placed.")
@@ -532,7 +536,20 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
     # tighter DTE floor force-closes it as a backstop so it never rides
     # ungoverned all the way to actual physical expiration if neither the
     # stop nor a trim level fires first (see config.py MOMENTUM_LAYER_*).
-    theta_exceeds_delta = theta is not None and delta is not None and abs(theta) > delta
+    #
+    # 2026-09-05: the weekly layer is now ALSO exempt from (a). A
+    # short-dated contract always carries high theta relative to delta -
+    # that's the accepted cost of the fast-reacting, high-gamma structure
+    # a weekly layer is bought for in the first place (betting on a near-
+    # term IV flush), not a signal something's gone wrong. Judging it by
+    # the same ratio used for a 30-45+ day primary contract would shake
+    # it out on schedule regardless of the setup. It's still governed by
+    # the premium stop, the trim ladder, and its own expiry-floor backstop
+    # above - just not this ratio.
+    theta_exceeds_delta = (
+        not is_weekly_layer
+        and theta is not None and delta is not None and abs(theta) > delta
+    )
     in_expiry_week = (not is_weekly_layer) and is_same_week(date.today(), expiry_date)
     days_to_expiry = (expiry_date - date.today()).days
     layer_expiry_floor_hit = is_weekly_layer and days_to_expiry <= config.MOMENTUM_LAYER_EXPIRY_FLOOR_DAYS
