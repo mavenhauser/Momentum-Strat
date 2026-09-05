@@ -487,6 +487,13 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
     lod_reference = min(prev_day_low, today_low_so_far) if prev_day_low is not None else today_low_so_far
     ema = build_ema_context(daily_bars, config.MOMENTUM_STOP_EMA_PERIOD).get(date.today())
 
+    # Shared underlying-trend gate, used below by both the stop and the
+    # theta>delta catalyst: "still trending" (at/above the EMA) always
+    # holds off a premium-side trigger; only a confirmed breakdown (at/
+    # below the LoD reference) lets one actually execute.
+    at_or_above_support = ema is not None and current_underlying >= ema
+    broke_down = current_underlying <= lod_reference
+
     snapshot = tt.get_option_market_snapshot([position["streamer_symbol"]]).get(position["streamer_symbol"]) or {}
     theta, delta, current_bid = snapshot.get("theta"), snapshot.get("delta"), snapshot.get("bid")
 
@@ -514,8 +521,6 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
         and r_multiple(position["entry_premium"], current_bid, config.MOMENTUM_R_PCT) <= active_stop_r
     )
     if premium_stop_hit:
-        at_or_above_support = ema is not None and current_underlying >= ema
-        broke_down = current_underlying <= lod_reference
         if broke_down and not at_or_above_support:
             stop_label = "breakeven stop" if position.get("breakeven_active", False) else "premium stop"
             if _close_full(client, ticker, position, f"{stop_label} (LoD break)", dry_run):
@@ -526,8 +531,8 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
     expiry_date = datetime.strptime(position["expiry"], "%Y%m%d").date()
     is_weekly_layer = position.get("is_weekly_layer", False)
 
-    # 2. "Catalyst" exit - fires unconditionally, ahead of the trim ladder,
-    # if either holds (user-specified definition, 2026-08-02):
+    # 2. "Catalyst" exit - fires ahead of the trim ladder if either holds
+    # (user-specified definition, 2026-08-02):
     #   (a) theta exceeds delta
     #   (b) still holding into the contract's own expiry week
     # The weekly-layer add-on (2026-09-01) is exempt from (b): that rule
@@ -546,16 +551,27 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
     # it out on schedule regardless of the setup. It's still governed by
     # the premium stop, the trim ladder, and its own expiry-floor backstop
     # above - just not this ratio.
-    theta_exceeds_delta = (
+    #
+    # 2026-09-05: (a) is now gated by the same underlying-trend check as
+    # the stop, for non-weekly-layer positions - real incident: DELL's
+    # theta>delta fired twice during a genuine multi-day breakout (+15%
+    # over 3 days), cutting both positions before the move played out.
+    # Likely mechanism: a big gap spikes IV, which then partially crushes
+    # over the following days even as price keeps climbing, pushing theta
+    # above delta well before the underlying's own move is actually done.
+    # Same principle as the stop: a premium-side signal alone isn't
+    # enough to close while the underlying is still confirming strength.
+    raw_theta_exceeds_delta = (
         not is_weekly_layer
         and theta is not None and delta is not None and abs(theta) > delta
     )
+    theta_exceeds_delta = raw_theta_exceeds_delta and broke_down and not at_or_above_support
     in_expiry_week = (not is_weekly_layer) and is_same_week(date.today(), expiry_date)
     days_to_expiry = (expiry_date - date.today()).days
     layer_expiry_floor_hit = is_weekly_layer and days_to_expiry <= config.MOMENTUM_LAYER_EXPIRY_FLOOR_DAYS
     if theta_exceeds_delta or in_expiry_week or layer_expiry_floor_hit:
         if theta_exceeds_delta:
-            reason = "theta > delta"
+            reason = "theta > delta (LoD break)"
         elif in_expiry_week:
             reason = "expiry week"
         else:
