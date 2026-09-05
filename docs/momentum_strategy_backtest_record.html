@@ -1223,6 +1223,18 @@
     </div>
   </section>
 
+  <section>
+    <h2 class="section-title">Live deployment build log, part 5 (2026-09-05)</h2>
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">BUG 12</span><h4>Passive mid-priced order missed a genuine entry on a wider-spread contract</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>A real Variant H signal fired on MU (1060C, 2026-09-18) but the buy never filled - 4 separate attempts across the session, each timing out with "entry order did not fill in time." No position was ever recorded, and IBKR confirmed a real position of 0 - unlike BUG 10/11, nothing was left in a bad state, but a real, fillable entry was likely missed entirely.</dd>
+        <dt>Root cause</dt><dd>Direct consequence of the 2026-09-03 switch to pricing off IBKR's own live mid-of-bid-ask: a passive limit sitting exactly at the mid is fine for a liquid, tightly-quoted contract, but MU's 1060 strike is well out-of-the-money on a fast-moving name - a wider spread and thinner resting liquidity meant the order could sit unmatched past the 30-second <code>ORDER_FILL_TIMEOUT_SECONDS</code> window instead of getting crossed. The user's own framing when asking for mid-pricing ("aka market order") set an expectation of reliable fills that a passive limit at the mid doesn't actually guarantee, unlike a true market order.</dd>
+        <dt>Fix</dt><dd>New <code>_place_with_nudge_retry()</code> in <code>run_momentum_paper_trader.py</code>, shared by <code>_buy_lot()</code>, <code>_close_full()</code>, and <code>_trim_one_quarter()</code>: places the order at IBKR's live mid first (unchanged default), and if NOTHING fills within the timeout, re-fetches a fresh quote and retries once more at the aggressive side of the spread (the ask for a BUY, the bid for a SELL) instead of giving up. A partial fill at the mid is still accepted as-is and does not trigger a retry - only a complete miss does. New <code>IBKRClient.get_option_bid_ask()</code> exposes the raw bid/ask (refactored out of <code>get_option_mid_price()</code>, which now calls it internally) so the retry price can be computed. Verified with a fake IBKR client across 6 scenarios: fills at mid (no retry), misses then fills on retry at a freshly-fetched price, misses with no fresh quote available for the retry (falls back to the first attempt's result), the SELL side correctly retries at the bid rather than the ask, no quote and no fallback price returns no order at all, and a fallback price is used correctly when IBKR has no live quote on the first attempt.</dd>
+      </dl>
+    </div>
+  </section>
+
   <div class="final-call">
     <span class="eyebrow">Standing decision</span>
     <h2>Variant H is live; option picker + enriched alert working end-to-end (TastyTrade data)</h2>

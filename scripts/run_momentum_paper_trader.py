@@ -150,6 +150,46 @@ def cluster_open_count(state, cluster):
     return sum(1 for t in cluster if t in state)
 
 
+def _place_with_nudge_retry(client, action, expiry, strike, ticker, quantity, fallback_price=None):
+    """Places a limit order at IBKR's live mid-of-bid-ask; if NOTHING
+    fills within wait_for_fill's timeout, re-fetches a fresh quote and
+    retries ONCE more at the aggressive side of the spread (the ask for
+    a BUY, the bid for a SELL) instead of giving up outright.
+
+    2026-09-05: added after a real incident (MU, 2026-09-04) - a passive
+    mid-priced order missed a genuine entry entirely on a wider-spread,
+    lower-liquidity contract (a far-OTM strike), timing out unfilled 4
+    separate times over one session. Resting at the fair mid is still
+    the default (matches the swing-trade rationale for pricing off IBKR
+    at all - see get_option_mid_price), but a complete miss now gets one
+    chance to just cross the spread and get filled instead of walking
+    away empty-handed. A PARTIAL fill at the mid is accepted as-is, same
+    as before - this only kicks in on a total miss (filled <= 0).
+
+    `fallback_price` is used only if IBKR has no live quote at all on the
+    FIRST attempt (e.g. TastyTrade's ask/bid, supplied by the caller);
+    if the retry's fresh quote is unavailable, the retry is skipped and
+    the first attempt's (unfilled) trade is returned as-is. Returns None
+    if no price was available from any source, meaning no order was
+    placed at all."""
+    place = client.buy_to_open if action == "BUY" else client.sell_to_close
+    bid, ask = client.get_option_bid_ask(expiry, strike, "C", trading_class=None, symbol=ticker)
+    mid_price = (bid + ask) / 2 if bid is not None else fallback_price
+    if mid_price is None:
+        return None
+    trade = place(expiry, strike, "C", quantity, mid_price, trading_class=None, symbol=ticker)
+    trade = client.wait_for_fill(trade)
+    if trade.orderStatus.filled > 0:
+        return trade
+
+    bid2, ask2 = client.get_option_bid_ask(expiry, strike, "C", trading_class=None, symbol=ticker)
+    if bid2 is None:
+        return trade  # no fresh quote to retry against - accept the (unfilled) first attempt
+    retry_price = ask2 if action == "BUY" else bid2
+    retry_trade = place(expiry, strike, "C", quantity, retry_price, trading_class=None, symbol=ticker)
+    return client.wait_for_fill(retry_trade)
+
+
 def _buy_lot(client, ticker, contract_info, contracts, current_price, target_price, is_weekly_layer):
     """Places the buy-to-open, waits for fill, and returns (entry, fully_filled):
     entry is the state dict to record, sized to the ACTUAL filled quantity -
@@ -173,17 +213,15 @@ def _buy_lot(client, ticker, contract_info, contracts, current_price, target_pri
     TastyTrade's greeks/volume/OI data, but execution happens on IBKR, so
     the execution price should reference IBKR's own live quote (see
     IBKRClient.get_option_mid_price). Falls back to TastyTrade's ask only
-    if IBKR has no live quote available this moment."""
-    mid = client.get_option_mid_price(
-        contract_info["expiry"], contract_info["strike"], "C", trading_class=None, symbol=ticker,
+    if IBKR has no live quote available this moment.
+
+    2026-09-05: retries once at the ask if nothing fills at the mid
+    within the timeout - see _place_with_nudge_retry's docstring."""
+    trade = _place_with_nudge_retry(
+        client, "BUY", contract_info["expiry"], contract_info["strike"], ticker, contracts,
+        fallback_price=contract_info["ask"],
     )
-    limit_price = mid if mid is not None else contract_info["ask"]
-    trade = client.buy_to_open(
-        contract_info["expiry"], contract_info["strike"], "C", contracts, limit_price,
-        trading_class=None, symbol=ticker,
-    )
-    trade = client.wait_for_fill(trade)
-    filled = trade.orderStatus.filled
+    filled = trade.orderStatus.filled if trade is not None else 0
     if filled <= 0:
         return None, False
     entry = {
@@ -312,7 +350,10 @@ def _close_full(client, ticker, position, reason, dry_run=False):
     the blind sell that followed opened a naked short. Now, if state and
     IBKR disagree, IBKR's real number wins - contracts_remaining is
     corrected to match before anything is sold, and the mismatch is
-    always alerted rather than passing by silently."""
+    always alerted rather than passing by silently.
+
+    2026-09-05: retries once at the bid if nothing fills at the mid
+    within the timeout - see _place_with_nudge_retry's docstring."""
     qty_attempted = position["contracts_remaining"]
     if dry_run:
         print(f"[dry-run] would CLOSE {ticker} ({reason}) {qty_attempted}x")
@@ -328,17 +369,15 @@ def _close_full(client, ticker, position, reason, dry_run=False):
         send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: nothing left to close ({reason}) - "
              f"IBKR shows 0 actually held. Dropping from tracking.")
         return True
-    mid = client.get_option_mid_price(position["expiry"], position["strike"], "C", trading_class=None, symbol=ticker)
-    limit_price = mid if mid is not None else position["entry_premium"]
-    trade = client.sell_to_close(
-        position["expiry"], position["strike"], "C", qty_to_close, limit_price,
-        trading_class=None, symbol=ticker,
+    trade = _place_with_nudge_retry(
+        client, "SELL", position["expiry"], position["strike"], ticker, qty_to_close,
+        fallback_price=position["entry_premium"],
     )
-    trade = client.wait_for_fill(trade)
-    filled = trade.orderStatus.filled
+    filled = trade.orderStatus.filled if trade is not None else 0
     if filled <= 0:
+        status = trade.orderStatus.status if trade is not None else "no live quote"
         send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: close attempt ({reason}) did not "
-             f"fill (status={trade.orderStatus.status}) - still holding {qty_to_close}x, will retry.")
+             f"fill (status={status}) - still holding {qty_to_close}x, will retry.")
         return False
     position["contracts_remaining"] -= filled
     fully_closed = position["contracts_remaining"] <= 0
@@ -367,7 +406,10 @@ def _trim_one_quarter(client, ticker, position, level, reason, dry_run=False):
     2026-09-04 (BUG 10): hard safety check before selling anything - see
     _close_full()'s docstring for the full rationale. If state and IBKR
     disagree, IBKR's real number wins and contracts_remaining is
-    corrected to match before computing how much to trim."""
+    corrected to match before computing how much to trim.
+
+    2026-09-05: retries once at the bid if nothing fills at the mid
+    within the timeout - see _place_with_nudge_retry's docstring."""
     if dry_run:
         trim_qty_target = max(1, int(round(position["contracts_remaining"] * config.MOMENTUM_TRIM_FRACTION)))
         trim_qty_target = min(trim_qty_target, position["contracts_remaining"])
@@ -387,14 +429,11 @@ def _trim_one_quarter(client, ticker, position, level, reason, dry_run=False):
 
     trim_qty_target = max(1, int(round(position["contracts_remaining"] * config.MOMENTUM_TRIM_FRACTION)))
     trim_qty_target = min(trim_qty_target, position["contracts_remaining"])
-    limit_price = client.get_option_mid_price(position["expiry"], position["strike"], "C", trading_class=None, symbol=ticker)
-    if limit_price is None:
-        return False
-    trade = client.sell_to_close(
-        position["expiry"], position["strike"], "C", trim_qty_target, limit_price,
-        trading_class=None, symbol=ticker,
+    trade = _place_with_nudge_retry(
+        client, "SELL", position["expiry"], position["strike"], ticker, trim_qty_target,
     )
-    trade = client.wait_for_fill(trade)
+    if trade is None:
+        return False
     filled = trade.orderStatus.filled
     if filled <= 0:
         send(f"*Momentum Trader* - *{ticker}* *{position['strike']:.0f}C*: trim attempt ({reason}) did not "

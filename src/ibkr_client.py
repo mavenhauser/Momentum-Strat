@@ -80,9 +80,9 @@ class IBKRClient:
         self.ib.sleep(2)
         return ticker
 
-    def get_option_mid_price(self, expiry, strike, right, trading_class=None, symbol=None):
-        """Live mid-of-bid-ask for one option contract, from THIS broker's
-        own market data - not any other data source. Momentum Strat
+    def get_option_bid_ask(self, expiry, strike, right, trading_class=None, symbol=None):
+        """Live (bid, ask) for one option contract, from THIS broker's own
+        market data - not any other data source. Momentum Strat
         (2026-09-03) prices every order's limit off this: contract
         selection stays on TastyTrade's greeks/volume/OI data, but
         execution happens on IBKR, so the execution price should reference
@@ -90,9 +90,9 @@ class IBKRClient:
         streaming quote for the same contract meaningfully stale vs.
         IBKR's (bid $27.50/ask $27.85 vs. IBKR's real $29.00/$30.45).
 
-        Returns None if bid/ask aren't both available (no live quote this
-        moment) - callers should fall back to something reasonable rather
-        than trust a missing/NaN price.
+        Returns (None, None) if bid/ask aren't both available (no live
+        quote this moment) - callers should fall back to something
+        reasonable rather than trust a missing/NaN price.
 
         Unlike get_option_quote() (used by the long-lived SPX Scalp
         process, which keeps its subscriptions open across a whole
@@ -107,6 +107,15 @@ class IBKRClient:
         bid, ask = ticker.bid, ticker.ask
         self.ib.cancelMktData(contract)
         if bid is None or ask is None or math.isnan(bid) or math.isnan(ask) or bid <= 0 or ask <= 0:
+            return None, None
+        return bid, ask
+
+    def get_option_mid_price(self, expiry, strike, right, trading_class=None, symbol=None):
+        """Live mid-of-bid-ask for one option contract - see
+        get_option_bid_ask's docstring for the full rationale. Returns
+        None if no live quote is available."""
+        bid, ask = self.get_option_bid_ask(expiry, strike, right, trading_class, symbol)
+        if bid is None:
             return None
         return (bid + ask) / 2
 
