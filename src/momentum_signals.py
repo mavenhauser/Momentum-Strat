@@ -14,6 +14,7 @@ Keeping the daily/intraday bar fetchers in one place (rather than
 duplicated per script) avoids exactly the backtest/live drift that this
 project's own dev docs flag repeatedly as a recurring failure mode.
 """
+import math
 import time
 from datetime import datetime, timedelta
 from datetime import time as dtime
@@ -221,18 +222,70 @@ def build_ema_context(daily_bars, period=8):
     return context
 
 
+def compute_realized_vol(daily_bars, lookback=20):
+    """Annualized realized (historical) volatility from the trailing
+    `lookback` daily closes - stdev of daily log returns x sqrt(252).
+
+    2026-09-09 IV-crush pre-trade filter: there's no historical IV data
+    anywhere in this pipeline (TastyTrade's DXLink is live-only, IBKR's
+    reqHistoricalData errors on option contracts - see the abandoned
+    Black-Scholes-modeling attempt in the tracker), so this stands in for
+    "the stock's own normal range" that a proper IV-percentile check
+    would use. Comparing a contract's live IV against this ratio flags
+    when IV is unusually rich relative to how much the stock has
+    actually been moving - exactly the setup for IV to crush even while
+    price keeps moving favorably (see config.py MOMENTUM_MAX_IV_HV_RATIO).
+    Returns None if there isn't enough history to compute it."""
+    if len(daily_bars) <= lookback:
+        return None
+    closes = [b.close for b in daily_bars[-(lookback + 1):]]
+    log_returns = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes)) if closes[i - 1] > 0]
+    if len(log_returns) < 2:
+        return None
+    mean_return = sum(log_returns) / len(log_returns)
+    variance = sum((r - mean_return) ** 2 for r in log_returns) / (len(log_returns) - 1)
+    return math.sqrt(variance) * math.sqrt(252)
+
+
 # ---- Variant H entry condition (long-only) ----------------------------------
 
-def _daily_breakout_flags(prev_day_high, premarket_high, regular_bars_so_far):
+def _bar_has_volume_expansion(bar, prior_bars, multiplier):
+    """True if `bar`'s volume is at least `multiplier`x the average of
+    `prior_bars` - "noticeably higher volume than the candles around it,"
+    the second half of a two-part breakout confirmation (close beyond the
+    level + volume expansion). With fewer than 3 prior bars there isn't
+    enough history to judge, so this doesn't block (defaults True) rather
+    than penalize the first checks of the day."""
+    if len(prior_bars) < 3:
+        return True
+    avg_volume = sum(b.volume for b in prior_bars) / len(prior_bars)
+    if avg_volume <= 0:
+        return True
+    return bar.volume > multiplier * avg_volume
+
+
+def _daily_breakout_flags(prev_day_high, premarket_high, regular_bars_so_far,
+                           require_volume_expansion=False, volume_multiplier=1.5):
     """Per-bar breakout flag, aligned with regular_bars_so_far. Each bar is
     checked against the running high strictly BEFORE it (never uses a bar's
-    own still-forming extreme) - same rule as the backtest engine."""
+    own still-forming extreme) - same rule as the backtest engine.
+
+    require_volume_expansion (2026-09-09, default off to keep
+    scripts/momentum_target_price_backtest.py's historical results
+    reproducible): if True, a bar only counts as a breakout when its own
+    volume also exceeds volume_multiplier x the average of the bars
+    before it today - a close beyond the level alone isn't enough, since
+    a close on thin volume is a known source of false breakouts that
+    don't hold."""
     flags = []
     today_high_before = None
-    for bar in regular_bars_so_far:
+    for i, bar in enumerate(regular_bars_so_far):
         close = bar.close
         if today_high_before is not None and premarket_high is not None:
-            flags.append(close > prev_day_high and close > premarket_high and close > today_high_before)
+            price_confirmed = close > prev_day_high and close > premarket_high and close > today_high_before
+            if price_confirmed and require_volume_expansion:
+                price_confirmed = _bar_has_volume_expansion(bar, regular_bars_so_far[:i], volume_multiplier)
+            flags.append(price_confirmed)
         else:
             flags.append(False)
         today_high_before = bar.high if today_high_before is None else max(today_high_before, bar.high)
@@ -240,7 +293,8 @@ def _daily_breakout_flags(prev_day_high, premarket_high, regular_bars_so_far):
 
 
 def check_variant_h_entry(prev_day_close, sma200, prev_day_high, premarket_high,
-                           regular_bars_so_far, lookback=6):
+                           regular_bars_so_far, lookback=6,
+                           require_volume_expansion=False, volume_multiplier=1.5):
     """Variant H's entry: SMA200 trend filter + triple-confirmed breakout
     (prior-day high, premarket high, fresh high-of-day), true if the
     condition fired on ANY of the trailing `lookback` regular-session bars
@@ -248,12 +302,19 @@ def check_variant_h_entry(prev_day_close, sma200, prev_day_high, premarket_high,
     this is what lets an hourly check hold up against G's continuous check
     (see docs/momentum_strategy_backtest_record.html, Variant H). Long-only:
     no short-side condition exists.
+
+    require_volume_expansion/volume_multiplier: see
+    _daily_breakout_flags() - defaults preserve the exact historical
+    behavior for scripts/momentum_target_price_backtest.py.
     """
     if prev_day_close is None or sma200 is None or prev_day_close <= sma200:
         return False
     if premarket_high is None or not regular_bars_so_far:
         return False
-    flags = _daily_breakout_flags(prev_day_high, premarket_high, regular_bars_so_far)
+    flags = _daily_breakout_flags(
+        prev_day_high, premarket_high, regular_bars_so_far,
+        require_volume_expansion, volume_multiplier,
+    )
     return any(flags[-lookback:])
 
 
@@ -318,13 +379,15 @@ def is_same_week(date_a, date_b):
 
 def trading_days_since(entry_date, as_of_date):
     """Count of US market business days from entry_date to as_of_date
-    (inclusive of as_of_date, exclusive of entry_date) - used by
-    scripts/momentum_target_price_backtest.py's 20-trading-day time exit
-    (removed from live code 2026-09-01, see config.py
-    MOMENTUM_TIME_EXIT_TRADING_DAYS). Uses pandas' federal holiday
-    calendar as an approximation of the market calendar (doesn't
-    special-case the handful of days that differ, e.g. Good Friday isn't
-    a federal holiday)."""
+    (inclusive of as_of_date, exclusive of entry_date). Used by
+    scripts/momentum_target_price_backtest.py's 20-trading-day time exit,
+    and again live as of 2026-09-09 for the progress-based time stop
+    (config.py MOMENTUM_PROGRESS_CHECK_TRADING_DAYS) - a narrower,
+    conditional successor to the unconditional 20-day time exit removed
+    from live code on 2026-09-01. Uses pandas' federal holiday calendar
+    as an approximation of the market calendar (doesn't special-case the
+    handful of days that differ, e.g. Good Friday isn't a federal
+    holiday)."""
     if as_of_date <= entry_date:
         return 0
     return len(pd.bdate_range(entry_date, as_of_date, freq=US_BUSINESS_DAY)) - 1

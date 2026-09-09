@@ -58,12 +58,14 @@ from src.momentum_signals import (  # noqa: E402
     build_ema_context,
     check_undercut_and_rally,
     check_variant_h_entry,
+    compute_realized_vol,
     fetch_daily_bars,
     fetch_intraday_bars,
     find_swing_leg,
     is_same_week,
     r_multiple,
     split_session_bars,
+    trading_days_since,
 )
 from src.momentum_state import acquire_lock, load_state, release_lock, save_state  # noqa: E402
 from src.tastytrade_client import TastytradeClient  # noqa: E402
@@ -105,13 +107,16 @@ def scan_for_entry(ib, ticker):
     """Fetch daily+intraday bars for `ticker` and check Variant H's entry
     condition against today's regular-session bars so far. Returns
     (triggered: bool, current_price: float | None, target_price: float | None,
-    is_strong: bool).
+    is_strong: bool, realized_vol: float | None).
     target_price is the measured-move trim target, pivot-based (None if no
     confirmed prior swing leg is found within
     config.MOMENTUM_SWING_PIVOT_MAX_LOOKBACK_DAYS) - see find_swing_leg().
     is_strong (2026-09-01) flags a same-day undercut-and-rally of the prior
     day's low (see check_undercut_and_rally) alongside the normal trigger -
-    used by try_open_position() to also add the weekly-layer position."""
+    used by try_open_position() to also add the weekly-layer position.
+    realized_vol (2026-09-09) is the underlying's own trailing realized
+    volatility, used by try_open_position() as the IV-crush pre-trade
+    filter's baseline - see compute_realized_vol()."""
     contract = Stock(ticker, "SMART", "USD")
     ib.qualifyContracts(contract)
 
@@ -119,22 +124,24 @@ def scan_for_entry(ib, ticker):
     context = build_daily_context(daily_bars, sma_window=config.MOMENTUM_SMA_WINDOW)
     ctx = context.get(date.today())
     if ctx is None:
-        return False, None, None, False
+        return False, None, None, False, None
     prev_day_high, prev_day_low, prev_day_close, sma = ctx
 
     intraday_bars = fetch_intraday_bars(ib, contract, date.today(), date.today())
     premarket_bars, regular_bars = split_session_bars(intraday_bars)
     if not regular_bars:
-        return False, None, None, False
+        return False, None, None, False, None
     premarket_high = max((b.high for b in premarket_bars), default=None)
 
     triggered = check_variant_h_entry(
         prev_day_close, sma, prev_day_high, premarket_high, regular_bars,
         lookback=config.MOMENTUM_ENTRY_LOOKBACK_CANDLES,
+        require_volume_expansion=True, volume_multiplier=config.MOMENTUM_BREAKOUT_VOLUME_MULTIPLIER,
     )
     current_price = regular_bars[-1].close
     target_price = None
     is_strong = False
+    realized_vol = None
     if triggered:
         swing_high, swing_low = find_swing_leg(
             daily_bars, date.today(),
@@ -143,7 +150,8 @@ def scan_for_entry(ib, ticker):
         if swing_high is not None:
             target_price = current_price + (swing_high - swing_low)
         is_strong = check_undercut_and_rally(prev_day_low, regular_bars)
-    return triggered, current_price, target_price, is_strong
+        realized_vol = compute_realized_vol(daily_bars, config.MOMENTUM_REALIZED_VOL_LOOKBACK_DAYS)
+    return triggered, current_price, target_price, is_strong, realized_vol
 
 
 def cluster_open_count(state, cluster):
@@ -241,7 +249,7 @@ def _buy_lot(client, ticker, contract_info, contracts, current_price, target_pri
 
 
 def try_open_position(client, tt, ib, ticker, state, nlv, dry_run=False):
-    triggered, current_price, target_price, is_strong = scan_for_entry(ib, ticker)
+    triggered, current_price, target_price, is_strong, realized_vol = scan_for_entry(ib, ticker)
     if not triggered or current_price is None:
         return
 
@@ -254,6 +262,19 @@ def try_open_position(client, tt, ib, ticker, state, nlv, dry_run=False):
         send(f"*Momentum Trader* - *{ticker}*: entry signal fired but no contract cleared the "
              f"delta/volume/OI filters - skipped, no order placed.")
         return
+
+    # IV-crush pre-trade filter (2026-09-09): skip the PRIMARY entry if IV
+    # is unusually rich relative to the underlying's own realized vol -
+    # deliberately NOT applied to the weekly layer below, which is a bet
+    # ON a near-term IV move rather than exposure to be protected from.
+    iv = contract_info.get("iv")
+    if iv is not None and realized_vol is not None and realized_vol > 0:
+        iv_hv_ratio = iv / realized_vol
+        if iv_hv_ratio > config.MOMENTUM_MAX_IV_HV_RATIO:
+            send(f"*Momentum Trader* - *{ticker}*: entry signal fired but IV ({iv:.0%}) is {iv_hv_ratio:.1f}x "
+                 f"the {config.MOMENTUM_REALIZED_VOL_LOOKBACK_DAYS}-day realized vol ({realized_vol:.0%}) - "
+                 f"crush risk too high, skipped.")
+            return
 
     ask = contract_info["ask"]
     premium_budget = nlv * config.MOMENTUM_SIZING_PCT_NLV
@@ -459,11 +480,11 @@ def _trim_one_quarter(client, ticker, position, level, reason, dry_run=False):
 
 def manage_position(client, tt, ib, ticker, position, dry_run=False):
     """Evaluates the swing exit in priority order: stop -> catalyst
-    (theta-decay or expiry week) -> pending trim. No hold-duration time
-    exit as of 2026-09-01 (see config.MOMENTUM_TIME_EXIT_TRADING_DAYS) -
-    a position only closes via the stop, the catalyst rule, or running
-    out of size on the trim ladder. Returns True if the position is
-    still open afterward.
+    (theta-decay or expiry week) -> pending trim -> progress-based time
+    stop (2026-09-09, conditional on being underwater - not the
+    unconditional 20-day exit removed 2026-09-01, see
+    config.MOMENTUM_PROGRESS_CHECK_TRADING_DAYS). Returns True if the
+    position is still open afterward.
 
     2026-08-31 redesign: option premium is the PRIMARY basis for both stop
     and trim; the underlying is only ever a secondary filter/confirmation
@@ -602,6 +623,26 @@ def manage_position(client, tt, ib, ticker, position, dry_run=False):
                 return False
             if not filled_ok:
                 break  # this attempt didn't fill - don't stack more orders this cycle
+
+    # 4. Progress-based time stop (2026-09-09): close if the position
+    # hasn't reached MOMENTUM_PROGRESS_CHECK_MIN_R by
+    # MOMENTUM_PROGRESS_CHECK_TRADING_DAYS - "the date by which the trade
+    # should have worked; if it hasn't, the thesis has failed" (see
+    # config.py for the full rationale, prompted by PLTR/NVDA grinding
+    # for ~30 days without tripping the stop or the catalyst). Not gated
+    # by the EMA/LoD trend check the way the stop and catalyst are above
+    # - the point here is "nothing happened," not "something's actively
+    # breaking down." Doesn't apply to the weekly layer - it has its own
+    # short expiry-floor backstop and is too short-lived for this to mean
+    # anything.
+    if not is_weekly_layer and current_bid is not None:
+        days_held = trading_days_since(date.fromisoformat(position["entry_date"]), date.today())
+        if days_held >= config.MOMENTUM_PROGRESS_CHECK_TRADING_DAYS:
+            premium_r = r_multiple(position["entry_premium"], current_bid, config.MOMENTUM_R_PCT)
+            if premium_r < config.MOMENTUM_PROGRESS_CHECK_MIN_R:
+                if _close_full(client, ticker, position, f"no progress after {days_held} trading days", dry_run):
+                    return False
+                return True  # didn't fully fill - reassess fresh next cycle
 
     return True
 

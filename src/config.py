@@ -198,6 +198,18 @@ MOMENTUM_ENTRY_LOOKBACK_CANDLES = 6
 MOMENTUM_ENTRY_WINDOW_ET = (9, 45, 14, 0)  # (start_hour, start_min, end_hour, end_min)
 MOMENTUM_SMA_WINDOW = 200
 
+# Breakout volume confirmation (2026-09-09): a close beyond the breakout
+# level alone isn't required to be backed by real volume today - a
+# well-known source of false breakouts that don't hold. The triggering
+# bar's own volume must now also exceed MOMENTUM_BREAKOUT_VOLUME_MULTIPLIER
+# x the average of the bars before it that day (see
+# check_variant_h_entry/_bar_has_volume_expansion in momentum_signals.py).
+# 1.5x is a judgment call, not backtested - no historical intraday volume
+# data exists for these tickers before Aug/Sep 2025 (see the "Downside
+# stress test" section in the docs), so this can't be swept the way the
+# R:R trim threshold was.
+MOMENTUM_BREAKOUT_VOLUME_MULTIPLIER = 1.5
+
 # Exit (underlying-price terms, translated into option sell orders):
 # MOMENTUM_STOP_PCT/MOMENTUM_TRIM_R are kept only for
 # scripts/momentum_target_price_backtest.py, which already ran and whose
@@ -280,20 +292,40 @@ MOMENTUM_TRIM_LEVELS = [2.0, 5.0, 8.0]
 MOMENTUM_SWING_PIVOT_WIDTH = 3  # bars needed on each side to confirm a local high/low
 MOMENTUM_SWING_PIVOT_MAX_LOOKBACK_DAYS = 60
 
-# 2026-09-01: removed from live code. Originated in Variant A's backtest
-# ("close at 20 trading days") and was carried forward unchanged through
-# G and H - the option-primary redesign on 2026-08-31 deliberately left
-# it in place, but on review its rationale (calibrated to A/G/H's single
-# 2R-trim design) was never re-validated against the current 3-level
-# premium trim ladder, and the one backtest that removed a time exit
-# (Variant I) confounded it with also removing the trim entirely, so it
-# doesn't isolate the time exit's own contribution either way. Exits are
-# now purely stop / trim ladder / catalyst (theta>delta or expiry week) -
-# no hold-duration exit. Kept only for
+# 2026-09-01: removed from live code as an UNCONDITIONAL exit. Originated
+# in Variant A's backtest ("close at 20 trading days") and was carried
+# forward unchanged through G and H - the option-primary redesign on
+# 2026-08-31 deliberately left it in place, but on review its rationale
+# (calibrated to A/G/H's single 2R-trim design) was never re-validated
+# against the current 3-level premium trim ladder, and the one backtest
+# that removed a time exit (Variant I) confounded it with also removing
+# the trim entirely, so it doesn't isolate the time exit's own
+# contribution either way. Kept only for
 # scripts/momentum_target_price_backtest.py, which already ran and whose
 # results are recorded in the docs - not touching it keeps that backtest
-# reproducible.
+# reproducible. See MOMENTUM_PROGRESS_CHECK_TRADING_DAYS below for its
+# narrower, conditional successor in live code.
 MOMENTUM_TIME_EXIT_TRADING_DAYS = 20
+
+# Progress-based time stop (2026-09-09, playbook-inspired): close if the
+# position hasn't reached MOMENTUM_PROGRESS_CHECK_MIN_R by this many
+# trading days, regardless of the stop/catalyst gates below - "the date
+# by which the trade should have worked; if it hasn't, the thesis has
+# failed." Narrower than the removed unconditional 20-day time exit:
+# this only fires if the position is actually behind, not on a duration
+# cap alone. Motivated by PLTR/NVDA grinding for ~30 days without
+# hitting either the stop or the (now-gated) catalyst while still
+# meaningfully underwater - a gap neither of those rules was designed to
+# catch. Not gated by the EMA/LoD trend check (unlike the stop and
+# catalyst) - the point here is "nothing happened," not "something's
+# actively breaking down," so a trend confirmation doesn't apply the
+# same way. Doesn't apply to the weekly layer - it already has its own
+# short expiry-floor backstop and is too short-lived (2-9 DTE) for a
+# days-held check to mean anything. 15 days and breakeven are judgment
+# calls, not backtested - no historical option premium data exists to
+# validate either number against.
+MOMENTUM_PROGRESS_CHECK_TRADING_DAYS = 15
+MOMENTUM_PROGRESS_CHECK_MIN_R = 0.0  # breakeven on premium
 
 # "Catalyst" exit - user-specified concrete definition (2026-08-02),
 # replacing the doc's vaguer "no catalyst ahead" language: exit
@@ -317,6 +349,24 @@ MOMENTUM_MIN_OPEN_INTEREST = 1000
 # behavior) while guaranteeing at least a week of runway before the
 # contract enters its own expiry week and gets catalyst-closed.
 MOMENTUM_TARGET_DTE_MIN = 10  # calendar days out, nearest monthly OpEx
+
+# IV-crush pre-trade filter (2026-09-09): skips the PRIMARY entry if the
+# contract's IV is more than MOMENTUM_MAX_IV_HV_RATIO x the underlying's
+# own MOMENTUM_REALIZED_VOL_LOOKBACK_DAYS-day realized volatility -
+# elevated IV relative to how much the stock has actually been moving is
+# exactly the setup for IV to crush even while price keeps moving
+# favorably (the DELL pattern from the week of 2026-09-02: two positions
+# closed near breakeven/a loss despite the underlying running +15% over
+# 3 days). No historical option IV exists anywhere in this pipeline to
+# properly compute an IV percentile (see the abandoned Black-Scholes
+# modeling attempt in the tracker), so realized vol from daily bars
+# stands in for "the stock's own normal range." 2.0x and a 20-day
+# lookback are judgment calls, not backtested. Deliberately NOT applied
+# to the weekly layer (pick_weekly_contract) - that trade is explicitly
+# a bet ON a near-term IV move, so elevated IV isn't a red flag there,
+# it's the thesis.
+MOMENTUM_MAX_IV_HV_RATIO = 2.0
+MOMENTUM_REALIZED_VOL_LOOKBACK_DAYS = 20
 
 # Sizing: 2% of current IBKR paper account NLV spent as premium budget per
 # position (2026-08-02: corrected down from an initial 20%, which was a
