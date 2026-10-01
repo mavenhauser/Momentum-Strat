@@ -26,6 +26,7 @@ orMin       = input.int(5, "Opening range (minutes)", options = [1, 2, 5, 10, 15
 useOR       = input.bool(true, "Arm on opening-range break (ORH / ORL)", group = G_ENT)
 usePM       = input.bool(true, "Arm on premarket break (PMH / PML)", group = G_ENT)
 usePD       = input.bool(true, "Arm on prior-day break (PDH / PDL)", group = G_ENT)
+usePW       = input.bool(true, "Arm on prior-week break (PWH / PWL)", group = G_ENT)
 trendFilter = input.string("Clean trend", "Trend filter at entry", options = ["Clean trend", "8 > 21 only", "Off"], group = G_ENT, tooltip = "Clean trend = 8 > 21 > 50 (reverse for shorts) with enough spread and slope - same definition as DTS 2.")
 minSpread   = input.float(0.10, "Clean trend: min 8/21 spread (x ATR)", minval = 0, step = 0.05, group = G_ENT)
 minSlope    = input.float(0.05, "Clean trend: min 21 EMA slope over 3 bars (x ATR)", minval = 0, step = 0.01, group = G_ENT)
@@ -43,6 +44,11 @@ rr         = input.float(2.0, "Target (R multiple)", minval = 0.5, step = 0.5, g
 trailSrc   = input.string("8 EMA", "After target, exit on close through", options = ["8 EMA", "21 EMA"], group = G_RISK)
 eodExit    = input.bool(true, "Flat by 15:55 New York", group = G_RISK)
 
+G_BAN = "A+ setup banner"
+showBanner = input.bool(true, "Show setup banner", group = G_BAN, tooltip = "OUTSIDE LONG = price above PDH and PMH (OUTSIDE SHORT = below PDL and PML). Grade adds one point each for: clean trend, right side of VWAP, beyond the opening range, beyond the prior-week level. 4 = A+, 3 = A, 2 = B, else C.")
+banPos     = input.string("Top center", "Banner position", options = ["Top left", "Top center", "Top right", "Bottom center"], group = G_BAN)
+banAlert   = input.bool(true, "alert() when an A+ OUTSIDE setup appears", group = G_BAN)
+
 G_UI = "Panel"
 showPanel = input.bool(true, "Setup checklist panel", group = G_UI)
 panelPos  = input.string("Bottom right", "Position", options = ["Top left", "Top right", "Bottom left", "Bottom right"], group = G_UI)
@@ -53,10 +59,13 @@ C_BEAR = #FF1744
 C_OR   = #FFEB3B
 C_WARN = #FFC107
 C_DIM  = #787B86
+C_ORG  = #FF9800
 
 f_pos(string s) =>
     switch s
         "Top left"    => position.top_left
+        "Top center"  => position.top_center
+        "Bottom center" => position.bottom_center
         "Top right"   => position.top_right
         "Bottom left" => position.bottom_left
         => position.bottom_right
@@ -95,6 +104,8 @@ f_levels() =>
     [pdh, pdl, pmh, pml]
 
 [pdh, pdl, pmh, pml] = request.security(ticker.modify(syminfo.tickerid, session.extended), timeframe.period, f_levels())
+// Prior completed week (non-repainting: [1] with lookahead on).
+[pwh, pwl] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead = barmerge.lookahead_on)
 
 chartNewDay = nz(ta.change(dayofmonth)) != 0
 rth = session.ismarket
@@ -135,12 +146,16 @@ xuPM = ta.crossover(close, pmh)
 xdPM = ta.crossunder(close, pml)
 xuPD = ta.crossover(close, pdh)
 xdPD = ta.crossunder(close, pdl)
+xuPW = ta.crossover(close, pwh)
+xdPW = ta.crossunder(close, pwl)
 brkORH = rth and orDone and xuOR
 brkORL = rth and orDone and xdOR
 brkPMH = rth and xuPM
 brkPML = rth and xdPM
 brkPDH = rth and xuPD
 brkPDL = rth and xdPD
+brkPWH = rth and xuPW
+brkPWL = rth and xdPW
 
 // ---------------------------------------------------------------- Trade state
 allowLong  = direction != "Short only"
@@ -249,6 +264,9 @@ if usePM and brkPMH and (na(upLvl) or pmh > upLvl)
 if usePD and brkPDH and (na(upLvl) or pdh > upLvl)
     upLvl := pdh
     upName := "PDH"
+if usePW and brkPWH and (na(upLvl) or pwh > upLvl)
+    upLvl := pwh
+    upName := "PWH"
 if allowLong and not na(upLvl) and close > e8 and e8 > e21
     lArmed  := true
     lLvl    := upLvl
@@ -268,6 +286,9 @@ if usePM and brkPML and (na(dnLvl) or pml < dnLvl)
 if usePD and brkPDL and (na(dnLvl) or pdl < dnLvl)
     dnLvl := pdl
     dnName := "PDL"
+if usePW and brkPWL and (na(dnLvl) or pwl < dnLvl)
+    dnLvl := pwl
+    dnName := "PWL"
 if allowShort and not na(dnLvl) and close < e8 and e8 < e21
     sArmed  := true
     sLvl    := dnLvl
@@ -349,8 +370,8 @@ alertcondition((retestNowL and allowLong or retestNowS and allowShort) and pos =
 var table panel = table.new(f_pos(panelPos), 2, 7, bgcolor = color.new(#000000, 15), border_color = color.new(#2A2E39, 0), border_width = 1, frame_color = color.new(#2A2E39, 0), frame_width = 1)
 if showPanel and barstate.islast
     ts = f_size(txtSize)
-    lStat = pos == 1 ? "IN LONG" : not allowLong ? "off" : not lArmed ? "wait for ORH/PMH/PDH break" : not lRetest ? "armed " + lName + " " + fmt(lLvl) + " → wait retest" : "retest ✓ → wait close > 8 EMA"
-    sStat = pos == -1 ? "IN SHORT" : not allowShort ? "off" : not sArmed ? "wait for ORL/PML/PDL break" : not sRetest ? "armed " + sName + " " + fmt(sLvl) + " → wait retest" : "retest ✓ → wait close < 8 EMA"
+    lStat = pos == 1 ? "IN LONG" : not allowLong ? "off" : not lArmed ? "wait for ORH/PMH/PDH/PWH break" : not lRetest ? "armed " + lName + " " + fmt(lLvl) + " → wait retest" : "retest ✓ → wait close > 8 EMA"
+    sStat = pos == -1 ? "IN SHORT" : not allowShort ? "off" : not sArmed ? "wait for ORL/PML/PDL/PWL break" : not sRetest ? "armed " + sName + " " + fmt(sLvl) + " → wait retest" : "retest ✓ → wait close < 8 EMA"
     trTxt = trend == 1 ? "CLEAN UPTREND" : trend == -1 ? "CLEAN DOWNTREND" : "CHOP - stand aside"
     tradeTxt = pos != 0 ? "E " + fmt(entPx) + "  S " + fmt(stpPx) + "  T " + fmt(tgtPx) : "flat (" + str.tostring(tradesToday) + "/" + str.tostring(maxTrades) + " today)"
     table.cell(panel, 0, 0, "Day Trading Setup", text_color = color.white, text_size = ts, text_halign = text.align_left)
@@ -367,3 +388,35 @@ if showPanel and barstate.islast
     table.cell(panel, 1, 5, sStat, text_color = sRetest or pos == -1 ? C_BEAR : color.white, text_size = ts, text_halign = text.align_left)
     table.cell(panel, 0, 6, "Trade", text_color = color.white, text_size = ts, text_halign = text.align_left)
     table.cell(panel, 1, 6, tradeTxt, text_color = color.white, text_size = ts, text_halign = text.align_left)
+
+// ---------------------------------------------------------------- A+ setup banner
+// OUTSIDE LONG: price above both PDH and PMH (outside yesterday's range and the
+// premarket range). Grade = how many of the 4 confirmations line up.
+outLong  = not na(pdh) and close > pdh and (na(pmh) or close > pmh)
+outShort = not na(pdl) and close < pdl and (na(pml) or close < pml)
+ptsL = (trend == 1 ? 1 : 0) + (close > vwapV ? 1 : 0) + (not na(orh) and orDone and close > orh ? 1 : 0) + (not na(pwh) and close > pwh ? 1 : 0)
+ptsS = (trend == -1 ? 1 : 0) + (close < vwapV ? 1 : 0) + (not na(orl) and orDone and close < orl ? 1 : 0) + (not na(pwl) and close < pwl ? 1 : 0)
+f_grade(int pts) => pts >= 4 ? "A+" : pts == 3 ? "A" : pts == 2 ? "B" : "C"
+aPlusL = rth and outLong and ptsL >= 4
+aPlusS = rth and outShort and ptsS >= 4
+aPlusNew = (aPlusL and not aPlusL[1]) or (aPlusS and not aPlusS[1])
+if banAlert and aPlusNew and barstate.isconfirmed
+    alert("DTS: A+ OUTSIDE " + (aPlusL ? "LONG " : "SHORT ") + syminfo.ticker + " @ " + fmt(close) + " - watch for the 8 EMA retest entry", alert.freq_once_per_bar_close)
+alertcondition(aPlusL or aPlusS, "A+ outside setup", "DTS {{ticker}}: A+ OUTSIDE setup @ {{close}}")
+
+var table banner = table.new(f_pos(banPos), 1, 2, bgcolor = color.new(#000000, 100), frame_color = color.new(#2A2E39, 0), frame_width = 1)
+if showBanner and barstate.islast
+    // Session clock (New York): phase + % of the regular session elapsed.
+    t = math.min(timenow, time_close)
+    m = hour(t, NY) * 60 + minute(t, NY)
+    pct = math.max(0.0, math.min(100.0, (m - 570) / 390.0 * 100))
+    phase = m < 570 ? "PREMARKET" : m < 600 ? "OPENING RANGE" : m < 690 ? "PRIME TIME" : m < 840 ? "MIDDAY - CAUTION" : m < 900 ? "AFTERNOON" : m < 960 ? "POWER HOUR" : "CLOSED"
+    phCol = m < 570 or m >= 960 ? C_DIM : m < 600 ? C_ORG : m < 690 ? C_BULL : m < 840 ? C_ORG : m < 900 ? C_WARN : C_BULL
+    n = math.round(pct / 10)
+    sessBar = str.repeat("▰", n) + str.repeat("▱", 10 - n)
+    grade = outLong ? f_grade(ptsL) : outShort ? f_grade(ptsS) : ""
+    head = outLong ? grade + " OUTSIDE LONG" : outShort ? grade + " OUTSIDE SHORT" : "INSIDE RANGE - NO EDGE"
+    isTop = grade == "A+" or grade == "A"
+    bg = outLong and isTop ? color.new(#00C853, 0) : outShort and isTop ? color.new(#D50000, 0) : outLong or outShort ? color.new(C_WARN, 0) : color.new(#434651, 0)
+    table.cell(banner, 0, 0, head, text_color = color.white, bgcolor = bg, text_size = size.large, width = 22)
+    table.cell(banner, 0, 1, sessBar + "  " + phase + "  " + str.tostring(math.round(pct)) + "%", text_color = phCol, bgcolor = color.new(#131722, 0), text_size = size.small, width = 22)

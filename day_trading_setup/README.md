@@ -20,6 +20,7 @@ TradingView layout name: **Day Trading Set up**
 | 4 | VWAP | Built-in *VWAP* |
 | 5 | VRVP | Built-in *Visible Range Volume Profile* |
 | 6 | Pivots | Built-in *Pivot Points Standard* (Traditional, daily) |
+| – | Volume | Built-in *Volume* (its own pane, as in the reference chart) |
 | 7 | **DTS 1 - Strongest Stocks** | [`pine/dts_1_strongest_stocks.pine`](pine/dts_1_strongest_stocks.pine) |
 | 8 | **DTS 2 - Trend & Breakouts** | [`pine/dts_2_trend_and_breakouts.pine`](pine/dts_2_trend_and_breakouts.pine) |
 | 9 | **DTS 3 - Entry Signals** | [`pine/dts_3_entry_signals.pine`](pine/dts_3_entry_signals.pine) |
@@ -67,20 +68,26 @@ single chart alert covers all 20 tickers.
     extended hours hidden.
   - ORH / ORL: opening-range high and low, yellow lines. The range is the
     first 5 minutes by default.
-  - Each level has a price tag at the right edge.
-- **Breakout markers:** ▲ `ORH` / `PMH` / `PDH` and ▼ `ORL` / `PML` / `PDL`.
+  - PWH / PWL: prior-week high and low, thick teal/red lines.
+  - Each level gets a filled flag tag at the right edge (`PDH`, `PMH`,
+    `PWH`…). Hover a tag to see its price, or switch the tag setting to
+    "Name + price".
+- **Market structure:** confirmed swings are labelled **HH / LH / HL / LL**.
+  When a close breaks the last swing high (or low), a dotted line marks it
+  with **BOS** (break of structure). Swing strength is 3 bars by default.
+- **Breakout markers:** ▲ `ORH` / `PMH` / `PDH` / `PWH` and ▼ `ORL` / `PML` / `PDL` / `PWL`.
   They're **bright in a clean trend and gray in chop**, which tells you to
   skip the break. The option "Only mark breakouts in a clean trend" hides
   the gray ones.
-- **Alerts:** *Clean-trend breakout up*, *Clean-trend breakdown*, and
-  *Trend turns clean*.
+- **Alerts:** *Clean-trend breakout up*, *Clean-trend breakdown*,
+  *Trend turns clean*, *BOS up* and *BOS down*.
 
 ## DTS 3 - Entry Signals (EMA + level retest)
 
 Long rules (shorts are the mirror image):
 
 1. **Breakout (arm).** In the regular session, a candle closes above
-   **ORH** (after the opening range is done), **PMH** or **PDH**, with
+   **ORH** (after the opening range is done), **PMH**, **PDH** or **PWH**, with
    close > 8 EMA > 21 EMA. If several levels break on the same bar, the
    highest is used.
 2. **Disarm.** The setup is cancelled by a close below the 21 EMA, or a
@@ -105,6 +112,30 @@ Long rules (shorts are the mirror image):
    - **Target** = 2R. When it's hit, the stop moves to break-even and the
      rest exits on a close below the 8 EMA.
    - All trades are flat by 15:55.
+
+**A+ setup banner** (top center), like the "A+ OUTSIDE LONG" bar:
+
+- **Top line:**
+  - **OUTSIDE LONG** when price is above both PDH and PMH.
+  - **OUTSIDE SHORT** when price is below both PDL and PML.
+  - Otherwise **INSIDE RANGE - NO EDGE**.
+- **Grade:** one point each for a clean trend, the right side of VWAP,
+  being beyond the opening range, and being beyond the prior-week high (or
+  low).
+  - 4 points = **A+**, 3 = **A**, 2 = **B**, 0–1 = **C**.
+  - The banner is green for an A/A+ long, red for an A/A+ short, amber for
+    a B/C grade, and gray when price is inside the range.
+- **Second line:** a progress bar showing how much of the regular session
+  has passed, plus the session phase:
+  - OPENING RANGE (9:30–10:00)
+  - PRIME TIME (10:00–11:30)
+  - MIDDAY - CAUTION (11:30–14:00)
+  - AFTERNOON (14:00–15:00)
+  - POWER HOUR (15:00–16:00)
+
+  For example: `▰▰▰▰▱▱▱▱▱▱  MIDDAY - CAUTION  36%`.
+- **Alert:** fires when a new A+ OUTSIDE setup appears. That's the cue to
+  watch for the 8 EMA retest entry.
 
 What it draws:
 
