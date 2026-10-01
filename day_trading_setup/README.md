@@ -35,10 +35,29 @@ rules, so keep their EMA length inputs equal to your built-in EMAs.
 
 ## DTS 1 - Strongest Stocks (screener table)
 
-The table covers up to 20 tickers, which you can edit in the settings. The
-defaults are this repo's momentum universe (NVDA, AMD, AVGO, MU, DELL, TSLA,
-PLTR, MSFT, AAPL, GOOGL) plus META, AMZN, NFLX, ORCL, CRM, QCOM, INTC, ADBE,
-SPY and QQQ.
+The table tracks up to 20 tickers. To change the list, open the indicator
+settings and go to **Tickers**:
+
+- **Ticker list** has presets:
+  - Momentum universe
+  - Mega-cap tech (the list from the reference screenshot)
+  - Semiconductors
+  - High beta / momentum
+  - Index ETFs + sectors
+- **Custom list** is a text box. Paste or type any tickers, separated by
+  commas, spaces or new lines, for example `NVDA, AMD, CRDO, PLTR`.
+  - Exchange prefixes are optional; use one (`NYSE:DELL`) only when a ticker
+    is ambiguous.
+  - Duplicates are ignored, and anything past 20 is dropped.
+  - A ticker TradingView can't find shows as `invalid` in its row.
+- The default custom list is this repo's momentum universe plus META, AMZN,
+  NFLX, ORCL, CRM, QCOM, INTC, ADBE, SPY and QQQ.
+- The row for the ticker currently on the chart is highlighted in blue.
+
+Pine can't read your TradingView watchlist, and it can't discover the
+market's top gainers by itself. For discovery, use TradingView's Stock
+Screener (for example, sorted by premarket % change) and paste the top names
+into the custom list.
 
 | Column | Meaning |
 |---|---|
@@ -197,8 +216,9 @@ plan supports them.
 
 ## Limitations
 
-- **Request limit:** DTS 1 uses 20 `request.security` calls, which is under
-  TradingView's limit of 40. If it loads slowly on a 1-minute chart, set its
+- **Request limit:** DTS 1 makes one request per ticker, so at most 20,
+  which is under TradingView's limit of 40. `MAX_T` in the script can be
+  raised to 40. If it loads slowly on a 1-minute chart, set its
   timeframe to 5.
 - **Charts:** built for intraday charts (1–15 min) on US stocks. PMH/PML
   stay blank on symbols that have no premarket session.
