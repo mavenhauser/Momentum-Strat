@@ -1,0 +1,171 @@
+//@version=6
+// Day Trading Setup 2/3 - Trend & Breakouts.
+//
+// Entry confirmation with trend: colors clean trends vs chop (8/21 ribbon +
+// bar colors), draws the key levels (PDH / PDL / PMH / PML / opening range)
+// and marks breakouts at those levels - bright in a clean trend, gray in
+// chop - so you only focus on the high-probability moves.
+//
+// Does NOT draw the EMA lines, VWAP or pivots: use TradingView's built-in
+// EMA (8 / 21 / 50), VWAP and Pivot Points Standard for those. Keep the EMA
+// lengths below equal to the built-in EMAs on your chart.
+//
+// Part of day_trading_setup/ (see ../README.md).
+indicator("DTS 2 - Trend & Breakouts", shorttitle = "DTS Trend", overlay = true, max_labels_count = 50)
+
+G_TR = "Trend vs chop"
+fastLen   = input.int(8, "EMA fast", minval = 1, group = G_TR, inline = "ema")
+midLen    = input.int(21, "mid", minval = 1, group = G_TR, inline = "ema")
+slowLen   = input.int(50, "slow", minval = 1, group = G_TR, inline = "ema")
+minSpread = input.float(0.10, "Min 8/21 EMA spread (x ATR)", minval = 0, step = 0.05, group = G_TR, tooltip = "The 8 and 21 EMAs must be at least this far apart (in ATR) for the trend to count as clean. Smaller = more bars count as trend.")
+minSlope  = input.float(0.05, "Min 21 EMA slope over 3 bars (x ATR)", minval = 0, step = 0.01, group = G_TR)
+showRib   = input.bool(true, "Trend ribbon between 8 and 21 EMA", group = G_TR)
+barMode   = input.string("Trend colors", "Bar coloring", options = ["Trend colors", "Dim chop only", "Off"], group = G_TR)
+
+G_LVL = "Key levels"
+showLevels = input.bool(true, "Show PDH / PDL / PMH / PML", group = G_LVL)
+orMin      = input.int(5, "Opening range (minutes)", options = [1, 2, 5, 10, 15, 30], group = G_LVL)
+showOR     = input.bool(true, "Show opening range high / low", group = G_LVL)
+showBrk    = input.bool(true, "Mark key-level breakouts", group = G_LVL)
+cleanOnly  = input.bool(false, "Only mark breakouts in a clean trend", group = G_LVL)
+
+C_BULL = #00E676
+C_BEAR = #FF1744
+C_CHOP = #7E57C2
+C_OR   = #FFEB3B
+C_DIM  = #787B86
+
+fmt(float x) => na(x) ? "–" : str.tostring(x, format.mintick)
+
+// Runs on the EXTENDED-hours version of the symbol so premarket levels exist
+// even on a regular-hours chart. PDH/PDL = prior REGULAR session high/low.
+f_levels() =>
+    var float pdh  = na
+    var float pdl  = na
+    var float rthH = na
+    var float rthL = na
+    var float pmh  = na
+    var float pml  = na
+    newDay = nz(ta.change(dayofmonth)) != 0
+    if newDay
+        if not na(rthH)
+            pdh := rthH
+            pdl := rthL
+        rthH := na
+        rthL := na
+        pmh  := na
+        pml  := na
+    if session.ispremarket
+        pmh := na(pmh) ? high : math.max(pmh, high)
+        pml := na(pml) ? low : math.min(pml, low)
+    if session.ismarket
+        rthH := na(rthH) ? high : math.max(rthH, high)
+        rthL := na(rthL) ? low : math.min(rthL, low)
+    [pdh, pdl, pmh, pml]
+
+[pdh, pdl, pmh, pml] = request.security(ticker.modify(syminfo.tickerid, session.extended), timeframe.period, f_levels())
+
+chartNewDay = nz(ta.change(dayofmonth)) != 0
+rth = session.ismarket
+
+// Opening range: first `orMin` minutes of the regular session.
+var float orh = na
+var float orl = na
+var int orStart = na
+if chartNewDay
+    orh := na
+    orl := na
+    orStart := na
+rthOpen = rth and (not session.ismarket[1] or chartNewDay)
+if rthOpen
+    orStart := time
+    orh := high
+    orl := low
+else if rth and not na(orStart) and time < orStart + orMin * 60000
+    orh := math.max(orh, high)
+    orl := math.min(orl, low)
+orDone = not na(orStart) and time_close >= orStart + orMin * 60000
+
+// ---------------------------------------------------------------- Trend state
+e8  = ta.ema(close, fastLen)
+e21 = ta.ema(close, midLen)
+e50 = ta.ema(close, slowLen)
+atr = ta.atr(14)
+
+bullStack = e8 > e21 and e21 > e50
+bearStack = e8 < e21 and e21 < e50
+spreadOk  = math.abs(e8 - e21) >= minSpread * atr
+slope21   = e21 - e21[3]
+// 1 = clean uptrend, -1 = clean downtrend, 0 = chop
+trend = bullStack and spreadOk and slope21 >= minSlope * atr ? 1 : bearStack and spreadOk and slope21 <= -minSlope * atr ? -1 : 0
+trendCol = trend == 1 ? C_BULL : trend == -1 ? C_BEAR : C_CHOP
+
+// Invisible EMA plots, only used to anchor the ribbon fill.
+p8  = plot(e8, "EMA fast (ribbon edge)", color = color(na), display = display.none)
+p21 = plot(e21, "EMA mid (ribbon edge)", color = color(na), display = display.none)
+fill(p8, p21, color = not showRib ? color(na) : trend == 1 ? color.new(C_BULL, 55) : trend == -1 ? color.new(C_BEAR, 55) : color.new(C_CHOP, 75), title = "Trend ribbon")
+
+barcolor(barMode == "Off" ? color(na) : trend == 0 ? C_DIM : barMode == "Trend colors" ? trendCol : color(na), title = "Trend / chop bars")
+
+// ---------------------------------------------------------------- Level plots
+lv(float x, bool on) => on and not chartNewDay ? x : na
+plot(lv(pdh, showLevels), "PDH", color = C_BULL, style = plot.style_linebr)
+plot(lv(pdl, showLevels), "PDL", color = C_BEAR, style = plot.style_linebr)
+plot(lv(pmh, showLevels), "PMH", color = color.new(C_BULL, 20), style = plot.style_circles, linewidth = 1)
+plot(lv(pml, showLevels), "PML", color = color.new(C_BEAR, 20), style = plot.style_circles, linewidth = 1)
+plot(lv(orh, showOR), "ORH", color = color.new(C_OR, 20), style = plot.style_linebr)
+plot(lv(orl, showOR), "ORL", color = color.new(C_OR, 20), style = plot.style_linebr)
+
+// Right-edge price tags for today's levels.
+f_tag(array<label> arr, float y, string name, color col) =>
+    if not na(y)
+        lb = label.new(bar_index + 2, y, name + " " + fmt(y), style = label.style_label_left, color = color.new(color.black, 100), textcolor = col, size = size.small)
+        array.push(arr, lb)
+    true
+
+var array<label> tags = array.new<label>()
+if barstate.islast
+    for lb in tags
+        label.delete(lb)
+    array.clear(tags)
+    if showLevels
+        f_tag(tags, pdh, "PDH", C_BULL)
+        f_tag(tags, pdl, "PDL", C_BEAR)
+        f_tag(tags, pmh, "PMH", C_BULL)
+        f_tag(tags, pml, "PML", C_BEAR)
+    if showOR
+        f_tag(tags, orh, "ORH", C_OR)
+        f_tag(tags, orl, "ORL", C_OR)
+
+// ---------------------------------------------------------------- Breakouts
+// Crossings computed every bar (Pine v6 'and' is lazy, so never inside a condition).
+xuOR = ta.crossover(close, orh)
+xdOR = ta.crossunder(close, orl)
+xuPM = ta.crossover(close, pmh)
+xdPM = ta.crossunder(close, pml)
+xuPD = ta.crossover(close, pdh)
+xdPD = ta.crossunder(close, pdl)
+
+okUp = showBrk and rth and (not cleanOnly or trend == 1)
+okDn = showBrk and rth and (not cleanOnly or trend == -1)
+brkORH = okUp and orDone and xuOR
+brkORL = okDn and orDone and xdOR
+brkPMH = okUp and xuPM
+brkPML = okDn and xdPM
+brkPDH = okUp and xuPD
+brkPDL = okDn and xdPD
+
+upCol = trend == 1 ? C_BULL : C_DIM
+dnCol = trend == -1 ? C_BEAR : C_DIM
+plotshape(brkORH, "ORH break", shape.triangleup, location.belowbar, upCol, text = "ORH", textcolor = upCol, size = size.tiny)
+plotshape(brkPMH, "PMH break", shape.triangleup, location.belowbar, upCol, text = "PMH", textcolor = upCol, size = size.tiny)
+plotshape(brkPDH, "PDH break", shape.triangleup, location.belowbar, upCol, text = "PDH", textcolor = upCol, size = size.tiny)
+plotshape(brkORL, "ORL break", shape.triangledown, location.abovebar, dnCol, text = "ORL", textcolor = dnCol, size = size.tiny)
+plotshape(brkPML, "PML break", shape.triangledown, location.abovebar, dnCol, text = "PML", textcolor = dnCol, size = size.tiny)
+plotshape(brkPDL, "PDL break", shape.triangledown, location.abovebar, dnCol, text = "PDL", textcolor = dnCol, size = size.tiny)
+
+cleanUpBreak = (brkORH or brkPMH or brkPDH) and trend == 1
+cleanDnBreak = (brkORL or brkPML or brkPDL) and trend == -1
+alertcondition(cleanUpBreak, "Clean-trend breakout up", "DTS {{ticker}}: key level breakout UP in a clean uptrend @ {{close}}")
+alertcondition(cleanDnBreak, "Clean-trend breakdown", "DTS {{ticker}}: key level breakdown in a clean downtrend @ {{close}}")
+alertcondition(trend != trend[1] and trend != 0, "Trend turns clean", "DTS {{ticker}}: trend turned clean @ {{close}}")

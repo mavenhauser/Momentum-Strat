@@ -1,0 +1,211 @@
+//@version=6
+// Day Trading Setup 1/3 - Strongest Stocks screener.
+//
+// Table of up to 20 tickers: price, day volume, % change and where price sits
+// versus PDH / PDL (prior regular-session high/low) and PMH / PML (premarket
+// high/low), with a trend column: ▲ above PDH + PMH, ▼ below PDL + PML,
+// ⚠ in between. Sorted strongest first. Alerts when a ticker flips ▲ / ▼.
+//
+// Part of day_trading_setup/ (see ../README.md). Use alongside
+// 2/3 Trend & Breakouts and 3/3 Entry Signals.
+indicator("DTS 1 - Strongest Stocks", shorttitle = "DTS Screener", overlay = true)
+
+G_SCR = "Screener"
+scrPos    = input.string("Top right", "Position", options = ["Top left", "Top right", "Bottom left", "Bottom right"], group = G_SCR)
+txtSize   = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal"], group = G_SCR)
+scrRows   = input.int(20, "Rows to show", minval = 1, maxval = 20, group = G_SCR)
+scrSort   = input.string("Strength", "Sort by", options = ["Strength", "% change", "Input order"], group = G_SCR, tooltip = "Strength = trend column first (above PDH+PMH, then mixed, then below PDL+PML), then % change.")
+scrTf     = input.timeframe("", "Timeframe (blank = chart)", group = G_SCR, tooltip = "Must be intraday. Set to 5 to speed up loading on a 1-minute chart.")
+scrAlerts = input.bool(true, "alert() when a ticker flips to ▲ / ▼", group = G_SCR)
+
+G_SYM = "Tickers"
+s1  = input.symbol("NASDAQ:NVDA", "", group = G_SYM, inline = "r1")
+s2  = input.symbol("NASDAQ:AMD", "", group = G_SYM, inline = "r1")
+s3  = input.symbol("NASDAQ:AVGO", "", group = G_SYM, inline = "r2")
+s4  = input.symbol("NASDAQ:MU", "", group = G_SYM, inline = "r2")
+s5  = input.symbol("NYSE:DELL", "", group = G_SYM, inline = "r3")
+s6  = input.symbol("NASDAQ:TSLA", "", group = G_SYM, inline = "r3")
+s7  = input.symbol("NASDAQ:PLTR", "", group = G_SYM, inline = "r4")
+s8  = input.symbol("NASDAQ:MSFT", "", group = G_SYM, inline = "r4")
+s9  = input.symbol("NASDAQ:AAPL", "", group = G_SYM, inline = "r5")
+s10 = input.symbol("NASDAQ:GOOGL", "", group = G_SYM, inline = "r5")
+s11 = input.symbol("NASDAQ:META", "", group = G_SYM, inline = "r6")
+s12 = input.symbol("NASDAQ:AMZN", "", group = G_SYM, inline = "r6")
+s13 = input.symbol("NASDAQ:NFLX", "", group = G_SYM, inline = "r7")
+s14 = input.symbol("NYSE:ORCL", "", group = G_SYM, inline = "r7")
+s15 = input.symbol("NYSE:CRM", "", group = G_SYM, inline = "r8")
+s16 = input.symbol("NASDAQ:QCOM", "", group = G_SYM, inline = "r8")
+s17 = input.symbol("NASDAQ:INTC", "", group = G_SYM, inline = "r9")
+s18 = input.symbol("NASDAQ:ADBE", "", group = G_SYM, inline = "r9")
+s19 = input.symbol("AMEX:SPY", "", group = G_SYM, inline = "r10")
+s20 = input.symbol("NASDAQ:QQQ", "", group = G_SYM, inline = "r10")
+
+C_BULL = #00E676
+C_BEAR = #FF1744
+C_WARN = #FFC107
+C_DIM  = #787B86
+
+f_pos(string s) =>
+    switch s
+        "Top left"    => position.top_left
+        "Top right"   => position.top_right
+        "Bottom left" => position.bottom_left
+        => position.bottom_right
+
+f_size(string s) =>
+    switch s
+        "Tiny"   => size.tiny
+        "Normal" => size.normal
+        => size.small
+
+// Runs on the EXTENDED-hours version of each symbol so premarket levels exist.
+// Returns [close, dayVolume, priorClose, PDH, PDL, PMH, PML]; PDH/PDL/prior
+// close come from the prior REGULAR session (09:30-16:00).
+f_levels() =>
+    var float pdh  = na
+    var float pdl  = na
+    var float pdc  = na
+    var float rthH = na
+    var float rthL = na
+    var float rthC = na
+    var float pmh  = na
+    var float pml  = na
+    var float dVol = 0.0
+    newDay = nz(ta.change(dayofmonth)) != 0
+    if newDay
+        if not na(rthH)
+            pdh := rthH
+            pdl := rthL
+            pdc := rthC
+        rthH := na
+        rthL := na
+        rthC := na
+        pmh  := na
+        pml  := na
+        dVol := 0.0
+    dVol += nz(volume)
+    if session.ispremarket
+        pmh := na(pmh) ? high : math.max(pmh, high)
+        pml := na(pml) ? low : math.min(pml, low)
+    if session.ismarket
+        rthH := na(rthH) ? high : math.max(rthH, high)
+        rthL := na(rthL) ? low : math.min(rthL, low)
+        rthC := close
+    [close, dVol, pdc, pdh, pdl, pmh, pml]
+
+f_req(string sym) =>
+    request.security(ticker.modify(sym, session.extended), scrTf, f_levels(), ignore_invalid_symbol = true)
+
+[c1, v1, pc1, h1, l1, mh1, ml1] = f_req(s1)
+[c2, v2, pc2, h2, l2, mh2, ml2] = f_req(s2)
+[c3, v3, pc3, h3, l3, mh3, ml3] = f_req(s3)
+[c4, v4, pc4, h4, l4, mh4, ml4] = f_req(s4)
+[c5, v5, pc5, h5, l5, mh5, ml5] = f_req(s5)
+[c6, v6, pc6, h6, l6, mh6, ml6] = f_req(s6)
+[c7, v7, pc7, h7, l7, mh7, ml7] = f_req(s7)
+[c8, v8, pc8, h8, l8, mh8, ml8] = f_req(s8)
+[c9, v9, pc9, h9, l9, mh9, ml9] = f_req(s9)
+[c10, v10, pc10, h10, l10, mh10, ml10] = f_req(s10)
+[c11, v11, pc11, h11, l11, mh11, ml11] = f_req(s11)
+[c12, v12, pc12, h12, l12, mh12, ml12] = f_req(s12)
+[c13, v13, pc13, h13, l13, mh13, ml13] = f_req(s13)
+[c14, v14, pc14, h14, l14, mh14, ml14] = f_req(s14)
+[c15, v15, pc15, h15, l15, mh15, ml15] = f_req(s15)
+[c16, v16, pc16, h16, l16, mh16, ml16] = f_req(s16)
+[c17, v17, pc17, h17, l17, mh17, ml17] = f_req(s17)
+[c18, v18, pc18, h18, l18, mh18, ml18] = f_req(s18)
+[c19, v19, pc19, h19, l19, mh19, ml19] = f_req(s19)
+[c20, v20, pc20, h20, l20, mh20, ml20] = f_req(s20)
+
+// Level column: a dot once price is through the level, otherwise a bar
+// showing how far price has travelled across the range toward it.
+f_bar(float frac) =>
+    n = math.round(math.max(0.0, math.min(1.0, frac)) * 8)
+    str.repeat("█", n) + str.repeat("░", 8 - n)
+
+// side = 1 for a high-level column (PDH / PMH), -1 for a low-level column (PDL / PML).
+f_brk(float c, float hi, float lo, int side) =>
+    string txt = "–"
+    if not na(c) and not na(hi) and not na(lo) and hi > lo
+        if side == 1
+            txt := c > hi ? "●" : c >= lo ? f_bar((c - lo) / (hi - lo)) : ""
+        else
+            txt := c < lo ? "●" : c <= hi ? f_bar((hi - c) / (hi - lo)) : ""
+    txt
+
+// 1 = above PDH and PMH, -1 = below PDL and PML, 0 = in between.
+f_tr(float c, float hi, float lo, float pmHi, float pmLo) =>
+    up = c > hi and (na(pmHi) or c > pmHi)
+    dn = c < lo and (na(pmLo) or c < pmLo)
+    up ? 1 : dn ? -1 : 0
+
+f_vol(float v) =>
+    na(v) ? "–" : v >= 1e9 ? str.tostring(v / 1e9, "#.##") + "B" : v >= 1e6 ? str.tostring(v / 1e6, "#.##") + "M" : v >= 1e3 ? str.tostring(v / 1e3, "#.##") + "K" : str.tostring(v, "#")
+
+f_name(string s) =>
+    parts = str.split(s, ":")
+    "$" + array.get(parts, array.size(parts) - 1)
+
+var table scr = table.new(f_pos(scrPos), 9, 21, bgcolor = color.new(#000000, 0), border_color = color.new(#2A2E39, 0), border_width = 1, frame_color = color.new(#2A2E39, 0), frame_width = 1)
+var array<int> prevTr = array.new<int>(20, 0)
+var bool primed = false
+
+if barstate.islast
+    syms = array.from(s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17, s18, s19, s20)
+    cs   = array.from(c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, c19, c20)
+    vs   = array.from(v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20)
+    pcs  = array.from(pc1, pc2, pc3, pc4, pc5, pc6, pc7, pc8, pc9, pc10, pc11, pc12, pc13, pc14, pc15, pc16, pc17, pc18, pc19, pc20)
+    hs   = array.from(h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13, h14, h15, h16, h17, h18, h19, h20)
+    ls   = array.from(l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15, l16, l17, l18, l19, l20)
+    mhs  = array.from(mh1, mh2, mh3, mh4, mh5, mh6, mh7, mh8, mh9, mh10, mh11, mh12, mh13, mh14, mh15, mh16, mh17, mh18, mh19, mh20)
+    mls  = array.from(ml1, ml2, ml3, ml4, ml5, ml6, ml7, ml8, ml9, ml10, ml11, ml12, ml13, ml14, ml15, ml16, ml17, ml18, ml19, ml20)
+
+    pcts   = array.new<float>(20, na)
+    trs    = array.new<int>(20, 0)
+    scores = array.new<float>(20, 0.0)
+    order0 = array.new<int>()
+    for i = 0 to 19
+        c  = array.get(cs, i)
+        pc = array.get(pcs, i)
+        pct = na(c) or na(pc) or pc == 0 ? na : (c - pc) / pc * 100
+        tr = f_tr(c, array.get(hs, i), array.get(ls, i), array.get(mhs, i), array.get(mls, i))
+        array.set(pcts, i, pct)
+        array.set(trs, i, tr)
+        array.set(scores, i, scrSort == "% change" ? nz(pct, -1e9) : tr * 1000.0 + nz(pct, -999))
+        array.push(order0, i)
+
+    // Alert when a ticker flips into a level trend (bar close only).
+    if barstate.isconfirmed
+        if primed and scrAlerts
+            for i = 0 to 19
+                tr = array.get(trs, i)
+                if tr != array.get(prevTr, i) and tr != 0
+                    alert("DTS screener: " + f_name(array.get(syms, i)) + (tr == 1 ? " ▲ above PDH + PMH" : " ▼ below PDL + PML") + " @ " + str.tostring(array.get(cs, i), "#.##"), alert.freq_once_per_bar_close)
+        for i = 0 to 19
+            array.set(prevTr, i, array.get(trs, i))
+        primed := true
+
+    ts = f_size(txtSize)
+    idx = scrSort == "Input order" ? order0 : array.sort_indices(scores, order.descending)
+    hdr = array.from("Ticker", "Price", "Volume", "% Chg", "PDH Break", "PDL Break", "PMH Break", "PML Break", "Trend")
+    for col = 0 to 8
+        table.cell(scr, col, 0, array.get(hdr, col), text_color = color.white, bgcolor = color.new(#131722, 0), text_size = ts)
+    for r = 0 to scrRows - 1
+        i  = array.get(idx, r)
+        c  = array.get(cs, i)
+        hi = array.get(hs, i)
+        lo = array.get(ls, i)
+        mh = array.get(mhs, i)
+        ml = array.get(mls, i)
+        pct = array.get(pcts, i)
+        tr = array.get(trs, i)
+        row = r + 1
+        table.cell(scr, 0, row, f_name(array.get(syms, i)), text_color = color.white, text_size = ts, text_halign = text.align_left)
+        table.cell(scr, 1, row, na(c) ? "–" : str.tostring(c, "#.##"), text_color = color.white, text_size = ts)
+        table.cell(scr, 2, row, f_vol(array.get(vs, i)), text_color = color.white, text_size = ts)
+        table.cell(scr, 3, row, na(pct) ? "–" : str.tostring(pct, "#.##") + "%", text_color = na(pct) ? C_DIM : pct >= 0 ? C_BULL : C_BEAR, text_size = ts)
+        table.cell(scr, 4, row, f_brk(c, hi, lo, 1), text_color = C_BULL, text_size = ts)
+        table.cell(scr, 5, row, f_brk(c, hi, lo, -1), text_color = C_BEAR, text_size = ts)
+        table.cell(scr, 6, row, f_brk(c, mh, ml, 1), text_color = C_BULL, text_size = ts)
+        table.cell(scr, 7, row, f_brk(c, mh, ml, -1), text_color = C_BEAR, text_size = ts)
+        table.cell(scr, 8, row, tr == 1 ? "▲" : tr == -1 ? "▼" : "⚠", text_color = tr == 0 ? C_WARN : color.white, bgcolor = tr == 1 ? color.new(C_BULL, 10) : tr == -1 ? color.new(C_BEAR, 10) : na, text_size = ts)
