@@ -1,0 +1,621 @@
+//@version=6
+// Day Trading Setup - opening-range breakout (ORB) entries off the 8 EMA,
+// in the style of LE Trading Academy / Qullamaggie intraday breakouts.
+//
+// Separate project from Momentum Strategy Variant H (../../pine). This is an
+// alert-only indicator: it never places orders. See ../README.md for the
+// rules, the "Day Trading Set up" TradingView layout and alert setup.
+//
+// What it draws:
+//   1. Strongest-stocks screener table: price, day volume, % change and where
+//      price sits versus PDH / PDL / PMH / PML for up to 20 tickers, sorted
+//      strongest first, with a trend column (above PDH+PMH / below PDL+PML).
+//   2. Trend vs chop: 8/21/50 EMA ribbon + bar colors (green = clean uptrend,
+//      red = clean downtrend, purple/gray = chop), VWAP, floor pivots, and
+//      breakout markers at ORH/ORL, PMH/PML, PDH/PDL (bright in a clean
+//      trend, gray in chop).
+//   3. Entry engine: break of a key level -> retest of the 8 EMA or the
+//      broken level -> candle CLOSES back above (below) the 8 EMA, not
+//      extended -> LONG (SHORT) label with exact entry / stop / target, and
+//      an alert.
+indicator("Day Trading Setup", shorttitle = "DTS", overlay = true, max_labels_count = 500, max_lines_count = 500)
+
+NY = "America/New_York"
+
+// ---------------------------------------------------------------- Inputs
+G_EMA = "EMAs / VWAP / Pivots"
+fastLen  = input.int(8, "EMA fast", minval = 1, group = G_EMA, inline = "ema")
+midLen   = input.int(21, "mid", minval = 1, group = G_EMA, inline = "ema")
+slowLen  = input.int(50, "slow", minval = 1, group = G_EMA, inline = "ema")
+showVwap = input.bool(true, "VWAP", group = G_EMA)
+showPiv  = input.bool(true, "Floor pivots P / R1 / S1 (from prior regular session)", group = G_EMA)
+showPiv2 = input.bool(false, "Also R2 / S2", group = G_EMA)
+
+G_LVL = "Key levels"
+showLevels = input.bool(true, "Show PDH / PDL / PMH / PML", group = G_LVL)
+orMin      = input.int(5, "Opening range (minutes)", options = [1, 2, 5, 10, 15, 30], group = G_LVL)
+showOR     = input.bool(true, "Show opening range high / low", group = G_LVL)
+showBrk    = input.bool(true, "Mark key-level breakouts", group = G_LVL)
+
+G_TR = "Trend vs chop"
+minSpread = input.float(0.10, "Min 8/21 EMA spread (x ATR)", minval = 0, step = 0.05, group = G_TR, tooltip = "The 8 and 21 EMAs must be at least this far apart (in ATR) for the trend to count as clean. Smaller = more bars count as trend.")
+minSlope  = input.float(0.05, "Min 21 EMA slope over 3 bars (x ATR)", minval = 0, step = 0.01, group = G_TR)
+barMode   = input.string("Trend colors", "Bar coloring", options = ["Trend colors", "Dim chop only", "Off"], group = G_TR)
+
+G_ENT = "Entry rules"
+direction   = input.string("Both", "Direction", options = ["Both", "Long only", "Short only"], group = G_ENT)
+useOR       = input.bool(true, "Arm on opening-range break (ORH / ORL)", group = G_ENT)
+usePM       = input.bool(true, "Arm on premarket break (PMH / PML)", group = G_ENT)
+usePD       = input.bool(true, "Arm on prior-day break (PDH / PDL)", group = G_ENT)
+trendFilter = input.string("Clean trend", "Trend filter at entry", options = ["Clean trend", "8 > 21 only", "Off"], group = G_ENT, tooltip = "Clean trend = 8 > 21 > 50 (or reverse for shorts) with enough spread and slope - see 'Trend vs chop'.")
+vwapFilter  = input.bool(true, "Longs only above VWAP, shorts only below", group = G_ENT)
+tolAtr      = input.float(0.15, "Retest tolerance (x ATR)", minval = 0, step = 0.05, group = G_ENT, tooltip = "How close the pullback must come to the 8 EMA or the broken level to count as a retest.")
+maxExt      = input.float(0.75, "Max close distance from 8 EMA (x ATR)", minval = 0, step = 0.05, group = G_ENT, tooltip = "The trigger candle must close RIGHT above (below) the 8 EMA - no chasing extended candles.")
+failAtr     = input.float(0.25, "Breakout fails if close back through level by (x ATR)", minval = 0, step = 0.05, group = G_ENT)
+entrySess   = input.session("0935-1200", "Entry window (New York time)", group = G_ENT)
+maxTrades   = input.int(3, "Max entries per day", minval = 1, group = G_ENT)
+
+G_RISK = "Stop / target"
+stopBuf    = input.float(0.05, "Stop buffer beyond retest swing (x ATR)", minval = 0, step = 0.05, group = G_RISK)
+maxRiskAtr = input.float(2.5, "Skip entry if stop is wider than (x ATR)", minval = 0.25, step = 0.25, group = G_RISK)
+rr         = input.float(2.0, "Target (R multiple)", minval = 0.5, step = 0.5, group = G_RISK, tooltip = "At the target the stop moves to break-even; the rest is trailed on a close through the trail EMA.")
+trailSrc   = input.string("8 EMA", "After target, exit on close through", options = ["8 EMA", "21 EMA"], group = G_RISK)
+eodExit    = input.bool(true, "Flat by 15:55 New York", group = G_RISK)
+
+G_UI = "Panels"
+showPanel = input.bool(true, "Setup checklist panel", group = G_UI)
+panelPos  = input.string("Bottom right", "Checklist position", options = ["Top left", "Top right", "Bottom left", "Bottom right"], group = G_UI)
+txtSize   = input.string("Small", "Panel text size", options = ["Tiny", "Small", "Normal"], group = G_UI)
+
+G_SCR = "Strongest-stocks screener"
+showScr   = input.bool(true, "Show screener table", group = G_SCR)
+scrPos    = input.string("Top right", "Screener position", options = ["Top left", "Top right", "Bottom left", "Bottom right"], group = G_SCR)
+scrRows   = input.int(20, "Rows to show", minval = 1, maxval = 20, group = G_SCR)
+scrSort   = input.string("Strength", "Sort by", options = ["Strength", "% change", "Input order"], group = G_SCR, tooltip = "Strength = trend column first (above PDH+PMH, then mixed, then below PDL+PML), then % change.")
+scrTf     = input.timeframe("", "Screener timeframe (blank = chart)", group = G_SCR)
+scrAlerts = input.bool(true, "Alert when a ticker flips to trend up / down", group = G_SCR)
+s1  = input.symbol("NASDAQ:NVDA", "", group = G_SCR, inline = "r1")
+s2  = input.symbol("NASDAQ:AMD", "", group = G_SCR, inline = "r1")
+s3  = input.symbol("NASDAQ:AVGO", "", group = G_SCR, inline = "r2")
+s4  = input.symbol("NASDAQ:MU", "", group = G_SCR, inline = "r2")
+s5  = input.symbol("NYSE:DELL", "", group = G_SCR, inline = "r3")
+s6  = input.symbol("NASDAQ:TSLA", "", group = G_SCR, inline = "r3")
+s7  = input.symbol("NASDAQ:PLTR", "", group = G_SCR, inline = "r4")
+s8  = input.symbol("NASDAQ:MSFT", "", group = G_SCR, inline = "r4")
+s9  = input.symbol("NASDAQ:AAPL", "", group = G_SCR, inline = "r5")
+s10 = input.symbol("NASDAQ:GOOGL", "", group = G_SCR, inline = "r5")
+s11 = input.symbol("NASDAQ:META", "", group = G_SCR, inline = "r6")
+s12 = input.symbol("NASDAQ:AMZN", "", group = G_SCR, inline = "r6")
+s13 = input.symbol("NASDAQ:NFLX", "", group = G_SCR, inline = "r7")
+s14 = input.symbol("NYSE:ORCL", "", group = G_SCR, inline = "r7")
+s15 = input.symbol("NYSE:CRM", "", group = G_SCR, inline = "r8")
+s16 = input.symbol("NASDAQ:QCOM", "", group = G_SCR, inline = "r8")
+s17 = input.symbol("NASDAQ:INTC", "", group = G_SCR, inline = "r9")
+s18 = input.symbol("NASDAQ:ADBE", "", group = G_SCR, inline = "r9")
+s19 = input.symbol("AMEX:SPY", "", group = G_SCR, inline = "r10")
+s20 = input.symbol("NASDAQ:QQQ", "", group = G_SCR, inline = "r10")
+
+// ---------------------------------------------------------------- Colors
+C_BULL  = #00E676
+C_BEAR  = #FF1744
+C_CHOP  = #7E57C2
+C_SLOW  = #42A5F5
+C_VWAP  = #FFB300
+C_OR    = #FFEB3B
+C_WARN  = #FFC107
+C_DIM   = #787B86
+
+// ---------------------------------------------------------------- Helpers
+f_pos(string s) =>
+    switch s
+        "Top left"    => position.top_left
+        "Top right"   => position.top_right
+        "Bottom left" => position.bottom_left
+        => position.bottom_right
+
+f_size(string s) =>
+    switch s
+        "Tiny"   => size.tiny
+        "Normal" => size.normal
+        => size.small
+
+fmt(float x) => na(x) ? "–" : str.tostring(x, format.mintick)
+
+// Runs on the EXTENDED-hours version of a symbol so premarket levels are
+// available even when the chart itself shows regular hours only.
+// Returns [close, dayVolume, priorClose, PDH, PDL, PMH, PML, rthHigh, rthLow].
+// PDH/PDL/prior close are from the prior REGULAR session (09:30-16:00).
+f_levels() =>
+    var float pdh  = na
+    var float pdl  = na
+    var float pdc  = na
+    var float rthH = na
+    var float rthL = na
+    var float rthC = na
+    var float pmh  = na
+    var float pml  = na
+    var float dVol = 0.0
+    newDay = nz(ta.change(dayofmonth)) != 0
+    if newDay
+        if not na(rthH)
+            pdh := rthH
+            pdl := rthL
+            pdc := rthC
+        rthH := na
+        rthL := na
+        rthC := na
+        pmh  := na
+        pml  := na
+        dVol := 0.0
+    dVol += nz(volume)
+    if session.ispremarket
+        pmh := na(pmh) ? high : math.max(pmh, high)
+        pml := na(pml) ? low : math.min(pml, low)
+    if session.ismarket
+        rthH := na(rthH) ? high : math.max(rthH, high)
+        rthL := na(rthL) ? low : math.min(rthL, low)
+        rthC := close
+    [close, dVol, pdc, pdh, pdl, pmh, pml, rthH, rthL]
+
+f_scr() =>
+    [c, v, pc, h, l, mh, ml, rh, rl] = f_levels()
+    [c, v, pc, h, l, mh, ml]
+
+f_req(string sym) =>
+    request.security(ticker.modify(sym, session.extended), scrTf, f_scr(), ignore_invalid_symbol = true)
+
+// ---------------------------------------------------------------- Chart levels
+[xClose, xVol, pdc, pdh, pdl, pmh, pml, xRthH, xRthL] = request.security(ticker.modify(syminfo.tickerid, session.extended), timeframe.period, f_levels())
+
+chartNewDay = nz(ta.change(dayofmonth)) != 0
+rth = session.ismarket
+
+// Opening range: first `orMin` minutes of the regular session.
+var float orh = na
+var float orl = na
+var int orStart = na
+if chartNewDay
+    orh := na
+    orl := na
+    orStart := na
+rthOpen = rth and (not session.ismarket[1] or chartNewDay)
+if rthOpen
+    orStart := time
+    orh := high
+    orl := low
+else if rth and not na(orStart) and time < orStart + orMin * 60000
+    orh := math.max(orh, high)
+    orl := math.min(orl, low)
+orDone = not na(orStart) and time_close >= orStart + orMin * 60000
+
+// ---------------------------------------------------------------- EMAs, VWAP, trend state
+e8    = ta.ema(close, fastLen)
+e21   = ta.ema(close, midLen)
+e50   = ta.ema(close, slowLen)
+atr   = ta.atr(14)
+vwapV = ta.vwap(hlc3)
+
+bullStack = e8 > e21 and e21 > e50
+bearStack = e8 < e21 and e21 < e50
+spreadOk  = math.abs(e8 - e21) >= minSpread * atr
+slope21   = e21 - e21[3]
+// 1 = clean uptrend, -1 = clean downtrend, 0 = chop
+trend = bullStack and spreadOk and slope21 >= minSlope * atr ? 1 : bearStack and spreadOk and slope21 <= -minSlope * atr ? -1 : 0
+trendCol = trend == 1 ? C_BULL : trend == -1 ? C_BEAR : C_CHOP
+
+p8  = plot(e8, "EMA 8", color = trendCol, linewidth = 2)
+p21 = plot(e21, "EMA 21", color = color.new(C_CHOP, 0), linewidth = 2)
+plot(e50, "EMA 50", color = color.new(C_SLOW, 0), linewidth = 2)
+fill(p8, p21, color = trend == 1 ? color.new(C_BULL, 55) : trend == -1 ? color.new(C_BEAR, 55) : color.new(C_CHOP, 75), title = "8/21 ribbon")
+plot(showVwap ? vwapV : na, "VWAP", color = C_VWAP, linewidth = 1)
+
+barcolor(barMode == "Off" ? color(na) : trend == 0 ? C_DIM : barMode == "Trend colors" ? trendCol : color(na), title = "Trend / chop bars")
+
+// ---------------------------------------------------------------- Level plots
+lv(float x, bool on) => on and not chartNewDay ? x : na
+plot(lv(pdh, showLevels), "PDH", color = C_BULL, style = plot.style_linebr)
+plot(lv(pdl, showLevels), "PDL", color = C_BEAR, style = plot.style_linebr)
+plot(lv(pmh, showLevels), "PMH", color = color.new(C_BULL, 20), style = plot.style_circles, linewidth = 1)
+plot(lv(pml, showLevels), "PML", color = color.new(C_BEAR, 20), style = plot.style_circles, linewidth = 1)
+plot(lv(orh, showOR), "ORH", color = color.new(C_OR, 20), style = plot.style_linebr)
+plot(lv(orl, showOR), "ORL", color = color.new(C_OR, 20), style = plot.style_linebr)
+
+pp = (pdh + pdl + pdc) / 3
+r1 = 2 * pp - pdl
+s1p = 2 * pp - pdh
+r2 = pp + (pdh - pdl)
+s2p = pp - (pdh - pdl)
+plot(lv(pp, showPiv), "Pivot P", color = color.new(color.white, 55), style = plot.style_linebr)
+plot(lv(r1, showPiv), "Pivot R1", color = color.new(C_BEAR, 65), style = plot.style_linebr)
+plot(lv(s1p, showPiv), "Pivot S1", color = color.new(C_BULL, 65), style = plot.style_linebr)
+plot(lv(r2, showPiv and showPiv2), "Pivot R2", color = color.new(C_BEAR, 75), style = plot.style_linebr)
+plot(lv(s2p, showPiv and showPiv2), "Pivot S2", color = color.new(C_BULL, 75), style = plot.style_linebr)
+
+// Right-edge price tags for today's levels.
+f_tag(array<label> arr, float y, string name, color col) =>
+    if not na(y)
+        lb = label.new(bar_index + 2, y, name + " " + fmt(y), style = label.style_label_left, color = color.new(color.black, 100), textcolor = col, size = size.small)
+        array.push(arr, lb)
+    true
+
+var array<label> tags = array.new<label>()
+if barstate.islast
+    for lb in tags
+        label.delete(lb)
+    array.clear(tags)
+    if showLevels
+        f_tag(tags, pdh, "PDH", C_BULL)
+        f_tag(tags, pdl, "PDL", C_BEAR)
+        f_tag(tags, pmh, "PMH", C_BULL)
+        f_tag(tags, pml, "PML", C_BEAR)
+    if showOR
+        f_tag(tags, orh, "ORH", C_OR)
+        f_tag(tags, orl, "ORL", C_OR)
+
+// ---------------------------------------------------------------- Breakouts
+// Crossings computed every bar (Pine v6 'and' is lazy, so never inside a condition).
+xuOR = ta.crossover(close, orh)
+xdOR = ta.crossunder(close, orl)
+xuPM = ta.crossover(close, pmh)
+xdPM = ta.crossunder(close, pml)
+xuPD = ta.crossover(close, pdh)
+xdPD = ta.crossunder(close, pdl)
+
+brkORH = rth and orDone and xuOR
+brkORL = rth and orDone and xdOR
+brkPMH = rth and xuPM
+brkPML = rth and xdPM
+brkPDH = rth and xuPD
+brkPDL = rth and xdPD
+
+upCol = trend == 1 ? C_BULL : C_DIM
+dnCol = trend == -1 ? C_BEAR : C_DIM
+plotshape(showBrk and brkORH, "ORH break", shape.triangleup, location.belowbar, upCol, text = "ORH", textcolor = upCol, size = size.tiny)
+plotshape(showBrk and brkPMH, "PMH break", shape.triangleup, location.belowbar, upCol, text = "PMH", textcolor = upCol, size = size.tiny)
+plotshape(showBrk and brkPDH, "PDH break", shape.triangleup, location.belowbar, upCol, text = "PDH", textcolor = upCol, size = size.tiny)
+plotshape(showBrk and brkORL, "ORL break", shape.triangledown, location.abovebar, dnCol, text = "ORL", textcolor = dnCol, size = size.tiny)
+plotshape(showBrk and brkPML, "PML break", shape.triangledown, location.abovebar, dnCol, text = "PML", textcolor = dnCol, size = size.tiny)
+plotshape(showBrk and brkPDL, "PDL break", shape.triangledown, location.abovebar, dnCol, text = "PDL", textcolor = dnCol, size = size.tiny)
+
+// ---------------------------------------------------------------- Trade state
+allowLong  = direction != "Short only"
+allowShort = direction != "Long only"
+inWindow   = not na(time(timeframe.period, entrySess, NY))
+trailEma   = trailSrc == "8 EMA" ? e8 : e21
+eodTs      = timestamp(NY, year(time, NY), month(time, NY), dayofmonth(time, NY), 15, 55)
+isEod      = eodExit and rth and time_close >= eodTs
+
+var int   pos = 0          // 1 long, -1 short, 0 flat
+var float entPx = na
+var float stpPx = na
+var float tgtPx = na
+var bool  tgtHit = false
+var int   entBar = na
+var line  lnEnt = na
+var line  lnStp = na
+var line  lnTgt = na
+var int   tradesToday = 0
+
+// Long setup state: armed by a breakout, then waiting for a retest, then the trigger.
+var bool   lArmed = false
+var float  lLvl = na
+var string lName = ""
+var int    lArmBar = na
+var bool   lRetest = false
+var float  lSwing = na
+// Short setup state (mirror).
+var bool   sArmed = false
+var float  sLvl = na
+var string sName = ""
+var int    sArmBar = na
+var bool   sRetest = false
+var float  sSwing = na
+
+if chartNewDay
+    tradesToday := 0
+    lArmed := false
+    lRetest := false
+    lSwing := na
+    sArmed := false
+    sRetest := false
+    sSwing := na
+
+// --- Manage the open trade first.
+bool   exitNow = false
+bool   tgtNow  = false
+string exitTxt = ""
+float  exitPx  = na
+if pos != 0 and bar_index > entBar
+    if pos == 1
+        if low <= stpPx
+            exitNow := true
+            exitPx  := stpPx
+            exitTxt := tgtHit ? "BE" : "STOP"
+        else
+            if not tgtHit and high >= tgtPx
+                tgtHit := true
+                tgtNow := true
+            if tgtHit and close < trailEma
+                exitNow := true
+                exitPx  := close
+                exitTxt := "TRAIL"
+    else
+        if high >= stpPx
+            exitNow := true
+            exitPx  := stpPx
+            exitTxt := tgtHit ? "BE" : "STOP"
+        else
+            if not tgtHit and low <= tgtPx
+                tgtHit := true
+                tgtNow := true
+            if tgtHit and close > trailEma
+                exitNow := true
+                exitPx  := close
+                exitTxt := "TRAIL"
+    if not exitNow and isEod
+        exitNow := true
+        exitPx  := close
+        exitTxt := "EOD"
+    line.set_x2(lnEnt, bar_index)
+    line.set_x2(lnStp, bar_index)
+    line.set_x2(lnTgt, bar_index)
+    if tgtNow
+        label.new(bar_index, pos == 1 ? high : low, str.tostring(rr) + "R ✓  stop → BE", style = pos == 1 ? label.style_label_down : label.style_label_up, color = color.new(C_BULL, 20), textcolor = color.black, size = size.tiny)
+        if not exitNow
+            stpPx := entPx
+            lnStp := line.new(bar_index, entPx, bar_index, entPx, color = C_BEAR, style = line.style_dashed)
+    if exitNow
+        isWin = pos == 1 ? exitPx > entPx : exitPx < entPx
+        label.new(bar_index, pos == 1 ? high : low, exitTxt + " " + fmt(exitPx), style = pos == 1 ? label.style_label_down : label.style_label_up, color = isWin ? color.new(C_BULL, 20) : color.new(C_DIM, 20), textcolor = color.black, size = size.tiny)
+        alert("Day Trading Setup: EXIT " + (pos == 1 ? "LONG " : "SHORT ") + syminfo.ticker + " (" + exitTxt + ") @ " + fmt(exitPx), alert.freq_once_per_bar_close)
+        pos := 0
+    else if tgtNow
+        alert("Day Trading Setup: " + syminfo.ticker + " hit " + str.tostring(rr) + "R target @ " + fmt(tgtPx) + " - take partial, stop to break-even " + fmt(entPx), alert.freq_once_per_bar_close)
+
+// --- Arm on a key-level breakout (highest level broken wins for longs, lowest for shorts).
+float  upLvl = na
+string upName = ""
+if useOR and brkORH
+    upLvl := orh
+    upName := "ORH"
+if usePM and brkPMH and (na(upLvl) or pmh > upLvl)
+    upLvl := pmh
+    upName := "PMH"
+if usePD and brkPDH and (na(upLvl) or pdh > upLvl)
+    upLvl := pdh
+    upName := "PDH"
+if allowLong and not na(upLvl) and close > e8 and e8 > e21
+    lArmed  := true
+    lLvl    := upLvl
+    lName   := upName
+    lArmBar := bar_index
+    lRetest := false
+    lSwing  := na
+
+float  dnLvl = na
+string dnName = ""
+if useOR and brkORL
+    dnLvl := orl
+    dnName := "ORL"
+if usePM and brkPML and (na(dnLvl) or pml < dnLvl)
+    dnLvl := pml
+    dnName := "PML"
+if usePD and brkPDL and (na(dnLvl) or pdl < dnLvl)
+    dnLvl := pdl
+    dnName := "PDL"
+if allowShort and not na(dnLvl) and close < e8 and e8 < e21
+    sArmed  := true
+    sLvl    := dnLvl
+    sName   := dnName
+    sArmBar := bar_index
+    sRetest := false
+    sSwing  := na
+
+// --- Failed breakout / trend break disarms.
+if lArmed and (close < e21 or close < lLvl - failAtr * atr)
+    lArmed := false
+    lRetest := false
+    lSwing := na
+if sArmed and (close > e21 or close > sLvl + failAtr * atr)
+    sArmed := false
+    sRetest := false
+    sSwing := na
+
+// --- Retest: pullback tags the 8 EMA or the broken level.
+bool retestNowL = false
+bool retestNowS = false
+if lArmed and bar_index > lArmBar and (low <= e8 + tolAtr * atr or low <= lLvl + tolAtr * atr)
+    retestNowL := not lRetest
+    lRetest := true
+if lArmed and lRetest
+    lSwing := na(lSwing) ? low : math.min(lSwing, low)
+if sArmed and bar_index > sArmBar and (high >= e8 - tolAtr * atr or high >= sLvl - tolAtr * atr)
+    retestNowS := not sRetest
+    sRetest := true
+if sArmed and sRetest
+    sSwing := na(sSwing) ? high : math.max(sSwing, high)
+
+// --- Trigger: candle CLOSES back above (below) the 8 EMA, right next to it.
+trendOkL = trendFilter == "Off" ? true : trendFilter == "8 > 21 only" ? e8 > e21 : trend == 1
+trendOkS = trendFilter == "Off" ? true : trendFilter == "8 > 21 only" ? e8 < e21 : trend == -1
+vwapOkL  = not vwapFilter or close > vwapV
+vwapOkS  = not vwapFilter or close < vwapV
+canEnter = barstate.isconfirmed and pos == 0 and not exitNow and rth and inWindow and tradesToday < maxTrades
+
+lStop = lSwing - stopBuf * atr
+lRisk = close - lStop
+sStop = sSwing + stopBuf * atr
+sRisk = sStop - close
+
+longSig = canEnter and allowLong and lArmed and lRetest and close > e8 and close > open and close > lLvl and close - e8 <= maxExt * atr and trendOkL and vwapOkL and lRisk > 0 and lRisk <= maxRiskAtr * atr
+shortSig = canEnter and not longSig and allowShort and sArmed and sRetest and close < e8 and close < open and close < sLvl and e8 - close <= maxExt * atr and trendOkS and vwapOkS and sRisk > 0 and sRisk <= maxRiskAtr * atr
+
+if longSig or shortSig
+    pos    := longSig ? 1 : -1
+    entPx  := close
+    stpPx  := longSig ? lStop : sStop
+    tgtPx  := longSig ? close + rr * lRisk : close - rr * sRisk
+    tgtHit := false
+    entBar := bar_index
+    tradesToday += 1
+    lnEnt := line.new(bar_index, entPx, bar_index + 1, entPx, color = color.new(color.white, 30), width = 1)
+    lnStp := line.new(bar_index, stpPx, bar_index + 1, stpPx, color = C_BEAR, style = line.style_dashed)
+    lnTgt := line.new(bar_index, tgtPx, bar_index + 1, tgtPx, color = C_BULL, style = line.style_dashed)
+    lvlName = longSig ? lName : sName
+    side = longSig ? "LONG" : "SHORT"
+    txt = side + " · " + lvlName + " retest\nEntry " + fmt(entPx) + "\nStop " + fmt(stpPx) + "\nTarget " + fmt(tgtPx)
+    label.new(bar_index, close, txt, yloc = longSig ? yloc.belowbar : yloc.abovebar, style = longSig ? label.style_label_up : label.style_label_down, color = longSig ? #00C853 : #D50000, textcolor = color.white, size = size.small)
+    alert("Day Trading Setup: " + side + " " + syminfo.ticker + " @ " + fmt(entPx) + " | stop " + fmt(stpPx) + " | target " + fmt(tgtPx) + " (" + str.tostring(rr) + "R) | " + lvlName + " breakout + 8 EMA retest", alert.freq_once_per_bar_close)
+    if longSig
+        lRetest := false
+        lSwing := na
+    else
+        sRetest := false
+        sSwing := na
+
+plotshape(retestNowL and pos == 0 and allowLong, "Retest (long) - get ready", shape.diamond, location.belowbar, color.new(C_BULL, 30), size = size.tiny)
+plotshape(retestNowS and pos == 0 and allowShort, "Retest (short) - get ready", shape.diamond, location.abovebar, color.new(C_BEAR, 30), size = size.tiny)
+
+alertcondition(longSig, "Long entry", "Day Trading Setup LONG {{ticker}} @ {{close}} - 8 EMA retest confirmed")
+alertcondition(shortSig, "Short entry", "Day Trading Setup SHORT {{ticker}} @ {{close}} - 8 EMA retest confirmed")
+alertcondition((retestNowL and allowLong or retestNowS and allowShort) and pos == 0, "Retest - get ready", "Day Trading Setup {{ticker}}: breakout retesting 8 EMA / level - get ready")
+alertcondition(brkORH or brkPMH or brkPDH or brkORL or brkPML or brkPDL, "Key level breakout", "Day Trading Setup {{ticker}}: key level break @ {{close}}")
+
+// ---------------------------------------------------------------- Checklist panel
+var table panel = table.new(f_pos(panelPos), 2, 7, bgcolor = color.new(#000000, 15), border_color = color.new(#2A2E39, 0), border_width = 1, frame_color = color.new(#2A2E39, 0), frame_width = 1)
+if showPanel and barstate.islast
+    ts = f_size(txtSize)
+    lStat = pos == 1 ? "IN LONG" : not allowLong ? "off" : not lArmed ? "wait for ORH/PMH/PDH break" : not lRetest ? "armed " + lName + " " + fmt(lLvl) + " → wait retest" : "retest ✓ → wait close > 8 EMA"
+    sStat = pos == -1 ? "IN SHORT" : not allowShort ? "off" : not sArmed ? "wait for ORL/PML/PDL break" : not sRetest ? "armed " + sName + " " + fmt(sLvl) + " → wait retest" : "retest ✓ → wait close < 8 EMA"
+    trTxt = trend == 1 ? "CLEAN UPTREND" : trend == -1 ? "CLEAN DOWNTREND" : "CHOP - stand aside"
+    tradeTxt = pos != 0 ? "E " + fmt(entPx) + "  S " + fmt(stpPx) + "  T " + fmt(tgtPx) : "flat (" + str.tostring(tradesToday) + "/" + str.tostring(maxTrades) + " today)"
+    table.cell(panel, 0, 0, "Day Trading Setup", text_color = color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 1, 0, syminfo.ticker + (inWindow ? "  · window open" : "  · outside window"), text_color = inWindow ? C_BULL : C_DIM, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 0, 1, "Trend", text_color = color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 1, 1, trTxt, text_color = color.black, bgcolor = trend == 1 ? C_BULL : trend == -1 ? C_BEAR : C_WARN, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 0, 2, "VWAP", text_color = color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 1, 2, close > vwapV ? "above " + fmt(vwapV) : "below " + fmt(vwapV), text_color = close > vwapV ? C_BULL : C_BEAR, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 0, 3, "Opening range", text_color = color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 1, 3, na(orh) ? "–" : (orDone ? "" : "forming ") + fmt(orl) + " – " + fmt(orh), text_color = C_OR, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 0, 4, "Long", text_color = color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 1, 4, lStat, text_color = lRetest or pos == 1 ? C_BULL : color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 0, 5, "Short", text_color = color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 1, 5, sStat, text_color = sRetest or pos == -1 ? C_BEAR : color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 0, 6, "Trade", text_color = color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 1, 6, tradeTxt, text_color = color.white, text_size = ts, text_halign = text.align_left)
+
+// ---------------------------------------------------------------- Strongest-stocks screener
+[c1, v1, pc1, h1, l1, mh1, ml1] = f_req(s1)
+[c2, v2, pc2, h2, l2, mh2, ml2] = f_req(s2)
+[c3, v3, pc3, h3, l3, mh3, ml3] = f_req(s3)
+[c4, v4, pc4, h4, l4, mh4, ml4] = f_req(s4)
+[c5, v5, pc5, h5, l5, mh5, ml5] = f_req(s5)
+[c6, v6, pc6, h6, l6, mh6, ml6] = f_req(s6)
+[c7, v7, pc7, h7, l7, mh7, ml7] = f_req(s7)
+[c8, v8, pc8, h8, l8, mh8, ml8] = f_req(s8)
+[c9, v9, pc9, h9, l9, mh9, ml9] = f_req(s9)
+[c10, v10, pc10, h10, l10, mh10, ml10] = f_req(s10)
+[c11, v11, pc11, h11, l11, mh11, ml11] = f_req(s11)
+[c12, v12, pc12, h12, l12, mh12, ml12] = f_req(s12)
+[c13, v13, pc13, h13, l13, mh13, ml13] = f_req(s13)
+[c14, v14, pc14, h14, l14, mh14, ml14] = f_req(s14)
+[c15, v15, pc15, h15, l15, mh15, ml15] = f_req(s15)
+[c16, v16, pc16, h16, l16, mh16, ml16] = f_req(s16)
+[c17, v17, pc17, h17, l17, mh17, ml17] = f_req(s17)
+[c18, v18, pc18, h18, l18, mh18, ml18] = f_req(s18)
+[c19, v19, pc19, h19, l19, mh19, ml19] = f_req(s19)
+[c20, v20, pc20, h20, l20, mh20, ml20] = f_req(s20)
+
+// Level column: a dot once price is through the level, otherwise a bar
+// showing how far price has travelled across the day's range toward it.
+f_bar(float frac) =>
+    n = math.round(math.max(0.0, math.min(1.0, frac)) * 8)
+    str.repeat("█", n) + str.repeat("░", 8 - n)
+
+// side = 1 for a high-level column (PDH / PMH), -1 for a low-level column (PDL / PML).
+f_brk(float c, float hi, float lo, int side) =>
+    string txt = "–"
+    if not na(c) and not na(hi) and not na(lo) and hi > lo
+        if side == 1
+            txt := c > hi ? "●" : c >= lo ? f_bar((c - lo) / (hi - lo)) : ""
+        else
+            txt := c < lo ? "●" : c <= hi ? f_bar((hi - c) / (hi - lo)) : ""
+    txt
+
+// 1 = above PDH and PMH, -1 = below PDL and PML, 0 = in between.
+f_tr(float c, float hi, float lo, float pmHi, float pmLo) =>
+    up = c > hi and (na(pmHi) or c > pmHi)
+    dn = c < lo and (na(pmLo) or c < pmLo)
+    up ? 1 : dn ? -1 : 0
+
+f_vol(float v) =>
+    na(v) ? "–" : v >= 1e9 ? str.tostring(v / 1e9, "#.##") + "B" : v >= 1e6 ? str.tostring(v / 1e6, "#.##") + "M" : v >= 1e3 ? str.tostring(v / 1e3, "#.##") + "K" : str.tostring(v, "#")
+
+f_name(string s) =>
+    parts = str.split(s, ":")
+    "$" + array.get(parts, array.size(parts) - 1)
+
+var table scr = table.new(f_pos(scrPos), 9, 21, bgcolor = color.new(#000000, 0), border_color = color.new(#2A2E39, 0), border_width = 1, frame_color = color.new(#2A2E39, 0), frame_width = 1)
+var array<int> prevTr = array.new<int>(20, 0)
+var bool primed = false
+
+if barstate.islast
+    syms = array.from(s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17, s18, s19, s20)
+    cs   = array.from(c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, c19, c20)
+    vs   = array.from(v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20)
+    pcs  = array.from(pc1, pc2, pc3, pc4, pc5, pc6, pc7, pc8, pc9, pc10, pc11, pc12, pc13, pc14, pc15, pc16, pc17, pc18, pc19, pc20)
+    hs   = array.from(h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13, h14, h15, h16, h17, h18, h19, h20)
+    ls   = array.from(l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15, l16, l17, l18, l19, l20)
+    mhs  = array.from(mh1, mh2, mh3, mh4, mh5, mh6, mh7, mh8, mh9, mh10, mh11, mh12, mh13, mh14, mh15, mh16, mh17, mh18, mh19, mh20)
+    mls  = array.from(ml1, ml2, ml3, ml4, ml5, ml6, ml7, ml8, ml9, ml10, ml11, ml12, ml13, ml14, ml15, ml16, ml17, ml18, ml19, ml20)
+
+    pcts   = array.new<float>(20, na)
+    trs    = array.new<int>(20, 0)
+    scores = array.new<float>(20, 0.0)
+    order0 = array.new<int>()
+    for i = 0 to 19
+        c  = array.get(cs, i)
+        pc = array.get(pcs, i)
+        pct = na(c) or na(pc) or pc == 0 ? na : (c - pc) / pc * 100
+        tr = f_tr(c, array.get(hs, i), array.get(ls, i), array.get(mhs, i), array.get(mls, i))
+        array.set(pcts, i, pct)
+        array.set(trs, i, tr)
+        array.set(scores, i, scrSort == "% change" ? nz(pct, -1e9) : tr * 1000.0 + nz(pct, -999))
+        array.push(order0, i)
+
+    // Alerts when a ticker flips into / out of a clean level trend (bar close only).
+    if barstate.isconfirmed
+        if primed and scrAlerts
+            for i = 0 to 19
+                tr = array.get(trs, i)
+                if tr != array.get(prevTr, i) and tr != 0
+                    alert("Day Trading Setup screener: " + f_name(array.get(syms, i)) + (tr == 1 ? " ▲ above PDH + PMH" : " ▼ below PDL + PML") + " @ " + fmt(array.get(cs, i)), alert.freq_once_per_bar_close)
+        for i = 0 to 19
+            array.set(prevTr, i, array.get(trs, i))
+        primed := true
+
+    if showScr
+        ts = f_size(txtSize)
+        idx = scrSort == "Input order" ? order0 : array.sort_indices(scores, order.descending)
+        hdr = array.from("Ticker", "Price", "Volume", "% Chg", "PDH Break", "PDL Break", "PMH Break", "PML Break", "Trend")
+        for col = 0 to 8
+            table.cell(scr, col, 0, array.get(hdr, col), text_color = color.white, bgcolor = color.new(#131722, 0), text_size = ts)
+        for r = 0 to scrRows - 1
+            i  = array.get(idx, r)
+            c  = array.get(cs, i)
+            hi = array.get(hs, i)
+            lo = array.get(ls, i)
+            mh = array.get(mhs, i)
+            ml = array.get(mls, i)
+            pct = array.get(pcts, i)
+            tr = array.get(trs, i)
+            row = r + 1
+            table.cell(scr, 0, row, f_name(array.get(syms, i)), text_color = color.white, text_size = ts, text_halign = text.align_left)
+            table.cell(scr, 1, row, na(c) ? "–" : str.tostring(c, "#.##"), text_color = color.white, text_size = ts)
+            table.cell(scr, 2, row, f_vol(array.get(vs, i)), text_color = color.white, text_size = ts)
+            table.cell(scr, 3, row, na(pct) ? "–" : str.tostring(pct, "#.##") + "%", text_color = na(pct) ? C_DIM : pct >= 0 ? C_BULL : C_BEAR, text_size = ts)
+            table.cell(scr, 4, row, f_brk(c, hi, lo, 1), text_color = C_BULL, text_size = ts)
+            table.cell(scr, 5, row, f_brk(c, hi, lo, -1), text_color = C_BEAR, text_size = ts)
+            table.cell(scr, 6, row, f_brk(c, mh, ml, 1), text_color = C_BULL, text_size = ts)
+            table.cell(scr, 7, row, f_brk(c, mh, ml, -1), text_color = C_BEAR, text_size = ts)
+            table.cell(scr, 8, row, tr == 1 ? "▲" : tr == -1 ? "▼" : "⚠", text_color = tr == 0 ? C_WARN : color.white, bgcolor = tr == 1 ? color.new(C_BULL, 10) : tr == -1 ? color.new(C_BEAR, 10) : na, text_size = ts)
