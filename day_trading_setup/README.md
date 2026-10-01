@@ -186,7 +186,7 @@ these steps have to be done by hand.
    2. In TradingView, open the **Pine Editor** (bottom panel) → **New** →
       select all → paste.
    3. Click **Save** and use the name `DTS Screener`, `DTS Trend` or `DTS Entry`
-      for the other files).
+      to match the file.
    4. Click **Add to chart**.
 
    Once saved, the scripts appear under Indicators → **My scripts** for
