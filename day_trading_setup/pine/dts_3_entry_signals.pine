@@ -11,48 +11,48 @@
 // them internally for the rules, so keep the lengths equal to your chart's.
 //
 // Part of day_trading_setup/ (see ../README.md).
-indicator("DTS 3 - Entry Signals", shorttitle = "DTS Entry", overlay = true, max_labels_count = 500, max_lines_count = 500)
+indicator("DTS Entry", shorttitle = "DTS Entry", overlay = true, max_labels_count = 500, max_lines_count = 500)
 
 NY = "America/New_York"
 
 G_EMA = "EMAs (match your chart's built-in EMAs)"
-fastLen = input.int(8, "EMA fast", minval = 1, group = G_EMA, inline = "ema")
-midLen  = input.int(21, "mid", minval = 1, group = G_EMA, inline = "ema")
-slowLen = input.int(50, "slow", minval = 1, group = G_EMA, inline = "ema")
+fastLen = input.int(8, "EMA fast", minval = 1, group = G_EMA, inline = "ema", display = display.none)
+midLen  = input.int(21, "mid", minval = 1, group = G_EMA, inline = "ema", display = display.none)
+slowLen = input.int(50, "slow", minval = 1, group = G_EMA, inline = "ema", display = display.none)
 
 G_ENT = "Entry rules"
-direction   = input.string("Both", "Direction", options = ["Both", "Long only", "Short only"], group = G_ENT)
-orMin       = input.int(5, "Opening range (minutes)", options = [1, 2, 5, 10, 15, 30], group = G_ENT)
-useOR       = input.bool(true, "Arm on opening-range break (ORH / ORL)", group = G_ENT)
-usePM       = input.bool(true, "Arm on premarket break (PMH / PML)", group = G_ENT)
-usePD       = input.bool(true, "Arm on prior-day break (PDH / PDL)", group = G_ENT)
-usePW       = input.bool(true, "Arm on prior-week break (PWH / PWL)", group = G_ENT)
-trendFilter = input.string("Clean trend", "Trend filter at entry", options = ["Clean trend", "8 > 21 only", "Off"], group = G_ENT, tooltip = "Clean trend = 8 > 21 > 50 (reverse for shorts) with enough spread and slope - same definition as DTS 2.")
-minSpread   = input.float(0.10, "Clean trend: min 8/21 spread (x ATR)", minval = 0, step = 0.05, group = G_ENT)
-minSlope    = input.float(0.05, "Clean trend: min 21 EMA slope over 3 bars (x ATR)", minval = 0, step = 0.01, group = G_ENT)
-vwapFilter  = input.bool(true, "Longs only above VWAP, shorts only below", group = G_ENT)
-tolAtr      = input.float(0.15, "Retest tolerance (x ATR)", minval = 0, step = 0.05, group = G_ENT, tooltip = "How close the pullback must come to the 8 EMA or the broken level to count as a retest.")
-maxExt      = input.float(0.75, "Max close distance from 8 EMA (x ATR)", minval = 0, step = 0.05, group = G_ENT, tooltip = "The trigger candle must close RIGHT above (below) the 8 EMA - no chasing extended candles.")
-failAtr     = input.float(0.25, "Breakout fails if close back through level by (x ATR)", minval = 0, step = 0.05, group = G_ENT)
-entrySess   = input.session("0935-1200", "Entry window (New York time)", group = G_ENT)
-maxTrades   = input.int(3, "Max entries per day", minval = 1, group = G_ENT)
+direction   = input.string("Both", "Direction", options = ["Both", "Long only", "Short only"], group = G_ENT, display = display.none)
+orMin       = input.int(5, "Opening range (minutes)", options = [1, 2, 5, 10, 15, 30], group = G_ENT, display = display.none)
+useOR       = input.bool(true, "Arm on opening-range break (ORH / ORL)", group = G_ENT, display = display.none)
+usePM       = input.bool(true, "Arm on premarket break (PMH / PML)", group = G_ENT, display = display.none)
+usePD       = input.bool(true, "Arm on prior-day break (PDH / PDL)", group = G_ENT, display = display.none)
+usePW       = input.bool(true, "Arm on prior-week break (PWH / PWL)", group = G_ENT, display = display.none)
+trendFilter = input.string("Clean trend", "Trend filter at entry", options = ["Clean trend", "8 > 21 only", "Off"], group = G_ENT, tooltip = "Clean trend = 8 > 21 > 50 (reverse for shorts) with enough spread and slope - same definition as DTS 2.", display = display.none)
+minSpread   = input.float(0.10, "Clean trend: min 8/21 spread (x ATR)", minval = 0, step = 0.05, group = G_ENT, display = display.none)
+minSlope    = input.float(0.05, "Clean trend: min 21 EMA slope over 3 bars (x ATR)", minval = 0, step = 0.01, group = G_ENT, display = display.none)
+vwapFilter  = input.bool(true, "Longs only above VWAP, shorts only below", group = G_ENT, display = display.none)
+tolAtr      = input.float(0.15, "Retest tolerance (x ATR)", minval = 0, step = 0.05, group = G_ENT, tooltip = "How close the pullback must come to the 8 EMA or the broken level to count as a retest.", display = display.none)
+maxExt      = input.float(0.75, "Max close distance from 8 EMA (x ATR)", minval = 0, step = 0.05, group = G_ENT, tooltip = "The trigger candle must close RIGHT above (below) the 8 EMA - no chasing extended candles.", display = display.none)
+failAtr     = input.float(0.25, "Breakout fails if close back through level by (x ATR)", minval = 0, step = 0.05, group = G_ENT, display = display.none)
+entrySess   = input.session("0935-1200", "Entry window (New York time)", group = G_ENT, display = display.none)
+maxTrades   = input.int(3, "Max entries per day", minval = 1, group = G_ENT, display = display.none)
 
 G_RISK = "Stop / target"
-stopBuf    = input.float(0.05, "Stop buffer beyond retest swing (x ATR)", minval = 0, step = 0.05, group = G_RISK)
-maxRiskAtr = input.float(2.5, "Skip entry if stop is wider than (x ATR)", minval = 0.25, step = 0.25, group = G_RISK)
-rr         = input.float(2.0, "Target (R multiple)", minval = 0.5, step = 0.5, group = G_RISK, tooltip = "At the target the stop moves to break-even; the rest exits on a close through the trail EMA.")
-trailSrc   = input.string("8 EMA", "After target, exit on close through", options = ["8 EMA", "21 EMA"], group = G_RISK)
-eodExit    = input.bool(true, "Flat by 15:55 New York", group = G_RISK)
+stopBuf    = input.float(0.05, "Stop buffer beyond retest swing (x ATR)", minval = 0, step = 0.05, group = G_RISK, display = display.none)
+maxRiskAtr = input.float(2.5, "Skip entry if stop is wider than (x ATR)", minval = 0.25, step = 0.25, group = G_RISK, display = display.none)
+rr         = input.float(2.0, "Target (R multiple)", minval = 0.5, step = 0.5, group = G_RISK, tooltip = "At the target the stop moves to break-even; the rest exits on a close through the trail EMA.", display = display.none)
+trailSrc   = input.string("8 EMA", "After target, exit on close through", options = ["8 EMA", "21 EMA"], group = G_RISK, display = display.none)
+eodExit    = input.bool(true, "Flat by 15:55 New York", group = G_RISK, display = display.none)
 
 G_BAN = "A+ setup banner"
-showBanner = input.bool(true, "Show setup banner", group = G_BAN, tooltip = "OUTSIDE LONG = price above PDH and PMH (OUTSIDE SHORT = below PDL and PML). Grade adds one point each for: clean trend, right side of VWAP, beyond the opening range, beyond the prior-week level. 4 = A+, 3 = A, 2 = B, else C.")
-banPos     = input.string("Top center", "Banner position", options = ["Top left", "Top center", "Top right", "Bottom center"], group = G_BAN)
-banAlert   = input.bool(true, "alert() when an A+ OUTSIDE setup appears", group = G_BAN)
+showBanner = input.bool(true, "Show setup banner", group = G_BAN, tooltip = "OUTSIDE LONG = price above PDH and PMH (OUTSIDE SHORT = below PDL and PML). Grade adds one point each for: clean trend, right side of VWAP, beyond the opening range, beyond the prior-week level. 4 = A+, 3 = A, 2 = B, else C.", display = display.none)
+banPos     = input.string("Top center", "Banner position", options = ["Top left", "Top center", "Top right", "Bottom center"], group = G_BAN, display = display.none)
+banAlert   = input.bool(true, "alert() when an A+ OUTSIDE setup appears", group = G_BAN, display = display.none)
 
 G_UI = "Panel"
-showPanel = input.bool(true, "Setup checklist panel", group = G_UI)
-panelPos  = input.string("Bottom right", "Position", options = ["Top left", "Top right", "Bottom left", "Bottom right"], group = G_UI)
-txtSize   = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal"], group = G_UI)
+showPanel = input.bool(true, "Setup checklist panel", group = G_UI, display = display.none)
+panelPos  = input.string("Bottom right", "Position", options = ["Top left", "Top right", "Bottom left", "Bottom right"], group = G_UI, display = display.none)
+txtSize   = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal"], group = G_UI, display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744

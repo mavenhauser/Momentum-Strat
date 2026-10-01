@@ -21,9 +21,9 @@ TradingView layout name: **Day Trading Set up**
 | 5 | VRVP | Built-in *Visible Range Volume Profile* |
 | 6 | Pivots | Built-in *Pivot Points Standard* (Traditional, daily) |
 | – | Volume | Built-in *Volume* (its own pane, as in the reference chart) |
-| 7 | **DTS 1 - Strongest Stocks** | [`pine/dts_1_strongest_stocks.pine`](pine/dts_1_strongest_stocks.pine) |
-| 8 | **DTS 2 - Trend & Breakouts** | [`pine/dts_2_trend_and_breakouts.pine`](pine/dts_2_trend_and_breakouts.pine) |
-| 9 | **DTS 3 - Entry Signals** | [`pine/dts_3_entry_signals.pine`](pine/dts_3_entry_signals.pine) |
+| 7 | **DTS Screener** | [`pine/dts_1_strongest_stocks.pine`](pine/dts_1_strongest_stocks.pine) |
+| 8 | **DTS Trend** | [`pine/dts_2_trend_and_breakouts.pine`](pine/dts_2_trend_and_breakouts.pine) |
+| 9 | **DTS Entry** | [`pine/dts_3_entry_signals.pine`](pine/dts_3_entry_signals.pine) |
 
 That is 9 indicators on one chart. TradingView's free Basic plan allows only
 a few indicators per chart, so this layout needs a paid plan that allows at
@@ -33,7 +33,7 @@ The DTS scripts draw no EMA, VWAP or pivot lines; the built-ins handle
 those. DTS 2 and DTS 3 calculate the 8/21/50 EMAs internally for their
 rules, so keep their EMA length inputs equal to your built-in EMAs.
 
-## DTS 1 - Strongest Stocks (screener table)
+## DTS Screener (screener table)
 
 The table tracks up to 20 tickers. To change the list, open the indicator
 settings and go to **Tickers**:
@@ -71,7 +71,7 @@ the tie-break. The best long candidates sit at the top and the best shorts
 at the bottom. An `alert()` fires when any ticker flips to ▲ or ▼, so a
 single chart alert covers all 20 tickers.
 
-## DTS 2 - Trend & Breakouts
+## DTS Trend
 
 - **Trend ribbon:** the band between the 8 and 21 EMAs is **green** in a
   clean uptrend, **red** in a clean downtrend and **purple** in chop. It
@@ -101,7 +101,7 @@ single chart alert covers all 20 tickers.
 - **Alerts:** *Clean-trend breakout up*, *Clean-trend breakdown*,
   *Trend turns clean*, *BOS up* and *BOS down*.
 
-## DTS 3 - Entry Signals (EMA + level retest)
+## DTS Entry (EMA + level retest)
 
 Long rules (shorts are the mirror image):
 
@@ -185,7 +185,7 @@ these steps have to be done by hand.
    1. Open the file on GitHub, click **Raw**, and copy all of it.
    2. In TradingView, open the **Pine Editor** (bottom panel) → **New** →
       select all → paste.
-   3. Click **Save** and use the name `DTS 1 - Strongest Stocks` (or 2 / 3
+   3. Click **Save** and use the name `DTS Screener`, `DTS Trend` or `DTS Entry`
       for the other files).
    4. Click **Add to chart**.
 
@@ -197,7 +197,7 @@ these steps have to be done by hand.
 
 Click ⏰ **Alert**, then set:
 
-- **Condition:** `DTS 3 - Entry Signals`
+- **Condition:** `DTS Entry`
 - **Trigger:** `Any alert() function call`
 - **Frequency:** once per bar close
 - **Notifications:** turn on app push
@@ -207,7 +207,7 @@ message looks like this:
 
 `DTS: LONG NVDA @ 177.16 | stop 176.40 | target 178.68 (2R) | ORH breakout + 8 EMA retest`
 
-Add a second alert with **Condition** `DTS 1 - Strongest Stocks` →
+Add a second alert with **Condition** `DTS Screener` →
 `Any alert() function call` to get ▲/▼ flips across all 20 tickers.
 
 Each TradingView alert is tied to one symbol. To get entry alerts on several

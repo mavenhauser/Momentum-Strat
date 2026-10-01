@@ -11,29 +11,29 @@
 // lengths below equal to the built-in EMAs on your chart.
 //
 // Part of day_trading_setup/ (see ../README.md).
-indicator("DTS 2 - Trend & Breakouts", shorttitle = "DTS Trend", overlay = true, max_labels_count = 500, max_lines_count = 500)
+indicator("DTS Trend", shorttitle = "DTS Trend", overlay = true, max_labels_count = 500, max_lines_count = 500)
 
 G_TR = "Trend vs chop"
-fastLen   = input.int(8, "EMA fast", minval = 1, group = G_TR, inline = "ema")
-midLen    = input.int(21, "mid", minval = 1, group = G_TR, inline = "ema")
-slowLen   = input.int(50, "slow", minval = 1, group = G_TR, inline = "ema")
-minSpread = input.float(0.10, "Min 8/21 EMA spread (x ATR)", minval = 0, step = 0.05, group = G_TR, tooltip = "The 8 and 21 EMAs must be at least this far apart (in ATR) for the trend to count as clean. Smaller = more bars count as trend.")
-minSlope  = input.float(0.05, "Min 21 EMA slope over 3 bars (x ATR)", minval = 0, step = 0.01, group = G_TR)
-showRib   = input.bool(true, "Trend ribbon between 8 and 21 EMA", group = G_TR)
-barMode   = input.string("Trend colors", "Bar coloring", options = ["Trend colors", "Dim chop only", "Off"], group = G_TR)
+fastLen   = input.int(8, "EMA fast", minval = 1, group = G_TR, inline = "ema", display = display.none)
+midLen    = input.int(21, "mid", minval = 1, group = G_TR, inline = "ema", display = display.none)
+slowLen   = input.int(50, "slow", minval = 1, group = G_TR, inline = "ema", display = display.none)
+minSpread = input.float(0.10, "Min 8/21 EMA spread (x ATR)", minval = 0, step = 0.05, group = G_TR, tooltip = "The 8 and 21 EMAs must be at least this far apart (in ATR) for the trend to count as clean. Smaller = more bars count as trend.", display = display.none)
+minSlope  = input.float(0.05, "Min 21 EMA slope over 3 bars (x ATR)", minval = 0, step = 0.01, group = G_TR, display = display.none)
+showRib   = input.bool(true, "Trend ribbon between 8 and 21 EMA", group = G_TR, display = display.none)
+barMode   = input.string("Trend colors", "Bar coloring", options = ["Trend colors", "Dim chop only", "Off"], group = G_TR, display = display.none)
 
 G_LVL = "Key levels"
-showLevels = input.bool(true, "Show PDH / PDL / PMH / PML", group = G_LVL)
-showWeek   = input.bool(true, "Show prior-week high / low (PWH / PWL)", group = G_LVL)
-tagMode    = input.string("Name", "Right-edge level tags", options = ["Name", "Name + price", "Off"], group = G_LVL)
-orMin      = input.int(5, "Opening range (minutes)", options = [1, 2, 5, 10, 15, 30], group = G_LVL)
-showOR     = input.bool(true, "Show opening range high / low", group = G_LVL)
-showBrk    = input.bool(true, "Mark key-level breakouts", group = G_LVL)
-cleanOnly  = input.bool(false, "Only mark breakouts in a clean trend", group = G_LVL)
+showLevels = input.bool(true, "Show PDH / PDL / PMH / PML", group = G_LVL, display = display.none)
+showWeek   = input.bool(true, "Show prior-week high / low (PWH / PWL)", group = G_LVL, display = display.none)
+tagMode    = input.string("Name", "Right-edge level tags", options = ["Name", "Name + price", "Off"], group = G_LVL, display = display.none)
+orMin      = input.int(5, "Opening range (minutes)", options = [1, 2, 5, 10, 15, 30], group = G_LVL, display = display.none)
+showOR     = input.bool(true, "Show opening range high / low", group = G_LVL, display = display.none)
+showBrk    = input.bool(true, "Mark key-level breakouts", group = G_LVL, display = display.none)
+cleanOnly  = input.bool(false, "Only mark breakouts in a clean trend", group = G_LVL, display = display.none)
 
 G_MS = "Market structure"
-showMS = input.bool(true, "Show HH / HL / LH / LL swings and BOS (break of structure)", group = G_MS)
-swLen  = input.int(3, "Swing strength (bars each side)", minval = 1, group = G_MS)
+showMS = input.bool(true, "Show HH / HL / LH / LL swings and BOS (break of structure)", group = G_MS, display = display.none)
+swLen  = input.int(3, "Swing strength (bars each side)", minval = 1, group = G_MS, display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744
@@ -120,14 +120,14 @@ barcolor(barMode == "Off" ? color(na) : trend == 0 ? C_DIM : barMode == "Trend c
 
 // ---------------------------------------------------------------- Level plots
 lv(float x, bool on) => on and not chartNewDay ? x : na
-plot(lv(pdh, showLevels), "PDH", color = C_BULL, style = plot.style_linebr)
-plot(lv(pdl, showLevels), "PDL", color = C_BEAR, style = plot.style_linebr)
-plot(lv(pmh, showLevels), "PMH", color = color.new(C_BULL, 20), style = plot.style_circles, linewidth = 1)
-plot(lv(pml, showLevels), "PML", color = color.new(C_BEAR, 20), style = plot.style_circles, linewidth = 1)
-plot(lv(pwh, showWeek), "PWH", color = color.new(C_PWH, 10), style = plot.style_linebr, linewidth = 2)
-plot(lv(pwl, showWeek), "PWL", color = color.new(C_PWL, 10), style = plot.style_linebr, linewidth = 2)
-plot(lv(orh, showOR), "ORH", color = color.new(C_OR, 20), style = plot.style_linebr)
-plot(lv(orl, showOR), "ORL", color = color.new(C_OR, 20), style = plot.style_linebr)
+plot(lv(pdh, showLevels), "PDH", color = C_BULL, style = plot.style_linebr, display = display.all - display.status_line)
+plot(lv(pdl, showLevels), "PDL", color = C_BEAR, style = plot.style_linebr, display = display.all - display.status_line)
+plot(lv(pmh, showLevels), "PMH", color = color.new(C_BULL, 20), style = plot.style_circles, linewidth = 1, display = display.all - display.status_line)
+plot(lv(pml, showLevels), "PML", color = color.new(C_BEAR, 20), style = plot.style_circles, linewidth = 1, display = display.all - display.status_line)
+plot(lv(pwh, showWeek), "PWH", color = color.new(C_PWH, 10), style = plot.style_linebr, linewidth = 2, display = display.all - display.status_line)
+plot(lv(pwl, showWeek), "PWL", color = color.new(C_PWL, 10), style = plot.style_linebr, linewidth = 2, display = display.all - display.status_line)
+plot(lv(orh, showOR), "ORH", color = color.new(C_OR, 20), style = plot.style_linebr, display = display.all - display.status_line)
+plot(lv(orl, showOR), "ORL", color = color.new(C_OR, 20), style = plot.style_linebr, display = display.all - display.status_line)
 
 // Right-edge flag tags for today's levels (price shown on hover).
 f_tag(array<label> arr, float y, string name, color col) =>

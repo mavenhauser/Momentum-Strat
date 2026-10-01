@@ -12,23 +12,23 @@
 //
 // Part of day_trading_setup/ (see ../README.md). Use alongside
 // 2/3 Trend & Breakouts and 3/3 Entry Signals.
-indicator("DTS 1 - Strongest Stocks", shorttitle = "DTS Screener", overlay = true)
+indicator("DTS Screener", shorttitle = "DTS Screener", overlay = true)
 
 // Max tickers scanned. TradingView allows 40 distinct requests per script, so
 // this can be raised to 40 (also raise the table row count below).
 MAX_T = 20
 
 G_SYM = "Tickers"
-preset = input.string("Custom list", "Ticker list", options = ["Custom list", "Momentum universe", "Mega-cap tech", "Semiconductors", "High beta / momentum", "Index ETFs + sectors"], group = G_SYM, tooltip = "Pick a preset, or choose 'Custom list' and edit the box below.")
-custom = input.text_area("NVDA, AMD, AVGO, MU, DELL, TSLA, PLTR, MSFT, AAPL, GOOGL, META, AMZN, NFLX, ORCL, CRM, QCOM, INTC, ADBE, SPY, QQQ", "Custom list (comma-separated, up to 20)", group = G_SYM, tooltip = "Any symbols, separated by commas, spaces or new lines. Add an exchange prefix (e.g. NYSE:DELL) only if a ticker is ambiguous. Duplicates are ignored; anything past 20 is dropped.")
+preset = input.string("Custom list", "Ticker list", options = ["Custom list", "Momentum universe", "Mega-cap tech", "Semiconductors", "High beta / momentum", "Index ETFs + sectors"], group = G_SYM, tooltip = "Pick a preset, or choose 'Custom list' and edit the box below.", display = display.none)
+custom = input.text_area("NVDA, AMD, AVGO, MU, DELL, TSLA, PLTR, MSFT, AAPL, GOOGL, META, AMZN, NFLX, ORCL, CRM, QCOM, INTC, ADBE, SPY, QQQ", "Custom list (comma-separated, up to 20)", group = G_SYM, tooltip = "Any symbols, separated by commas, spaces or new lines. Add an exchange prefix (e.g. NYSE:DELL) only if a ticker is ambiguous. Duplicates are ignored; anything past 20 is dropped.", display = display.none)
 
 G_SCR = "Screener"
-scrPos    = input.string("Top right", "Position", options = ["Top left", "Top right", "Bottom left", "Bottom right"], group = G_SCR)
-txtSize   = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal"], group = G_SCR)
-scrRows   = input.int(20, "Rows to show", minval = 1, maxval = 20, group = G_SCR)
-scrSort   = input.string("Strength", "Sort by", options = ["Strength", "% change", "Input order"], group = G_SCR, tooltip = "Strength = trend column first (above PDH+PMH, then mixed, then below PDL+PML), then % change.")
-scrTf     = input.timeframe("", "Timeframe (blank = chart)", group = G_SCR, tooltip = "Must be intraday. Set to 5 to speed up loading on a 1-minute chart.")
-scrAlerts = input.bool(true, "alert() when a ticker flips to ▲ / ▼", group = G_SCR)
+scrPos    = input.string("Top right", "Position", options = ["Top left", "Top right", "Bottom left", "Bottom right"], group = G_SCR, display = display.none)
+txtSize   = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal"], group = G_SCR, display = display.none)
+scrRows   = input.int(20, "Rows to show", minval = 1, maxval = 20, group = G_SCR, display = display.none)
+scrSort   = input.string("Strength", "Sort by", options = ["Strength", "% change", "Input order"], group = G_SCR, tooltip = "Strength = trend column first (above PDH+PMH, then mixed, then below PDL+PML), then % change.", display = display.none)
+scrTf     = input.timeframe("", "Timeframe (blank = chart)", group = G_SCR, tooltip = "Must be intraday. Set to 5 to speed up loading on a 1-minute chart.", display = display.none)
+scrAlerts = input.bool(true, "alert() when a ticker flips to ▲ / ▼", group = G_SCR, display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744
