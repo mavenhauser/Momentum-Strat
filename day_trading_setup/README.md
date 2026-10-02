@@ -178,6 +178,8 @@ these steps have to be done by hand.
 2. **Chart:** load a liquid stock on a **5-minute** chart (2-minute also
    works). Turn **extended hours off** under Chart settings → Symbol →
    Session. The DTS scripts still read premarket levels in the background.
+   Before the open you'll want it on for a while; see
+   [Premarket vs regular hours](#premarket-vs-regular-hours).
 3. **Built-ins:** open Indicators and add **Moving Average Exponential**
    three times, setting the lengths to 8, 21 and 50. Then add **VWAP**,
    **Visible Range Volume Profile** and **Pivot Points Standard**.
@@ -192,6 +194,28 @@ these steps have to be done by hand.
    Once saved, the scripts appear under Indicators → **My scripts** for
    reuse on any chart.
 5. **Save** the layout with Ctrl/Cmd+S.
+
+### Premarket vs regular hours
+
+With extended hours off, the newest bar on the chart is the previous
+session's last candle until the 09:30 bar prints. The DTS scripts only
+update when a new chart bar arrives, so before the open:
+
+- the screener shows **yesterday's close**, not premarket prices;
+- PDH / PDL and PMH / PML are **one day behind** (PDH / PDL from two
+  sessions ago, PMH / PML from yesterday's premarket);
+- the banner reads `CLOSED 100%` instead of `PREMARKET`.
+
+Daily routine:
+
+1. **Before 09:30:** turn extended hours **on** (click **RTH** at the
+   bottom right of the chart so it reads **ETH**). The screener and today's
+   PMH / PML / PDH / PDL are then live, and you can pick the day's names.
+2. **At 09:30:** switch back to **RTH**. With extended hours on, the 8 / 21
+   / 50 EMAs, ATR and VWAP (both the built-ins and the copies inside DTS 2
+   and DTS 3) include the thin premarket bars, which shifts the trend
+   filter, retest tolerance and stops away from the rules above. Entries
+   still only fire in the regular session either way.
 
 ### Alerts ("tell me when to enter")
 
