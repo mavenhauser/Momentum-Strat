@@ -12,7 +12,7 @@
 //
 // Part of day_trading_setup/ (see ../README.md). Use alongside
 // 2/3 Trend & Breakouts and 3/3 Entry Signals.
-indicator("DTS Screener", shorttitle = "DTS Screener", overlay = true)
+indicator("DTS Screener", shorttitle = "DTS Scan", overlay = true)
 
 // Max tickers scanned. TradingView allows 40 distinct requests per script, so
 // this can be raised to 40 (also raise the table row count below).

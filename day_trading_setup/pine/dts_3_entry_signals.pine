@@ -359,8 +359,8 @@ if longSig or shortSig
         sRetest := false
         sSwing := na
 
-plotshape(retestNowL and pos == 0 and allowLong, "Retest (long) - get ready", shape.diamond, location.belowbar, color.new(C_BULL, 30), size = size.tiny)
-plotshape(retestNowS and pos == 0 and allowShort, "Retest (short) - get ready", shape.diamond, location.abovebar, color.new(C_BEAR, 30), size = size.tiny)
+plotshape(retestNowL and pos == 0 and allowLong, "Retest (long) - get ready", shape.diamond, location.belowbar, color.new(C_BULL, 30), size = size.tiny, display = display.all - display.status_line)
+plotshape(retestNowS and pos == 0 and allowShort, "Retest (short) - get ready", shape.diamond, location.abovebar, color.new(C_BEAR, 30), size = size.tiny, display = display.all - display.status_line)
 
 alertcondition(longSig, "Long entry", "DTS LONG {{ticker}} @ {{close}} - 8 EMA retest confirmed")
 alertcondition(shortSig, "Short entry", "DTS SHORT {{ticker}} @ {{close}} - 8 EMA retest confirmed")

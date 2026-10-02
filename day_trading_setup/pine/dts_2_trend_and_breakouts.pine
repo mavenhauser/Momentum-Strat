@@ -215,14 +215,14 @@ brkPWL = okDn and showWeek and xdPW
 
 upCol = trend == 1 ? C_BULL : C_DIM
 dnCol = trend == -1 ? C_BEAR : C_DIM
-plotshape(brkORH, "ORH break", shape.triangleup, location.belowbar, upCol, text = "ORH", textcolor = upCol, size = size.tiny)
-plotshape(brkPMH, "PMH break", shape.triangleup, location.belowbar, upCol, text = "PMH", textcolor = upCol, size = size.tiny)
-plotshape(brkPDH, "PDH break", shape.triangleup, location.belowbar, upCol, text = "PDH", textcolor = upCol, size = size.tiny)
-plotshape(brkPWH, "PWH break", shape.triangleup, location.belowbar, upCol, text = "PWH", textcolor = upCol, size = size.tiny)
-plotshape(brkORL, "ORL break", shape.triangledown, location.abovebar, dnCol, text = "ORL", textcolor = dnCol, size = size.tiny)
-plotshape(brkPML, "PML break", shape.triangledown, location.abovebar, dnCol, text = "PML", textcolor = dnCol, size = size.tiny)
-plotshape(brkPDL, "PDL break", shape.triangledown, location.abovebar, dnCol, text = "PDL", textcolor = dnCol, size = size.tiny)
-plotshape(brkPWL, "PWL break", shape.triangledown, location.abovebar, dnCol, text = "PWL", textcolor = dnCol, size = size.tiny)
+plotshape(brkORH, "ORH break", shape.triangleup, location.belowbar, upCol, text = "ORH", textcolor = upCol, size = size.tiny, display = display.all - display.status_line)
+plotshape(brkPMH, "PMH break", shape.triangleup, location.belowbar, upCol, text = "PMH", textcolor = upCol, size = size.tiny, display = display.all - display.status_line)
+plotshape(brkPDH, "PDH break", shape.triangleup, location.belowbar, upCol, text = "PDH", textcolor = upCol, size = size.tiny, display = display.all - display.status_line)
+plotshape(brkPWH, "PWH break", shape.triangleup, location.belowbar, upCol, text = "PWH", textcolor = upCol, size = size.tiny, display = display.all - display.status_line)
+plotshape(brkORL, "ORL break", shape.triangledown, location.abovebar, dnCol, text = "ORL", textcolor = dnCol, size = size.tiny, display = display.all - display.status_line)
+plotshape(brkPML, "PML break", shape.triangledown, location.abovebar, dnCol, text = "PML", textcolor = dnCol, size = size.tiny, display = display.all - display.status_line)
+plotshape(brkPDL, "PDL break", shape.triangledown, location.abovebar, dnCol, text = "PDL", textcolor = dnCol, size = size.tiny, display = display.all - display.status_line)
+plotshape(brkPWL, "PWL break", shape.triangledown, location.abovebar, dnCol, text = "PWL", textcolor = dnCol, size = size.tiny, display = display.all - display.status_line)
 
 cleanUpBreak = (brkORH or brkPMH or brkPDH or brkPWH) and trend == 1
 cleanDnBreak = (brkORL or brkPML or brkPDL or brkPWL) and trend == -1
