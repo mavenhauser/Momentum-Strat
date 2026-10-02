@@ -238,6 +238,73 @@ Each TradingView alert is tied to one symbol. To get entry alerts on several
 tickers, create a DTS 3 alert on each one, or use watchlist alerts if your
 plan supports them.
 
+## Trading it: entry guide
+
+How the three indicators fit together during the day. Longs are shown;
+shorts are the mirror image (▼ rows, ORL / PML / PDL / PWL, below VWAP,
+close back below the 8 EMA).
+
+### 1. Before 09:30: pick the names (DTS Screener, ETH on)
+
+- **Longs:** ▲ rows at the top of the table, above both PDH and PMH.
+- **Shorts:** ▼ rows at the bottom.
+- **⚠ rows** are inside the range: skip them or keep them on watch.
+- Load your top one or two names, then switch the chart to **RTH** at
+  09:30.
+
+### 2. Check the backdrop (banner and panel)
+
+- **Banner:** **A+ / A OUTSIDE LONG** (green) is the setup you want.
+  **B / C** (amber) is weaker. **INSIDE RANGE - NO EDGE** means stand
+  aside.
+- **Panel → Trend** must read **CLEAN UPTREND**. On **CHOP - stand aside**
+  the entry rules won't fire anyway.
+- **Panel → VWAP** must say **above**.
+- **Time:** entries are allowed **09:35–12:00**. The 09:30–09:35 bars build
+  the opening range.
+
+### 3. Watch the entry sequence
+
+| Step | What you'll see | Meaning |
+|---|---|---|
+| **Breakout** | ▲ `ORH` / `PMH` / `PDH` / `PWH` marker below a candle (DTS Trend) | A candle closed above a key level. **Bright green** = clean trend; **gray** = chop, so ignore it. |
+| **Armed** | Panel "Long" row: `armed ORH 119.18 → wait retest` | The setup is live. It cancels on a close below the 21 EMA, or a close more than 0.25 ATR back below the level. |
+| **Retest** | ◆ green diamond (*get ready*) | A pullback tagged the 8 EMA or the broken level. Panel: `retest ✓ → wait close > 8 EMA`. |
+| **Entry** | Green **LONG** label with Entry / Stop / Target, plus lines | A green candle closed above the 8 EMA, no more than 0.75 ATR above it, still above the level, in a clean trend, above VWAP. |
+
+Signals fire **on the candle close**, and the label's entry price is that
+close: enter at or just after it. Nothing fires mid-candle.
+
+### 4. Manage the trade (the labels tell you)
+
+- **Stop** = the lowest low since the retest − 0.05 ATR. The signal is
+  skipped if the stop would be wider than 2.5 ATR.
+- **Target** = 2R. When it's hit you'll see `2R ✓ stop → BE`: take a
+  partial and move your stop to your entry.
+- **The rest** exits on a close below the 8 EMA (`TRAIL`), or at `BE` if
+  it comes back to your entry.
+- Flat by **15:55** (`EOD`). Max **3 entries per day**; the panel shows
+  `flat (1/3 today)`.
+
+### Example (INTC 5m, 2026-10-01)
+
+`LONG · ORH retest — Entry 119.84, Stop 119.06, Target 121.41`
+
+Risk 0.78, so 2R = 119.84 + 1.56 ≈ 121.41. Price reached the target
+(`2R ✓`) and the rest was closed later by the 8 EMA trail.
+
+### When to skip
+
+- Gray breakout markers, a CHOP panel, or the INSIDE RANGE banner.
+- **MIDDAY - CAUTION** (11:30–14:00), even though the entry window runs
+  to 12:00.
+- A breakout that has run far from the 8 EMA with no pullback. The script
+  won't chase it, and you shouldn't either.
+
+These rules haven't been backtested. Paper-trade the signals and compare
+them with what you'd have taken by hand before sizing up. Every threshold
+(2R, 0.75 ATR, the 09:35–12:00 window, 3 trades a day) is a setting.
+
 ## Limitations
 
 - **Request limit:** DTS 1 makes one request per ticker, so at most 20,
