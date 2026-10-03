@@ -1,0 +1,751 @@
+<title>Day Trading Setup</title>
+<style>
+  /* Layout: one 900px record sheet, same system as the Momentum Strategy record:
+     ruled masthead, serif section titles, mono labels, raised panels for reference data. */
+  :root {
+    --paper: #eef1f0;
+    --paper-raised: #ffffff;
+    --ink: #16232a;
+    --ink-soft: #56666f;
+    --ink-faint: #8b979c;
+    --accent: #1f6f64;
+    --accent-soft: #e4efec;
+    --rule: #d6dcda;
+    --rule-strong: #b9c2bf;
+    --pos: #1f7a4d;
+    --neg: #b3423c;
+    --warn: #9a6a1f;
+    --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
+    --sans: -apple-system, "Seravek", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #12181a;
+      --paper-raised: #1a2225;
+      --ink: #e9efee;
+      --ink-soft: #9db0ac;
+      --ink-faint: #647573;
+      --accent: #5fb8a9;
+      --accent-soft: #1c2b29;
+      --rule: #2a3538;
+      --rule-strong: #3c4a4d;
+      --pos: #4ec98a;
+      --neg: #e2716a;
+      --warn: #d3a54e;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #12181a;
+    --paper-raised: #1a2225;
+    --ink: #e9efee;
+    --ink-soft: #9db0ac;
+    --ink-faint: #647573;
+    --accent: #5fb8a9;
+    --accent-soft: #1c2b29;
+    --rule: #2a3538;
+    --rule-strong: #3c4a4d;
+    --pos: #4ec98a;
+    --neg: #e2716a;
+    --warn: #d3a54e;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15.5px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet {
+    max-width: 900px;
+    margin: 0 auto;
+    padding-block: 3.2rem 5rem;
+    padding-inline: 1.75rem;
+  }
+  @media (max-width: 480px) { .sheet { padding-inline: 1.1rem; padding-block: 2rem 3.5rem; } }
+
+  h1, h2, h3, h4 { text-wrap: balance; font-weight: 600; }
+  p { margin: 0 0 0.8rem; max-width: 70ch; }
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--accent-soft);
+    border-radius: 2px;
+    padding: 0.05rem 0.3rem;
+    overflow-wrap: anywhere;
+  }
+  a { color: var(--accent); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding-bottom: 1.6rem;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 1.8rem;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .masthead h1 {
+    font-family: var(--serif);
+    font-size: 2.15rem;
+    letter-spacing: -0.01em;
+    margin: 0.1rem 0 0.2rem;
+  }
+  .masthead .dek { color: var(--ink-soft); font-size: 15px; max-width: 62ch; margin: 0; }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 1.4rem;
+    margin-top: 0.6rem;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+  }
+  .meta-row b { color: var(--ink-soft); font-weight: 600; }
+
+  section { margin-top: 2.6rem; }
+
+  h2.section-title {
+    font-family: var(--serif);
+    font-size: 1.3rem;
+    letter-spacing: -0.005em;
+    padding-bottom: 0.55rem;
+    border-bottom: 1px solid var(--rule-strong);
+    margin: 0 0 1.1rem;
+  }
+  h3.sub {
+    font-family: var(--serif);
+    font-size: 1.02rem;
+    margin: 1.6rem 0 0.6rem;
+  }
+
+  /* Reference grid */
+  .assumptions {
+    background: var(--paper-raised);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 1.3rem 1.5rem;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.9rem 2rem;
+  }
+  @media (max-width: 620px) { .assumptions { grid-template-columns: 1fr; } }
+  .assumptions > div { min-width: 0; }
+  .assumptions dt {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 0.15rem;
+  }
+  .assumptions dd { margin: 0; font-size: 14.5px; color: var(--ink); }
+  .assumptions dd.note { color: var(--ink-soft); font-size: 13px; margin-top: 0.1rem; }
+
+  /* Sequence strip */
+  .lineage {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    background: var(--paper-raised);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 1rem 1.3rem;
+    line-height: 2.1;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .lineage .node { color: var(--ink); font-weight: 600; }
+  .lineage .node.pick { color: var(--accent); }
+  .lineage .node.dead { color: var(--neg); font-weight: 400; }
+  .lineage .arrow { color: var(--ink-faint); margin: 0 0.5rem; }
+  .lineage .branch { display: block; padding-left: 2.4rem; }
+  .lineage .src { color: var(--ink-faint); font-weight: 400; }
+
+  /* Tables */
+  .table-wrap {
+    overflow-x: auto;
+    background: var(--paper-raised);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 0.4rem 1rem 0.6rem;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td {
+    padding: 0.55rem 0.7rem;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--rule);
+  }
+  thead th {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+    border-bottom: 1px solid var(--rule-strong);
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.k {
+    font-family: var(--mono);
+    font-size: 13px;
+    white-space: nowrap;
+    color: var(--ink);
+    font-weight: 600;
+  }
+  td.num { font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.soft { color: var(--ink-soft); }
+  .wide { min-width: 560px; }
+
+  .pos { color: var(--pos); }
+  .neg { color: var(--neg); }
+  .warn { color: var(--warn); }
+
+  /* Indicator cards */
+  .variant { padding-top: 1.9rem; border-top: 1px solid var(--rule); margin-top: 1.9rem; }
+  .variant.first { border-top: none; padding-top: 0; margin-top: 0; }
+  .variant-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.3rem; }
+  .variant-id {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 2px;
+    padding: 0.05rem 0.4rem;
+    font-weight: 700;
+  }
+  .variant-head h3 { font-family: var(--serif); font-size: 1.12rem; margin: 0; }
+  .rules { display: flex; gap: 0.7rem 1.6rem; flex-wrap: wrap; font-size: 13px; color: var(--ink-soft); margin: 0.5rem 0 1rem; }
+  .rules div b { color: var(--ink); font-weight: 600; }
+  .rules .label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    display: block;
+    margin-bottom: 0.1rem;
+  }
+  ul.plain { margin: 0 0 0.8rem; padding-left: 1.15rem; max-width: 72ch; }
+  ul.plain li { margin-bottom: 0.3rem; }
+  ol.steps { margin: 0 0 0.8rem; padding-left: 1.3rem; max-width: 72ch; }
+  ol.steps li { margin-bottom: 0.45rem; }
+
+  .verdict {
+    margin-top: 0.9rem;
+    padding: 0.85rem 1.1rem;
+    background: var(--paper-raised);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 3px 3px 0;
+    font-size: 14px;
+    color: var(--ink);
+  }
+  .verdict b { color: var(--accent); }
+
+  .informal {
+    background: var(--paper-raised);
+    border: 1px dashed var(--rule-strong);
+    border-radius: 3px;
+    padding: 1rem 1.2rem;
+    font-size: 14px;
+    color: var(--ink-soft);
+  }
+  .informal .tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--warn);
+    display: block;
+    margin-bottom: 0.4rem;
+  }
+  .informal p:last-child { margin-bottom: 0; }
+
+  /* Example trade */
+  .ticket {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    background: var(--paper-raised);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 1rem 1.3rem;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.8rem 1.4rem;
+  }
+  @media (max-width: 560px) { .ticket { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .ticket .label { display: block; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+  .ticket .v { font-size: 1.05rem; font-weight: 600; color: var(--ink); }
+
+  /* Build log */
+  .bug {
+    background: var(--paper-raised);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 1.1rem 1.3rem;
+    margin-top: 1.1rem;
+  }
+  .bug-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+  .bug-id {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--neg);
+    border: 1px solid var(--neg);
+    border-radius: 2px;
+    padding: 0.05rem 0.4rem;
+    font-weight: 700;
+  }
+  .bug-head h4 { font-family: var(--serif); font-size: 1.02rem; margin: 0; }
+  .bug dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.35rem 1rem; margin: 0.7rem 0 0; font-size: 14px; }
+  .bug dt {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    white-space: nowrap;
+    padding-top: 0.15rem;
+  }
+  .bug dd { margin: 0; color: var(--ink); }
+
+  .status-list { list-style: none; margin: 0; padding: 0; }
+  .status-list li { display: flex; gap: 0.7rem; padding: 0.55rem 0; border-bottom: 1px solid var(--rule); font-size: 14.5px; }
+  .status-list li:last-child { border-bottom: none; }
+  .status-list li > span:last-child { min-width: 0; }
+  .badge {
+    flex: 0 0 auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-radius: 2px;
+    padding: 0.1rem 0.45rem;
+    height: fit-content;
+    margin-top: 0.1rem;
+    min-width: 5.6rem;
+    text-align: center;
+  }
+  .badge.done { color: var(--pos); border: 1px solid var(--pos); }
+  .badge.unconfirmed { color: var(--warn); border: 1px solid var(--warn); }
+  .badge.open { color: var(--neg); border: 1px solid var(--neg); }
+
+  .final-call {
+    margin-top: 2.6rem;
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 4px;
+    padding: 1.7rem 1.9rem;
+  }
+  .final-call .eyebrow { font-size: 11px; letter-spacing: 0.12em; opacity: 0.95; }
+  .final-call h2 { font-family: var(--serif); font-size: 1.4rem; margin: 0.3rem 0 0.7rem; color: var(--paper); }
+  .final-call p { color: color-mix(in srgb, var(--paper) 82%, transparent); font-size: 14.5px; max-width: 68ch; }
+  .final-call p b { color: var(--paper); }
+  .final-call .caveat {
+    margin-top: 0.9rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid color-mix(in srgb, var(--paper) 25%, transparent);
+    font-size: 13.5px;
+    margin-bottom: 0;
+  }
+  /* The dark panel sits on --ink, so the accent needs its light-on-dark value there. */
+  .final-call .eyebrow { color: color-mix(in srgb, var(--accent) 55%, var(--paper)); }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--rule);
+    font-size: 12px;
+    color: var(--ink-faint);
+    font-family: var(--mono);
+  }
+</style>
+
+<div class="sheet">
+
+  <div class="masthead">
+    <span class="eyebrow">Internal record · indicator guide &amp; build log</span>
+    <h1>Day Trading Setup</h1>
+    <p class="dek">Three alert-only TradingView indicators for intraday opening-range breakout trades: wait for a stock to break a key level, let it pull back to the 8 EMA or the broken level, and enter when a candle closes back above the 8 EMA. This page records what each indicator does, how to trade with them, and what was built and fixed to get them running on the Day Trading Set Up layout. Separate from the Momentum Strategy (Variant H) system and shares no code with it.</p>
+    <div class="meta-row">
+      <span><b>Prepared</b> 2026-10-03</span>
+      <span><b>Built</b> 2026-10-01 to 2026-10-03</span>
+      <span><b>Instrument</b> Pine Script v6 indicators: DTS Screener, DTS Trend, DTS Entry</span>
+      <span><b>Repo</b> mavenhauser/Momentum-Strat · branch day-trading-setup</span>
+      <span><b>Status</b> running live, not backtested</span>
+    </div>
+  </div>
+
+  <section>
+    <h2 class="section-title">The setup at a glance</h2>
+    <dl class="assumptions">
+      <div>
+        <dt>Chart</dt>
+        <dd>5-minute bars, regular hours (RTH) while trading</dd>
+        <dd class="note">2-minute also works. Built for 1–15 minute charts on US stocks; a daily chart gives meaningless signals.</dd>
+      </div>
+      <div>
+        <dt>Style</dt>
+        <dd>Opening-range breakout with an 8 EMA retest entry</dd>
+        <dd class="note">Long and short. Shorts are the mirror image of every rule below.</dd>
+      </div>
+      <div>
+        <dt>What it does</dt>
+        <dd>Draws levels, labels and alerts only</dd>
+        <dd class="note">Places no orders and has no Python side. You take the trade by hand.</dd>
+      </div>
+      <div>
+        <dt>Screener universe</dt>
+        <dd>Up to 20 tickers, from a preset or a pasted list</dd>
+        <dd class="note">Default: NVDA, AMD, AVGO, MU, DELL, TSLA, PLTR, MSFT, AAPL, GOOGL, META, AMZN, NFLX, ORCL, CRM, QCOM, INTC, ADBE, SPY, QQQ.</dd>
+      </div>
+      <div>
+        <dt>Entry window</dt>
+        <dd>09:35–12:00 New York time</dd>
+        <dd class="note">The 09:30–09:35 bars build the opening range. Max 3 entries per day.</dd>
+      </div>
+      <div>
+        <dt>Stop</dt>
+        <dd>Lowest low since the retest, minus 0.05 ATR</dd>
+        <dd class="note">The signal is skipped if that stop would be wider than 2.5 ATR.</dd>
+      </div>
+      <div>
+        <dt>Target</dt>
+        <dd>2R, then stop to break-even</dd>
+        <dd class="note">The rest exits on a close back through the 8 EMA. Everything is flat by 15:55.</dd>
+      </div>
+      <div>
+        <dt>Evidence</dt>
+        <dd>None yet</dd>
+        <dd class="note">The scripts compile and run correctly. The rules themselves have not been backtested or paper-traded.</dd>
+      </div>
+    </dl>
+  </section>
+
+  <section>
+    <h2 class="section-title">How a trade comes together</h2>
+    <div class="lineage">
+      <span class="node">Screener ▲ row</span><span class="src"> · DTS Screener</span><span class="arrow">→</span><span class="node">A / A+ OUTSIDE LONG</span><span class="src"> · banner</span><span class="arrow">→</span><span class="node">CLEAN UPTREND + above VWAP</span><span class="src"> · panel</span>
+      <span class="branch"><span class="arrow">↳</span><span class="node">▲ breakout marker</span><span class="src"> · DTS Trend</span><span class="arrow">→</span><span class="node">armed</span><span class="arrow">→</span><span class="node">◆ retest</span><span class="arrow">→</span><span class="node pick">LONG label: entry / stop / target</span><span class="src"> · DTS Entry</span></span>
+      <span class="branch" style="padding-left: 4.8rem;"><span class="arrow">↳</span><span class="node">2R ✓ stop → BE</span><span class="arrow">→</span><span class="node">TRAIL (close below 8 EMA)</span><span class="arrow">or</span><span class="node">EOD 15:55</span></span>
+      <span class="branch" style="padding-left: 4.8rem;"><span class="arrow">↳</span><span class="node dead">STOP</span><span class="src"> · low hits the stop before 2R</span></span>
+    </div>
+    <p style="margin-top: 0.9rem; color: var(--ink-soft); font-size: 14px;">Each step is something you can see on the chart. Nothing fires mid-candle: every signal waits for the 5-minute bar to close.</p>
+  </section>
+
+  <section>
+    <h2 class="section-title">The layout</h2>
+    <p>The layout is named <b>Day Trading Set Up</b> in TradingView. The three DTS scripts draw no EMA, VWAP or pivot lines of their own. Built-in indicators handle those, and DTS Trend and DTS Entry calculate the same 8 / 21 / 50 EMAs internally for their rules.</p>
+    <div class="table-wrap">
+      <table class="wide">
+        <thead>
+          <tr><th>Indicator</th><th>Job</th><th>On your chart</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">EMA 8 / 21 / 50</td><td>Trend lines the entry rules are built around</td><td class="soft">Your "3EMA" script set to 8, 21, 50. Matches the lengths inside the DTS scripts.</td></tr>
+          <tr><td class="k">VWAP</td><td>Longs only above it, shorts only below</td><td class="soft">Built-in, session-anchored, hlc3. Added 2026-10-02.</td></tr>
+          <tr><td class="k">VRVP</td><td>Volume profile for the visible range</td><td class="soft">Built-in, 24 rows.</td></tr>
+          <tr><td class="k">Pivots</td><td>Daily floor pivots</td><td class="soft">Built-in, Traditional. Currently hidden.</td></tr>
+          <tr><td class="k">Volume</td><td>Volume bars</td><td class="soft">On the price pane, by your choice.</td></tr>
+          <tr><td class="k">DTS Screener</td><td>Which stocks are outside yesterday's and premarket range</td><td class="soft">Saved script, version 6.0.</td></tr>
+          <tr><td class="k">DTS Trend</td><td>Trend ribbon, key levels, breakout markers, market structure</td><td class="soft">Saved script, version 3.0. Bar coloring off.</td></tr>
+          <tr><td class="k">DTS Entry</td><td>Entry signals, stop and target, checklist panel, A+ banner</td><td class="soft">Saved script, version 2.0.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section-title">The three indicators</h2>
+
+    <div class="variant first">
+      <div class="variant-head">
+        <span class="variant-id">DTS 1</span>
+        <h3>DTS Screener: the strongest-stocks table</h3>
+      </div>
+      <div class="rules">
+        <div><span class="label">Legend name</span><b>DTS Scan</b></div>
+        <div><span class="label">Tracks</span><b>up to 20 tickers</b></div>
+        <div><span class="label">Alert</span><b>any ticker flipping to ▲ or ▼</b></div>
+      </div>
+      <p>A table in the top right that ranks your tickers by where price sits against two ranges: yesterday's regular session (PDH / PDL) and today's premarket (PMH / PML).</p>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>Column</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td class="k">Price / Volume / % Chg</td><td>Last price, today's volume including premarket, and change against the prior regular-session close.</td></tr>
+            <tr><td class="k">PDH Break / PMH Break</td><td><b>●</b> when price is above the level. Otherwise a green bar shows how far price has travelled from the low toward the high.</td></tr>
+            <tr><td class="k">PDL Break / PML Break</td><td><b>●</b> when price is below the level. Otherwise a red bar shows how far price has fallen from the high toward the low.</td></tr>
+            <tr><td class="k">Trend</td><td><b class="pos">▲</b> above PDH and PMH · <b class="neg">▼</b> below PDL and PML · <b class="warn">⚠</b> mixed or inside the range.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul class="plain" style="margin-top: 0.9rem;">
+        <li>Rows sort strongest first: ▲, then ⚠, then ▼, with % change as the tie-break. Long candidates sit at the top, shorts at the bottom.</li>
+        <li>The row for the ticker on the chart is highlighted in blue. A ticker TradingView can't find shows <code>invalid</code>.</li>
+        <li>Change the list in the indicator settings under <b>Tickers</b>: pick a preset (Momentum universe, Mega-cap tech, Semiconductors, High beta / momentum, Index ETFs + sectors) or paste your own list.</li>
+        <li>Pine can't read your watchlist or discover top gainers. Use TradingView's Stock Screener for discovery and paste the names in.</li>
+      </ul>
+    </div>
+
+    <div class="variant">
+      <div class="variant-head">
+        <span class="variant-id">DTS 2</span>
+        <h3>DTS Trend: is the trend clean, and which levels matter</h3>
+      </div>
+      <div class="rules">
+        <div><span class="label">Clean trend</span><b>8 &gt; 21 &gt; 50, spread ≥ 0.10 ATR, 21 EMA rising ≥ 0.05 ATR over 3 bars</b></div>
+        <div><span class="label">Alerts</span><b>5 named conditions</b></div>
+      </div>
+      <ul class="plain">
+        <li><b>Trend ribbon:</b> the band between the 8 and 21 EMAs is green in a clean uptrend, red in a clean downtrend and purple in chop.</li>
+        <li><b>Key levels:</b> PDH / PDL (prior regular session, solid), PMH / PML (premarket, dotted), ORH / ORL (opening range, yellow, first 5 minutes), PWH / PWL (prior week, thick). Each gets a flag tag at the right edge.</li>
+        <li><b>Breakout markers:</b> ▲ <code>ORH</code> / <code>PMH</code> / <code>PDH</code> / <code>PWH</code> below a candle that closed above a level, ▼ for the lows. <b>Bright in a clean trend, gray in chop.</b> Gray means skip it.</li>
+        <li><b>Market structure:</b> confirmed swings labelled HH / LH / HL / LL, with a dotted <code>BOS</code> line when a close breaks the last swing.</li>
+        <li><b>Bar coloring:</b> off, so candles keep their normal red and green. "Trend colors" paints every candle by the trend instead, which makes down candles green in an uptrend.</li>
+      </ul>
+    </div>
+
+    <div class="variant">
+      <div class="variant-head">
+        <span class="variant-id">DTS 3</span>
+        <h3>DTS Entry: breakout, retest, entry</h3>
+      </div>
+      <div class="rules">
+        <div><span class="label">Entry</span><b>close back above the 8 EMA after a retest</b></div>
+        <div><span class="label">Stop</span><b>retest low − 0.05 ATR</b></div>
+        <div><span class="label">Target</span><b>2R, then trail the 8 EMA</b></div>
+      </div>
+      <ol class="steps">
+        <li><b>Breakout (arm).</b> In the regular session, a candle closes above ORH, PMH, PDH or PWH with close &gt; 8 EMA &gt; 21 EMA. If several levels break on one bar, the highest is used.</li>
+        <li><b>Disarm.</b> Cancelled by a close below the 21 EMA, or a close more than 0.25 ATR back below the broken level.</li>
+        <li><b>Retest.</b> A later bar's low comes within 0.15 ATR of the 8 EMA or the broken level. A ◆ diamond appears.</li>
+        <li><b>Entry.</b> A bar closes green, above the 8 EMA but no more than 0.75 ATR above it, still above the level, in a clean trend, above VWAP, inside 09:35–12:00, with no open trade and fewer than 3 entries today.</li>
+        <li><b>Exit.</b> Stop, 2R target with stop to break-even, then a close below the 8 EMA, or flat at 15:55.</li>
+      </ol>
+      <h3 class="sub">A+ setup banner (top center)</h3>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>Part</th><th>What it shows</th></tr></thead>
+          <tbody>
+            <tr><td class="k">Top line</td><td><b>OUTSIDE LONG</b> when price is above PDH and PMH. <b>OUTSIDE SHORT</b> when below PDL and PML. Otherwise <b>INSIDE RANGE - NO EDGE</b>.</td></tr>
+            <tr><td class="k">Grade</td><td>One point each for: clean trend, right side of VWAP, beyond the opening range, beyond the prior-week level. 4 = A+, 3 = A, 2 = B, 0–1 = C.</td></tr>
+            <tr><td class="k">Color</td><td>Green for an A / A+ long, red for an A / A+ short, amber for B / C, gray inside the range.</td></tr>
+            <tr><td class="k">Second line</td><td>Session progress bar and phase: OPENING RANGE (9:30–10:00), PRIME TIME (10:00–11:30), MIDDAY - CAUTION (11:30–14:00), AFTERNOON (14:00–15:00), POWER HOUR (15:00–16:00).</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3 class="sub">Checklist panel (bottom right)</h3>
+      <p>Trend, VWAP side, opening range, and where each side stands: <code>wait for break</code> → <code>armed ORH 119.18 → wait retest</code> → <code>retest ✓ → wait close &gt; 8 EMA</code> → <code>IN LONG</code>. The Trade row shows entry, stop and target, or <code>flat (1/3 today)</code>.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section-title">How to use it</h2>
+
+    <h3 class="sub" style="margin-top: 0;">1. Before 09:30: pick the names (extended hours on)</h3>
+    <ul class="plain">
+      <li>Click <b>RTH</b> at the bottom right of the chart so it reads <b>ETH</b>. The screener and today's levels are then live.</li>
+      <li><b>Longs:</b> ▲ rows at the top of the screener. <b>Shorts:</b> ▼ rows at the bottom. Skip ⚠ rows or keep them on watch.</li>
+      <li>Load your top one or two names.</li>
+    </ul>
+
+    <h3 class="sub">2. At 09:30: switch back to RTH and check the backdrop</h3>
+    <ul class="plain">
+      <li><b>Banner:</b> A+ / A OUTSIDE LONG is the setup you want. B / C is weaker. INSIDE RANGE means stand aside.</li>
+      <li><b>Panel → Trend</b> must read CLEAN UPTREND. On CHOP the entry rules won't fire anyway.</li>
+      <li><b>Panel → VWAP</b> must say above.</li>
+    </ul>
+
+    <h3 class="sub">3. Watch the entry sequence</h3>
+    <div class="table-wrap">
+      <table class="wide">
+        <thead><tr><th>Step</th><th>What you'll see</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="k">Breakout</td><td>▲ <code>ORH</code> / <code>PMH</code> / <code>PDH</code> / <code>PWH</code> below a candle</td><td class="soft">A candle closed above a key level. Bright green = clean trend. Gray = chop, ignore it.</td></tr>
+          <tr><td class="k">Armed</td><td>Panel Long row: <code>armed ORH 119.18 → wait retest</code></td><td class="soft">The setup is live. It cancels on a close below the 21 EMA or a failed breakout.</td></tr>
+          <tr><td class="k">Retest</td><td>◆ green diamond</td><td class="soft">A pullback tagged the 8 EMA or the broken level. Get ready.</td></tr>
+          <tr><td class="k">Entry</td><td>Green <b>LONG</b> label with Entry / Stop / Target and three lines</td><td class="soft">The candle closed back above the 8 EMA with every filter passing. Enter at or just after that close.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="sub">4. Manage the trade</h3>
+    <ul class="plain">
+      <li><code>2R ✓ stop → BE</code>: take a partial and move your stop to your entry.</li>
+      <li><code>TRAIL</code>: the rest exits on a close below the 8 EMA. <code>BE</code> if price comes back to your entry first.</li>
+      <li><code>STOP</code>: the low hit the stop before 2R.</li>
+      <li><code>EOD</code>: flat by 15:55.</li>
+    </ul>
+
+    <h3 class="sub">Example: INTC, 5-minute, 2026-10-01</h3>
+    <div class="ticket">
+      <div><span class="label">Signal</span><span class="v">LONG · ORH retest</span></div>
+      <div><span class="label">Entry</span><span class="v">119.84</span></div>
+      <div><span class="label">Stop</span><span class="v neg">119.06</span></div>
+      <div><span class="label">Target (2R)</span><span class="v pos">121.41</span></div>
+    </div>
+    <p style="margin-top: 0.8rem;">Risk was 0.78, so 2R = 119.84 + 1.56 ≈ 121.41. Price reached the target (<code>2R ✓</code>) and the rest was closed later by the 8 EMA trail. This is one trade from the chart's history, shown to illustrate the labels. It says nothing about how often the setup works.</p>
+
+    <h3 class="sub">When to skip</h3>
+    <ul class="plain">
+      <li>Gray breakout markers, a CHOP panel, or the INSIDE RANGE banner.</li>
+      <li>MIDDAY - CAUTION (11:30–14:00), even though the entry window runs to 12:00.</li>
+      <li>A breakout that has run far from the 8 EMA with no pullback. The script won't chase it.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2 class="section-title">Premarket vs regular hours</h2>
+    <p>The scripts only update when a new bar prints on the chart. With extended hours off, the newest bar before the open is yesterday's last candle, so everything is one session behind until 09:30.</p>
+    <div class="table-wrap">
+      <table class="wide">
+        <thead><tr><th>Chart mode</th><th>Before 09:30</th><th>During the session</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="k">ETH (extended on)</td>
+            <td>Screener shows live premarket prices. Today's PMH / PML / PDH / PDL are correct. <b class="pos">Use this to pick names.</b></td>
+            <td class="soft">EMAs, ATR and VWAP include thin premarket bars. VWAP starts at 04:00. The trend filter, retest tolerance and stops drift from the rules.</td>
+          </tr>
+          <tr>
+            <td class="k">RTH (extended off)</td>
+            <td class="soft">Screener shows yesterday's close. PDH / PDL are from two sessions ago. Banner reads CLOSED 100%.</td>
+            <td>EMAs and VWAP are regular-session only. VWAP starts at 09:30. <b class="pos">Use this to trade.</b></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="verdict"><b>Daily routine:</b> ETH before 09:30 to pick names, RTH from 09:30 to trade. One click on the RTH / ETH button at the bottom right of the chart.</div>
+  </section>
+
+  <section>
+    <h2 class="section-title">Alerts</h2>
+    <p>No alerts are set up yet. When you want them, there are two kinds.</p>
+    <div class="table-wrap">
+      <table class="wide">
+        <thead><tr><th>Kind</th><th>Indicator</th><th>What it sends</th></tr></thead>
+        <tbody>
+          <tr><td class="k">Any alert() call</td><td>DTS Entry</td><td>Entries with entry / stop / target, the 2R hit, every exit, and a new A+ OUTSIDE setup. One alert covers all of it.</td></tr>
+          <tr><td class="k">Any alert() call</td><td>DTS Screener</td><td>Any of the 20 tickers flipping to ▲ or ▼. One alert covers all 20.</td></tr>
+          <tr><td class="k">Named condition</td><td>DTS Entry</td><td><i>Retest - get ready</i> (the ◆ diamond). Only available this way.</td></tr>
+          <tr><td class="k">Named condition</td><td>DTS Trend</td><td><i>Clean-trend breakout up</i>, <i>Clean-trend breakdown</i>, <i>Trend turns clean</i>, <i>BOS up</i>, <i>BOS down</i>. One alert each.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul class="plain" style="margin-top: 0.9rem;">
+      <li>Set the trigger to <b>Once per bar close</b> and turn on app push.</li>
+      <li>One alert watches one symbol, except the screener. Typical use: keep the screener alert running, and when a ticker flips to ▲, open it and create a DTS Entry alert there.</li>
+      <li>An alert keeps the code and settings it was created with. After editing a script or its inputs, delete and recreate the alert.</li>
+    </ul>
+    <p>A message looks like this: <code>DTS: LONG NVDA @ 177.16 | stop 176.40 | target 178.68 (2R) | ORH breakout + 8 EMA retest</code></p>
+  </section>
+
+  <section>
+    <h2 class="section-title">What was done</h2>
+    <ul class="status-list">
+      <li><span class="badge done">Done</span><span><b>Three scripts written</b> (2026-10-01, cloud session): the original single indicator was split into DTS Screener, DTS Trend and DTS Entry, with PWH / PWL, flag tags, market structure, the A+ banner and a dynamic ticker list added.</span></li>
+      <li><span class="badge done">Done</span><span><b>Compiled in TradingView</b> (2026-10-02): all three were checked on TradingView's servers and in the desktop app for the first time. Zero errors.</span></li>
+      <li><span class="badge done">Done</span><span><b>Layout finished:</b> DTS Screener updated from an older version, DTS Trend and DTS Entry saved and added, VWAP added, chart set to 5-minute.</span></li>
+      <li><span class="badge done">Done</span><span><b>Runtime check:</b> levels, swings, breakout markers, entries, exits, the panel and the banner all draw on real data. The screener loads and sorts all 20 tickers.</span></li>
+      <li><span class="badge done">Done</span><span><b>VWAP verified:</b> the VWAP inside DTS Entry matches the built-in in both modes (121.56 in ETH, 119.73 in RTH on INTC).</span></li>
+      <li><span class="badge done">Done</span><span><b>Seen live</b> (2026-10-02, 10:47 New York): QCOM showed A OUTSIDE LONG, CLEAN UPTREND, <code>armed PMH 186.94 → wait retest</code>, with 11 tickers at ▲ in the screener.</span></li>
+      <li><span class="badge done">Done</span><span><b>README extended:</b> premarket vs regular hours routine, and a full entry guide.</span></li>
+    </ul>
+
+    <h3 class="sub">Problems found and fixed</h3>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">FIX-1</span><h4>Screener short name over TradingView's limit</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>"The shorttitle is too long (12 characters)" when compiling in the app. The server-side check had passed it.</dd>
+        <dt>Fix</dt><dd>Short name changed from "DTS Screener" to <code>DTS Scan</code>. The full name is unchanged.</dd>
+      </dl>
+    </div>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">FIX-2</span><h4>Rows of 0.0000 in the chart legend</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>DTS Trend and DTS Entry printed eight and two <code>0.0000</code> values beside their names: the "no signal" value of each marker.</dd>
+        <dt>Fix</dt><dd>Marker values hidden from the legend. They still show in the Data Window.</dd>
+      </dl>
+    </div>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">FIX-3</span><h4>New-script tool wrote into the open script</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>Creating DTS Trend saved its code over the screener script instead of opening a new one. A second attempt loaded code into the DTS Entry tab.</dd>
+        <dt>Fix</dt><dd>The screener's code was saved back straight away (now version 6.0; older versions remain in its history). The second case was discarded before saving. New scripts were then created through the Pine Editor's own menu, checking the editor title before every paste.</dd>
+      </dl>
+    </div>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">FIX-4</span><h4>Down candles shown in green</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>DTS Trend's default "Trend colors" painted every candle by the trend, so down candles were green in an uptrend.</dd>
+        <dt>Fix</dt><dd>Bar coloring set to Off on the chart and made the default in the script (2026-10-03). The trend still shows in the ribbon and the panel.</dd>
+      </dl>
+    </div>
+
+    <h3 class="sub">Commits on day-trading-setup</h3>
+    <div class="table-wrap">
+      <table class="wide">
+        <thead><tr><th>Commit</th><th>Date</th><th>Change</th></tr></thead>
+        <tbody>
+          <tr><td class="num">60d2020</td><td class="num">10-01</td><td>Add Day Trading Setup: ORB / 8 EMA retest indicator</td></tr>
+          <tr><td class="num">66c6dde</td><td class="num">10-01</td><td>Split into three separate indicators</td></tr>
+          <tr><td class="num">c93dee6</td><td class="num">10-01</td><td>Add PWH / PWL, flag level tags, market structure, A+ banner</td></tr>
+          <tr><td class="num">ed5f7f4</td><td class="num">10-01</td><td>Screener: dynamic ticker list (presets or pasted list)</td></tr>
+          <tr><td class="num">a70a5b6</td><td class="num">10-01</td><td>Shorten indicator names, keep settings out of the legend</td></tr>
+          <tr><td class="num">c9bd9a6</td><td class="num">10-02</td><td>Fix screener short name length, hide marker values from legend</td></tr>
+          <tr><td class="num">a90ea43</td><td class="num">10-02</td><td>README: premarket vs regular hours routine</td></tr>
+          <tr><td class="num">a71bf47</td><td class="num">10-02</td><td>README: entry guide</td></tr>
+          <tr><td class="num">354dfb4</td><td class="num">10-03</td><td>DTS Trend: default bar coloring to Off</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section-title">Still open</h2>
+    <ul class="status-list">
+      <li><span class="badge open">Open</span><span><b>Not backtested.</b> There is no win rate, average R or drawdown figure for these rules. Every threshold (2R, 0.75 ATR, the 09:35–12:00 window, 3 trades a day) is an untested default.</span></li>
+      <li><span class="badge open">Open</span><span><b>Paper-trade first.</b> Log the signals for a few weeks and compare them with what you would have taken by hand.</span></li>
+      <li><span class="badge unconfirmed">Unconfirmed</span><span><b>A full live entry.</b> The setup was seen arming live on QCOM. A complete live sequence through entry, 2R and exit has not been watched end to end.</span></li>
+      <li><span class="badge unconfirmed">Not set up</span><span><b>Alerts.</b> None created, by choice. See the Alerts section when you want them.</span></li>
+    </ul>
+    <div class="informal" style="margin-top: 1.1rem;">
+      <span class="tag">Limits of the tool</span>
+      <p>The screener makes one data request per ticker, 20 at most, against TradingView's limit of 40. PMH / PML stay blank on symbols with no premarket session. The layout uses 8 indicators, which needs a paid TradingView plan.</p>
+    </div>
+  </section>
+
+  <div class="final-call">
+    <span class="eyebrow">Where it stands</span>
+    <h2>The tooling works. The edge is unproven.</h2>
+    <p>All three indicators compile, run and agree with TradingView's own VWAP and levels. The layout is saved on a 5-minute chart, and the daily routine is <b>ETH before 09:30 to pick names, RTH from 09:30 to trade</b>. Take entries only when the banner reads A or A+ OUTSIDE, the panel reads a clean trend, and the LONG or SHORT label prints on a closed candle.</p>
+    <p class="caveat">Nothing here has been backtested. Treat every signal as a prompt to look, and size it as a paper trade until you have your own record of how the setup performs.</p>
+  </div>
+
+  <footer>
+    Source: day_trading_setup/README.md and day_trading_setup/pine/ on branch day-trading-setup. Companion to the Momentum Strategy backtest record.
+  </footer>
+
+</div>
