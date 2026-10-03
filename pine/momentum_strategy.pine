@@ -1,12 +1,13 @@
 //@version=6
 strategy("Momentum Strategy", overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=20, commission_type=strategy.commission.percent, commission_value=0.0)
 
-// Entry: SMA200 trend filter + triple-confirmed breakout (Variant G)
+// Entry: SMA200 trend filter + triple-confirmed breakout (Variant H)
 //   - prior day's close > 200-day SMA
 //   - price > yesterday's daily high
 //   - price > today's premarket high
 //   - price > today's high-of-day-so-far (fresh intraday high)
-//   - only considered after 10:00 ET
+//   - only checked hourly (10:00, 11:00, ..., 14:00 ET), looking back over
+//     the trailing 6 candles (the past hour) rather than every 10-min bar
 
 sma200D = request.security(syminfo.tickerid, "D", ta.sma(close, 200)[1])
 prevDayClose = request.security(syminfo.tickerid, "D", close[1])
@@ -30,13 +31,18 @@ if session.ismarket
     sessionHigh := na(sessionHigh) ? high : math.max(sessionHigh, high)
 
 etHour = hour(time, "America/New_York")
+etMinute = minute(time, "America/New_York")
 afterTenAM = etHour >= 10
 
 aboveYesterdayHigh = close > prevDayHigh
 abovePMH = not na(pmh) and close > pmh
 newHOD = not na(prevSessionHigh) and close > prevSessionHigh
 
-longCondition = afterTenAM and session.ismarket and strategy.position_size == 0 and trendOk and aboveYesterdayHigh and abovePMH and newHOD
+breakoutNow = afterTenAM and session.ismarket and trendOk and aboveYesterdayHigh and abovePMH and newHOD
+isHourlyCheckBar = session.ismarket and afterTenAM and etHour <= 14 and etMinute == 0
+recentBreakout = ta.highest(breakoutNow ? 1.0 : 0.0, 6) == 1
+
+longCondition = isHourlyCheckBar and recentBreakout and strategy.position_size == 0
 
 if longCondition
     strategy.entry("Long", strategy.long)
