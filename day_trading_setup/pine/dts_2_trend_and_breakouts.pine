@@ -20,7 +20,7 @@ slowLen   = input.int(50, "slow", minval = 1, group = G_TR, inline = "ema", disp
 minSpread = input.float(0.10, "Min 8/21 EMA spread (x ATR)", minval = 0, step = 0.05, group = G_TR, tooltip = "The 8 and 21 EMAs must be at least this far apart (in ATR) for the trend to count as clean. Smaller = more bars count as trend.", display = display.none)
 minSlope  = input.float(0.05, "Min 21 EMA slope over 3 bars (x ATR)", minval = 0, step = 0.01, group = G_TR, display = display.none)
 showRib   = input.bool(true, "Trend ribbon between 8 and 21 EMA", group = G_TR, display = display.none)
-barMode   = input.string("Trend colors", "Bar coloring", options = ["Trend colors", "Dim chop only", "Off"], group = G_TR, display = display.none)
+barMode   = input.string("Off", "Bar coloring", options = ["Trend colors", "Dim chop only", "Off"], group = G_TR, display = display.none)
 
 G_LVL = "Key levels"
 showLevels = input.bool(true, "Show PDH / PDL / PMH / PML", group = G_LVL, display = display.none)

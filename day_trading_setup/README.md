@@ -76,8 +76,10 @@ single chart alert covers all 20 tickers.
 - **Trend ribbon:** the band between the 8 and 21 EMAs is **green** in a
   clean uptrend, **red** in a clean downtrend and **purple** in chop. It
   sits underneath your built-in EMA lines.
-- **Bar colors:** green or red in a clean trend, **gray in chop**. You can
-  set "Dim chop only" or "Off" instead.
+- **Bar colors:** **off by default**, so candles keep their normal red /
+  green. "Trend colors" paints every candle by the trend instead (green in
+  a clean uptrend even on a down candle, red in a clean downtrend, gray in
+  chop); "Dim chop only" keeps normal candles and grays out chop.
 - **Clean trend** means 8 > 21 > 50, the 8 and 21 EMAs are at least 0.10
   ATR apart, and the 21 EMA has risen at least 0.05 ATR over 3 bars. A
   clean downtrend is the mirror image.
