@@ -99,33 +99,41 @@ SCAN_LAYOUT_NAME = "Main"
 class WrongLayout(Exception):
     """TradingView's active layout isn't SCAN_LAYOUT_NAME - chart left untouched."""
 
-# Deterministic pre-check (no LLM): a read-only CDP call that reads the layout name off the
-# same tab the MCP will drive. Runs before every `claude -p` so a wrong layout never reaches
-# the model; the in-prompt check below stays as a backstop for a tab switch mid-scan.
+# Deterministic tab finder (no LLM): a read-only CDP call that locates the tab whose layout is
+# exactly SCAN_LAYOUT_NAME, even when it's a background tab, and the MCP is then pinned to it
+# (TV_TARGET_ID). Runs before every `claude -p`; no such tab = no scan. The in-prompt layout
+# check below stays as a backstop in case that tab is switched to another layout mid-scan.
 LAYOUT_CHECK_SCRIPT = Path(__file__).resolve().parent / "tv_layout_check.mjs"
 NODE_BIN = "/opt/homebrew/bin/node"
 
 
-def read_active_layout() -> str:
-    """Active TradingView layout name, exactly as TradingView reports it. Raises RuntimeError
-    if it can't be read (TradingView closed, CDP off) - fail closed, never assume 'Main'."""
+def find_scan_tab() -> str:
+    """CDP target id of the TradingView tab whose layout is exactly SCAN_LAYOUT_NAME, found whether
+    or not it's the tab in front (the scan is pinned to it, so other tabs/windows are never touched).
+    Raises WrongLayout if no tab has that layout; RuntimeError if TradingView can't be read at all
+    (fail closed - never fall back to driving whichever tab happens to be visible)."""
     try:
-        r = subprocess.run([NODE_BIN, str(LAYOUT_CHECK_SCRIPT)], capture_output=True, text=True, timeout=30)
+        r = subprocess.run([NODE_BIN, str(LAYOUT_CHECK_SCRIPT), SCAN_LAYOUT_NAME],
+                           capture_output=True, text=True, timeout=30)
     except subprocess.TimeoutExpired:
         raise RuntimeError("layout pre-check timed out")
     try:
         out = json.loads(r.stdout.strip().splitlines()[-1])
     except (json.JSONDecodeError, IndexError):
         raise RuntimeError(f"layout pre-check gave no JSON (exit {r.returncode}): {(r.stdout + r.stderr)[-300:]}")
-    if r.returncode != 0 or not isinstance(out.get("layout"), str):
+    if r.returncode != 0 or "error" in out:
         raise RuntimeError(f"layout pre-check failed: {out.get('error', out)}")
-    return out["layout"]
+    if not out.get("target_id"):
+        open_layouts = ", ".join(repr(t.get("layout")) for t in out.get("tabs", [])) or "none"
+        raise WrongLayout(f"open layouts: {open_layouts}")
+    return out["target_id"]
 
 
-def require_scan_layout() -> None:
-    layout = read_active_layout()
-    if layout != SCAN_LAYOUT_NAME:
-        raise WrongLayout(layout)
+def mcp_config(target_id: str) -> str:
+    """MCP_CONFIG with the tradingview server pinned to one tab (TV_TARGET_ID, see its connection.js)."""
+    cfg = json.loads(MCP_CONFIG)
+    cfg["mcpServers"]["tradingview"]["env"] = {"TV_TARGET_ID": target_id}
+    return json.dumps(cfg)
 
 DAILY_BAR_COUNT = 210   # need 200 for SMA200 + prev day, small buffer
 INTRADAY_BAR_COUNT = 150  # comfortably covers today + premarket
@@ -235,7 +243,7 @@ def fetch_bars(symbol, timeframe, count, extended_hours=False):
     intraday bars in a single combined call (6 sequential tool calls) timed
     out at 180s; splitting into two independent lighter calls is more
     reliable even though it re-sets the symbol each time."""
-    require_scan_layout()  # deterministic gate - nothing below runs on any other layout
+    target_id = find_scan_tab()  # deterministic gate: no tab on the right layout = nothing below runs
 
     # The chart's session defaults to "regular" (09:30-16:00 ET only), which
     # silently excludes premarket bars from data_get_ohlcv - confirmed via
@@ -279,7 +287,7 @@ def fetch_bars(symbol, timeframe, count, extended_hours=False):
             "claude", "-p", prompt,
             "--print", "--output-format", "json",
             "--json-schema", BARS_SCHEMA,
-            "--mcp-config", MCP_CONFIG,
+            "--mcp-config", mcp_config(target_id),
             "--strict-mcp-config",
             "--permission-mode", "bypassPermissions",
             "--no-session-persistence",
@@ -455,8 +463,8 @@ def main():
             if "error" in r:
                 errors.append(f"{symbol}: {r['error']}")
         except WrongLayout as e:
-            log(f"Active TradingView layout is '{e}', not '{SCAN_LAYOUT_NAME}' - scan skipped, chart untouched.")
-            print(f"Momentum Scanner: skipped (active layout '{e}' != '{SCAN_LAYOUT_NAME}').")
+            log(f"No usable '{SCAN_LAYOUT_NAME}' TradingView tab ({e}) - scan skipped, chart untouched.")
+            print(f"Momentum Scanner: skipped (no usable '{SCAN_LAYOUT_NAME}' tab: {e}).")
             return
         except Exception as e:
             err = f"{symbol}: {e}"
