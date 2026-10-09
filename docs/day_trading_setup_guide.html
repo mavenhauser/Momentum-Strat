@@ -387,7 +387,8 @@
     <p class="dek">Three alert-only TradingView indicators for intraday opening-range breakout trades: wait for a stock to break a key level, let it pull back to the 8 EMA or the broken level, and enter when a candle closes back above the 8 EMA. This page records what each indicator does, how to trade with them, and what was built and fixed to get them running on the Day Trading Set Up layout. Separate from the Momentum Strategy (Variant H) system and shares no code with it.</p>
     <div class="meta-row">
       <span><b>Prepared</b> 2026-10-03</span>
-      <span><b>Built</b> 2026-10-01 to 2026-10-03</span>
+      <span><b>Updated</b> 2026-10-09: daily screener list, integrity check</span>
+      <span><b>Built</b> 2026-10-01 to 2026-10-09</span>
       <span><b>Instrument</b> Pine Script v6 indicators: DTS Screener, DTS Trend, DTS Entry</span>
       <span><b>Repo</b> mavenhauser/Momentum-Strat · branch day-trading-setup</span>
       <span><b>Status</b> running live, not backtested</span>
@@ -414,8 +415,8 @@
       </div>
       <div>
         <dt>Screener universe</dt>
-        <dd>Up to 20 tickers, from a preset or a pasted list</dd>
-        <dd class="note">Default: NVDA, AMD, AVGO, MU, DELL, TSLA, PLTR, MSFT, AAPL, GOOGL, META, AMZN, NFLX, ORCL, CRM, QCOM, INTC, ADBE, SPY, QQQ.</dd>
+        <dd>20 tickers, refreshed every trading morning</dd>
+        <dd class="note">10 Momentum Strategy tickers, SPY and QQQ, and the 8 mega caps with the biggest premarket move that day.</dd>
       </div>
       <div>
         <dt>Entry window</dt>
@@ -466,7 +467,7 @@
           <tr><td class="k">Pivots</td><td>Daily floor pivots</td><td class="soft">Built-in, Traditional. Currently hidden.</td></tr>
           <tr><td class="k">Volume</td><td>Volume bars</td><td class="soft">On the price pane, by your choice.</td></tr>
           <tr><td class="k">DTS Screener</td><td>Which stocks are outside yesterday's and premarket range</td><td class="soft">Saved script, version 6.0.</td></tr>
-          <tr><td class="k">DTS Trend</td><td>Trend ribbon, key levels, breakout markers, market structure</td><td class="soft">Saved script, version 3.0. Bar coloring off.</td></tr>
+          <tr><td class="k">DTS Trend</td><td>Trend ribbon, key levels, breakout markers, market structure</td><td class="soft">Saved script, version 7.0. Bar coloring off.</td></tr>
           <tr><td class="k">DTS Entry</td><td>Entry signals, stop and target, checklist panel, A+ banner</td><td class="soft">Saved script, version 2.0.</td></tr>
         </tbody>
       </table>
@@ -501,8 +502,24 @@
       <ul class="plain" style="margin-top: 0.9rem;">
         <li>Rows sort strongest first: ▲, then ⚠, then ▼, with % change as the tie-break. Long candidates sit at the top, shorts at the bottom.</li>
         <li>The row for the ticker on the chart is highlighted in blue. A ticker TradingView can't find shows <code>invalid</code>.</li>
-        <li>Change the list in the indicator settings under <b>Tickers</b>: pick a preset (Momentum universe, Mega-cap tech, Semiconductors, High beta / momentum, Index ETFs + sectors) or paste your own list.</li>
-        <li>Pine can't read your watchlist or discover top gainers. Use TradingView's Stock Screener for discovery and paste the names in.</li>
+        <li>Pine can't read your watchlist or discover top gainers, so the list is supplied from outside: by the daily updater below, or by hand in the indicator settings under <b>Tickers</b> (a preset or a pasted list).</li>
+      </ul>
+      <h3 class="sub">The daily list</h3>
+      <p>A scheduled job rebuilds the 20 tickers each trading morning and writes them into the screener.</p>
+      <div class="table-wrap">
+        <table class="wide">
+          <thead><tr><th>Slots</th><th>Source</th></tr></thead>
+          <tbody>
+            <tr><td class="k">10 fixed</td><td>The Momentum Strategy universe: DELL, AMD, NVDA, MU, TSLA, AVGO, PLTR, MSFT, AAPL, GOOGL. Read from where that list is defined, so it follows any change.</td></tr>
+            <tr><td class="k">2 ETFs</td><td>SPY and QQQ.</td></tr>
+            <tr><td class="k">8 daily</td><td>US stocks with a market cap of at least $200B, not already in the list, with at least 20,000 premarket shares traded, ranked by the size of their premarket move, up or down.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul class="plain" style="margin-top: 0.9rem;">
+        <li><b>When:</b> 08:30 and 09:15 New York time, Monday to Friday. The first run gives you a list while picking names; the second catches late movers. A run missed while the Mac was asleep catches up once, until 12:00.</li>
+        <li><b>Needs:</b> TradingView Desktop started with its remote-control connection (<code>open -a TradingView --args --remote-debugging-port=9222</code>) and a tab on this layout. If it can't reach TradingView it retries every 5 minutes and shows one notification.</li>
+        <li><b>Example, 2026-10-09:</b> SPCX +2.95%, AMAT +2.07%, CRWD +1.77%, LRCX +1.69%, MRVL +1.64%, CSCO +1.52%, NFLX −1.47%, AXP −1.44%.</li>
       </ul>
     </div>
 
@@ -564,6 +581,7 @@
     <h3 class="sub" style="margin-top: 0;">1. Before 09:30: pick the names (extended hours on)</h3>
     <ul class="plain">
       <li>Click <b>RTH</b> at the bottom right of the chart so it reads <b>ETH</b>. The screener and today's levels are then live.</li>
+      <li>The screener's list is refreshed for you at 08:30 and again at 09:15 New York time.</li>
       <li><b>Longs:</b> ▲ rows at the top of the screener. <b>Shorts:</b> ▼ rows at the bottom. Skip ⚠ rows or keep them on watch.</li>
       <li>Load your top one or two names.</li>
     </ul>
@@ -668,6 +686,9 @@
       <li><span class="badge done">Done</span><span><b>VWAP verified:</b> the VWAP inside DTS Entry matches the built-in in both modes (121.56 in ETH, 119.73 in RTH on INTC).</span></li>
       <li><span class="badge done">Done</span><span><b>Seen live</b> (2026-10-02, 10:47 New York): QCOM showed A OUTSIDE LONG, CLEAN UPTREND, <code>armed PMH 186.94 → wait retest</code>, with 11 tickers at ▲ in the screener.</span></li>
       <li><span class="badge done">Done</span><span><b>README extended:</b> premarket vs regular hours routine, and a full entry guide.</span></li>
+      <li><span class="badge done">Done</span><span><b>Integrity check</b> (2026-10-03): the three saved scripts were compared with the repo and found identical. The outputs were then recomputed from raw 5-minute bars on PENG: PDH / PDL on 154 of 154 bars, ORH / ORL on 231 of 231, VWAP on 234 of 234, the ribbon on 220 of 220, and a bar-by-bar replay of the entry and exit rules matched all 12 labels.</span></li>
+      <li><span class="badge done">Done</span><span><b>Live signal traced</b> (2026-10-05): TSLA <code>LONG · PWH retest</code>, entry 376.34, fired at the close of the 10:50 bar. The earlier green closes at 10:00–10:10 were skipped for being 2.7 to 3.0 above the 8 EMA against a limit of about 1.35.</span></li>
+      <li><span class="badge done">Done</span><span><b>Daily screener list</b> (2026-10-09): updater script and a launchd job that rebuilds the 20 tickers each trading morning. Tested by hand and through launchd.</span></li>
     </ul>
 
     <h3 class="sub">Problems found and fixed</h3>
@@ -704,6 +725,14 @@
       </dl>
     </div>
 
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">FIX-5</span><h4>DTS Trend overwritten by another workstream</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>On 2026-10-03 the SPX Scalping workstream saved its own 69-line script over DTS Trend twice (versions 4.0 and 6.0). Same tool flaw as FIX-3.</dd>
+        <dt>Fix</dt><dd>It was restored within about a minute each time (5.0 and 7.0). Version 7.0 was verified identical to the repo, and the chart's settings were intact. Sessions on this project now confirm the editor title before pasting.</dd>
+      </dl>
+    </div>
+
     <h3 class="sub">Commits on day-trading-setup</h3>
     <div class="table-wrap">
       <table class="wide">
@@ -718,6 +747,8 @@
           <tr><td class="num">a90ea43</td><td class="num">10-02</td><td>README: premarket vs regular hours routine</td></tr>
           <tr><td class="num">a71bf47</td><td class="num">10-02</td><td>README: entry guide</td></tr>
           <tr><td class="num">354dfb4</td><td class="num">10-03</td><td>DTS Trend: default bar coloring to Off</td></tr>
+          <tr><td class="num">4707282</td><td class="num">10-03</td><td>Add this guide page</td></tr>
+          <tr><td class="num">b63edf0</td><td class="num">10-09</td><td>Screener: daily ticker list updater and schedule</td></tr>
         </tbody>
       </table>
     </div>
@@ -728,7 +759,8 @@
     <ul class="status-list">
       <li><span class="badge open">Open</span><span><b>Not backtested.</b> There is no win rate, average R or drawdown figure for these rules. Every threshold (2R, 0.75 ATR, the 09:35–12:00 window, 3 trades a day) is an untested default.</span></li>
       <li><span class="badge open">Open</span><span><b>Paper-trade first.</b> Log the signals for a few weeks and compare them with what you would have taken by hand.</span></li>
-      <li><span class="badge unconfirmed">Unconfirmed</span><span><b>A full live entry.</b> The setup was seen arming live on QCOM. A complete live sequence through entry, 2R and exit has not been watched end to end.</span></li>
+      <li><span class="badge unconfirmed">Unconfirmed</span><span><b>A full live trade.</b> A live entry was traced on TSLA (2026-10-05) and was still open when checked. A complete live sequence through 2R and exit has not been watched end to end.</span></li>
+      <li><span class="badge unconfirmed">Unconfirmed</span><span><b>An unattended morning run of the daily list.</b> The job was tested mid-session on 2026-10-09. The first real premarket run is 2026-10-12 at 08:30 New York; the log is <code>~/.dts-screener/screener_list_cron.log</code>.</span></li>
       <li><span class="badge unconfirmed">Not set up</span><span><b>Alerts.</b> None created, by choice. See the Alerts section when you want them.</span></li>
     </ul>
     <div class="informal" style="margin-top: 1.1rem;">
