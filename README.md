@@ -17,6 +17,21 @@ strategy. A handful of broker/data-client files are intentionally
 duplicated rather than shared between the two repos — see the tracker doc
 above for why.
 
+## Separate project: Day Trading Setup
+
+[`day_trading_setup/`](day_trading_setup/) is an independent set of three
+alert-only TradingView indicators for intraday opening-range breakouts
+entered on an 8 EMA retest:
+
+- a strongest-stocks screener table (PDH/PDL/PMH/PML);
+- trend-vs-chop coloring with breakout markers;
+- exact entry/stop/target signals.
+
+They're meant to sit on top of TradingView's built-in EMA, VWAP, VRVP and
+pivot indicators, and they share no code with the momentum system described
+below. See [its README](day_trading_setup/README.md) for the rules and for
+setting up the "Day Trading Set up" layout.
+
 ## How it works
 
 - **Entry logic**: [`src/momentum_signals.py`](src/momentum_signals.py) —
