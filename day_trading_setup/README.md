@@ -57,7 +57,49 @@ settings and go to **Tickers**:
 Pine can't read your TradingView watchlist, and it can't discover the
 market's top gainers by itself. For discovery, use TradingView's Stock
 Screener (for example, sorted by premarket % change) and paste the top names
-into the custom list.
+into the custom list, or let the daily updater below do it.
+
+### Daily list (automatic)
+
+[`scripts/update_screener_list.mjs`](scripts/update_screener_list.mjs) builds
+the 20 tickers each trading morning and writes them into the Custom list:
+
+| Slots | Source |
+|---|---|
+| 10 | The Momentum Strategy universe (`MOMENTUM_TICKERS` in `src/config.py`, or the deployed scanner's list), so it follows that list. |
+| 2 | SPY and QQQ. |
+| 8 | Mega caps with the biggest premarket move that day, up or down. Changes every trading day. |
+
+The mega-cap pick is: US primary common stocks with a market cap of at least
+$200B, not already in the list, with at least 20,000 premarket shares
+traded, ranked by absolute premarket % change. The data comes from
+TradingView's screener feed. If fewer than 8 qualify (a run outside
+premarket), the rest are filled by the last session's absolute % change.
+The thresholds are constants at the top of the script.
+
+```bash
+node day_trading_setup/scripts/update_screener_list.mjs          # dry run: print the list
+node day_trading_setup/scripts/update_screener_list.mjs --apply  # also write it into TradingView
+```
+
+`--apply` needs TradingView Desktop running with the debugging port
+(`--remote-debugging-port=9222`) and a tab on the **Day Trading Set Up**
+layout. It writes to every tab that has that layout.
+
+**Schedule.** A launchd job (`com.jameswoo.dts-screener-list`) polls
+[`scripts/screener_list_cron_wrapper.sh`](scripts/screener_list_cron_wrapper.sh)
+every 5 minutes. The wrapper runs the update at **08:30 and 09:15 New York
+time**, Monday to Friday. A slot missed while the Mac was asleep catches up
+once, until 12:00. If TradingView isn't reachable it retries on each poll
+and shows one macOS notification. The scheduled copy and its log live in
+`~/.dts-screener/`; after changing either script, copy it there again:
+
+```bash
+cp day_trading_setup/scripts/update_screener_list.mjs day_trading_setup/scripts/screener_list_cron_wrapper.sh ~/.dts-screener/
+```
+
+On US market holidays the job still runs and ranks by the last session,
+which is harmless.
 
 | Column | Meaning |
 |---|---|
