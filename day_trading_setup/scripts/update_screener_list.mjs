@@ -1,14 +1,15 @@
 // Builds the day's 20-ticker list for DTS Screener and (with --apply) writes it into the
 // indicator's "Custom list" on the TradingView tab whose layout is "Day Trading Set Up".
 //
-//   10  Momentum Strategy universe (MOMENTUM_TICKERS in src/config.py - follows that list)
-//    2  index ETFs (SPY, QQQ)
-//    8  mega caps with the biggest premarket move today (changes every trading day)
+//   fixed  Momentum Strategy universe (MOMENTUM_TICKERS in src/config.py - follows that
+//          list) plus any Magnificent 7 name not already in it. 12 tickers today.
+//   daily  the remaining slots up to 20 (8 today): mega caps that are up the most in
+//          premarket. Changes every trading day.
 //
-// Mega-cap pick: US primary common stocks with market cap >= MIN_CAP, not already in the
-// list, with at least MIN_PM_VOL premarket shares, ranked by absolute premarket % change.
-// If fewer than 8 qualify (run outside premarket), the rest are filled by the last
-// session's absolute % change.
+// Daily pick: US primary common stocks with market cap >= MIN_CAP, not already in the
+// list, with at least MIN_PM_VOL premarket shares, ranked by premarket % change, highest
+// first. If too few qualify (run outside premarket), the rest are filled by the last
+// session's % change, highest first.
 //
 // Usage:  node update_screener_list.mjs            dry run: print the list
 //         node update_screener_list.mjs --apply    also write it into TradingView
@@ -19,8 +20,8 @@ import { fileURLToPath } from 'url';
 
 const LAYOUT = 'Day Trading Set Up';
 const STUDY = 'DTS Screener';
-const ETFS = ['SPY', 'QQQ'];
-const N_MEGA = 8;
+const MAG7 = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA'];
+const TOTAL = 20;
 const MIN_CAP = 200e9;
 const MIN_PM_VOL = 20000;
 // Second share classes of names already covered, and classes with no usable premarket.
@@ -49,7 +50,7 @@ function momentumTickers() {
   return { list: MOMENTUM_FALLBACK, source: 'built-in fallback' };
 }
 
-async function megaCaps(taken) {
+async function megaCaps(taken, count) {
   const res = await fetch('https://scanner.tradingview.com/america/scan', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -69,14 +70,14 @@ async function megaCaps(taken) {
   const pool = (await res.json()).data
     .map(r => ({ symbol: r.s, name: r.d[0], cap_bn: Math.round(r.d[1] / 1e9), change: r.d[2], pm_change: r.d[3], pm_volume: r.d[4] }))
     .filter(r => !taken.has(r.name) && !EXCLUDE.has(r.name));
-  const byAbs = key => (a, b) => Math.abs(b[key]) - Math.abs(a[key]);
+  const highest = key => (a, b) => b[key] - a[key];
   const picks = pool
     .filter(r => r.pm_change != null && (r.pm_volume || 0) >= MIN_PM_VOL)
-    .sort(byAbs('pm_change')).slice(0, N_MEGA).map(r => ({ ...r, ranked_by: 'premarket' }));
-  if (picks.length < N_MEGA) {
+    .sort(highest('pm_change')).slice(0, count).map(r => ({ ...r, ranked_by: 'premarket' }));
+  if (picks.length < count) {
     const have = new Set(picks.map(r => r.name));
     picks.push(...pool.filter(r => !have.has(r.name) && r.change != null)
-      .sort(byAbs('change')).slice(0, N_MEGA - picks.length).map(r => ({ ...r, ranked_by: 'last session' })));
+      .sort(highest('change')).slice(0, count - picks.length).map(r => ({ ...r, ranked_by: 'last session' })));
   }
   return { picks, pool_size: pool.length };
 }
@@ -128,16 +129,18 @@ async function writeToTradingView(listText) {
 
 try {
   const mom = momentumTickers();
-  const fixed = [...mom.list, ...ETFS];
-  const { picks, pool_size } = await megaCaps(new Set(fixed));
-  if (picks.length < N_MEGA) throw new Error(`only ${picks.length} mega caps available from the feed`);
+  const mag7Added = MAG7.filter(t => !mom.list.includes(t));
+  const fixed = [...mom.list, ...mag7Added];
+  const nDaily = Math.max(0, TOTAL - fixed.length);
+  const { picks, pool_size } = await megaCaps(new Set(fixed), nDaily);
+  if (picks.length < nDaily) throw new Error(`only ${picks.length} of ${nDaily} mega caps available from the feed`);
   // The daily names carry their exchange so one-letter tickers (V, C) resolve to the right stock.
   const tickers = [...fixed, ...picks.map(p => p.symbol)];
   const listText = tickers.join(', ');
   const out = {
     as_of_new_york: new Date().toLocaleString('sv-SE', { timeZone: 'America/New_York' }),
     momentum: { tickers: mom.list, source: mom.source },
-    etfs: ETFS,
+    mag7_added: mag7Added,
     mega_caps: picks.map(p => ({ ticker: p.name, premarket_pct: p.pm_change == null ? null : +p.pm_change.toFixed(2), premarket_volume: p.pm_volume, last_session_pct: p.change == null ? null : +p.change.toFixed(2), market_cap_bn: p.cap_bn, ranked_by: p.ranked_by })),
     mega_cap_pool: pool_size,
     list: listText,
