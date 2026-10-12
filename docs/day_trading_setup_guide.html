@@ -518,7 +518,7 @@
       </div>
       <ul class="plain" style="margin-top: 0.9rem;">
         <li><b>When:</b> 08:30 and 09:15 New York time, Monday to Friday. The first run gives you a list while picking names; the second catches late movers. A run missed while the Mac was asleep catches up once, until 12:00.</li>
-        <li><b>Needs:</b> TradingView Desktop started with its remote-control connection (<code>open -a TradingView --args --remote-debugging-port=9222</code>) and a tab on this layout. If it can't reach TradingView it retries every 5 minutes and shows one notification.</li>
+        <li><b>Needs:</b> TradingView Desktop running with its remote-control connection and a tab on this layout. Open it with the <b>TradingView Connected</b> launcher in your Applications folder, not the normal icon. If TradingView is closed at run time, the job starts it for you. If it was opened the normal way, the job can't reach it: it shows one notification and retries every 5 minutes.</li>
         <li><b>Example, 2026-10-12:</b> SHOP +1.70%, NFLX +1.54%, SPCX +1.28%, XOM +1.25%, CRWD +0.31%, JPM +0.30%, PANW +0.29%, WMT +0.22%. On a weak morning the last picks are barely positive.</li>
       </ul>
     </div>
@@ -760,7 +760,7 @@
       <li><span class="badge open">Open</span><span><b>Not backtested.</b> There is no win rate, average R or drawdown figure for these rules. Every threshold (2R, 0.75 ATR, the 09:35–12:00 window, 3 trades a day) is an untested default.</span></li>
       <li><span class="badge open">Open</span><span><b>Paper-trade first.</b> Log the signals for a few weeks and compare them with what you would have taken by hand.</span></li>
       <li><span class="badge unconfirmed">Unconfirmed</span><span><b>A full live trade.</b> A live entry was traced on TSLA (2026-10-05) and was still open when checked. A complete live sequence through 2R and exit has not been watched end to end.</span></li>
-      <li><span class="badge unconfirmed">Unconfirmed</span><span><b>An unattended morning run of the daily list.</b> The first one, on 2026-10-12, failed: TradingView had been opened without its remote-control connection, so the job could not write the list. The data side worked. The log is <code>~/.dts-screener/screener_list_cron.log</code>.</span></li>
+      <li><span class="badge unconfirmed">Unconfirmed</span><span><b>An unattended morning run of the daily list.</b> The first one, on 2026-10-12, failed: TradingView had been opened without its remote-control connection, so the job could not write the list. The list was applied after a restart, and the job now starts TradingView itself when it is closed. That auto-start has not yet been seen working unattended. The log is <code>~/.dts-screener/screener_list_cron.log</code>.</span></li>
       <li><span class="badge unconfirmed">Not set up</span><span><b>Alerts.</b> None created, by choice. See the Alerts section when you want them.</span></li>
     </ul>
     <div class="informal" style="margin-top: 1.1rem;">

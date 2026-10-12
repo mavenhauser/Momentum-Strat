@@ -8,8 +8,11 @@
 # once on wake. Catch-up is allowed until 12:00 because the feed keeps the
 # day's premarket figures after the open.
 #
-# A slot is only marked done when the update succeeds, so if TradingView isn't
-# reachable the next poll retries. One macOS notification per failed slot.
+# If TradingView isn't running at all, the wrapper starts it in the background
+# with the debugging port the updater needs. It never closes or restarts a
+# TradingView that is already open: one opened without the port (from the Dock)
+# can't be reached, so the slot fails, a notification says so, and the next
+# poll retries. A slot is only marked done when the update succeeds.
 
 set -uo pipefail
 
@@ -41,12 +44,39 @@ if [ -f "$MARKER_FILE" ] && [ "$(cat "$MARKER_FILE")" = "$slot_id" ]; then
   exit 0
 fi
 
+CDP_PORT=9222
+TV_BIN="/Applications/TradingView.app/Contents/MacOS/TradingView"
+chart_tabs() {
+  curl -s -m 3 "http://localhost:$CDP_PORT/json/list" 2>/dev/null | grep -c 'tradingview.com/chart' || true
+}
+
 echo "=== $(TZ='America/New_York' date '+%Y-%m-%d %H:%M:%S') ET slot $slot_id"
-if "$NODE" "$UPDATER" --apply; then
+
+attempts=1
+reason="TradingView is open without its connection. Quit it and reopen with TradingView Connected."
+if [ "$(chart_tabs)" -eq 0 ] && ! pgrep -f "$TV_BIN( |\$)" >/dev/null; then
+  echo "TradingView not running - starting it with --remote-debugging-port=$CDP_PORT"
+  open -g -a TradingView --args "--remote-debugging-port=$CDP_PORT" || true
+  for _ in $(seq 1 30); do
+    [ "$(chart_tabs)" -gt 0 ] && break
+    sleep 3
+  done
+  sleep 20          # let the layouts and indicators finish loading
+  attempts=3
+  reason="TradingView was started but did not finish loading in time."
+fi
+
+ok=0
+for i in $(seq 1 "$attempts"); do
+  if "$NODE" "$UPDATER" --apply; then ok=1; break; fi
+  [ "$i" -lt "$attempts" ] && sleep 15
+done
+
+if [ "$ok" -eq 1 ]; then
   echo "$slot_id" > "$MARKER_FILE"
 else
   if [ ! -f "$FAIL_FILE" ] || [ "$(cat "$FAIL_FILE")" != "$slot_id" ]; then
     echo "$slot_id" > "$FAIL_FILE"
-    osascript -e 'display notification "TradingView was not reachable. Retrying every 5 minutes until 12:00 ET." with title "DTS Screener list not updated"' >/dev/null 2>&1 || true
+    osascript -e "display notification \"$reason Retrying every 5 minutes until 12:00 ET.\" with title \"DTS Screener list not updated\"" >/dev/null 2>&1 || true
   fi
 fi

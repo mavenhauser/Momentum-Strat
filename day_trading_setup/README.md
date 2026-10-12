@@ -95,8 +95,11 @@ layout. It writes to every tab that has that layout.
 [`scripts/screener_list_cron_wrapper.sh`](scripts/screener_list_cron_wrapper.sh)
 every 5 minutes. The wrapper runs the update at **08:30 and 09:15 New York
 time**, Monday to Friday. A slot missed while the Mac was asleep catches up
-once, until 12:00. If TradingView isn't reachable it retries on each poll
-and shows one macOS notification. The scheduled copy and its log live in
+once, until 12:00. If TradingView isn't running, the wrapper starts it in
+the background with the debugging port. It never closes a TradingView that
+is already open, so one opened from the Dock (no port) can't be reached:
+the wrapper retries on each poll and shows one macOS notification. The
+scheduled copy and its log live in
 `~/.dts-screener/`; after changing either script, copy it there again:
 
 ```bash
@@ -105,6 +108,16 @@ cp day_trading_setup/scripts/update_screener_list.mjs day_trading_setup/scripts/
 
 On US market holidays the job still runs and ranks by the last session,
 which is harmless.
+
+**Launcher.** Open TradingView with **TradingView Connected**
+(`~/Applications/TradingView Connected.app`) instead of the normal icon. It
+starts TradingView with the debugging port. If TradingView is already open
+without it, the launcher offers to restart it. Source:
+[`scripts/tradingview_connected.applescript`](scripts/tradingview_connected.applescript).
+
+```bash
+osacompile -o ~/Applications/"TradingView Connected.app" day_trading_setup/scripts/tradingview_connected.applescript
+```
 
 | Column | Meaning |
 |---|---|
