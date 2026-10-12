@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
-# Refreshes DTS Screener's ticker list twice each trading morning, 08:30 and
+# Refreshes DTS Screener's ticker list, and the TradingView alerts that follow
+# it (one DTS Entry alert per ticker plus the screener alert), twice each
+# trading morning, 08:30 and
 # 09:15 America/New_York, Monday-Friday: 08:30 so the list is there while
 # picking names, 09:15 so the final list reflects the late premarket movers.
 # Launchd's StartInterval polls this wrapper every 5 minutes; the marker file
@@ -68,7 +70,7 @@ fi
 
 ok=0
 for i in $(seq 1 "$attempts"); do
-  if "$NODE" "$UPDATER" --apply; then ok=1; break; fi
+  if "$NODE" "$UPDATER" --apply --alerts; then ok=1; break; fi
   [ "$i" -lt "$attempts" ] && sleep 15
 done
 
@@ -77,6 +79,6 @@ if [ "$ok" -eq 1 ]; then
 else
   if [ ! -f "$FAIL_FILE" ] || [ "$(cat "$FAIL_FILE")" != "$slot_id" ]; then
     echo "$slot_id" > "$FAIL_FILE"
-    osascript -e "display notification \"$reason Retrying every 5 minutes until 12:00 ET.\" with title \"DTS Screener list not updated\"" >/dev/null 2>&1 || true
+    osascript -e "display notification \"$reason Retrying every 5 minutes until 12:00 ET.\" with title \"DTS Screener list / alerts not updated\"" >/dev/null 2>&1 || true
   fi
 fi

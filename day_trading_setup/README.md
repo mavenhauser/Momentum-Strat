@@ -83,18 +83,38 @@ weak morning the last picks can be barely positive. The thresholds are
 constants at the top of the script.
 
 ```bash
-node day_trading_setup/scripts/update_screener_list.mjs          # dry run: print the list
-node day_trading_setup/scripts/update_screener_list.mjs --apply  # also write it into TradingView
+node day_trading_setup/scripts/update_screener_list.mjs                   # dry run: print the list
+node day_trading_setup/scripts/update_screener_list.mjs --apply           # also write it into TradingView
+node day_trading_setup/scripts/update_screener_list.mjs --apply --alerts  # and sync the alerts
+node day_trading_setup/scripts/update_screener_list.mjs --alerts-plan     # show what --alerts would change
 ```
 
 `--apply` needs TradingView Desktop running with the debugging port
 (`--remote-debugging-port=9222`) and a tab on the **Day Trading Set Up**
 layout. It writes to every tab that has that layout.
 
+**Alerts follow the list.** With `--alerts` the updater keeps 21 TradingView
+alerts in step with the 20 tickers:
+
+- **`DTS Entry · <TICKER>`**, one per ticker: DTS Entry → *Any alert()
+  function call*, 5-minute, regular session. It sends entries, 2R hits,
+  exits and new A+ setups for that ticker.
+- **`DTS Screener · flips`**, one alert: fires when any ticker flips to ▲ or
+  ▼. It holds a copy of the ticker list, so it is replaced whenever the list
+  changes, and it only reports flips that happen after it was created.
+
+Each run deletes the alerts of tickers that left the list, creates the
+missing ones, and replaces any that are stopped or were made with an older
+script version or different settings, so the alerts always match the
+indicators on the chart. The 12 fixed alerts normally stay untouched. Only
+alerts with those two name patterns are ever changed. They notify by app
+push, on-screen pop-up and sound (no webhook, no email), never expire, and
+run on the `BATS` (Cboe One) real-time feed the charts use.
+
 **Schedule.** A launchd job (`com.jameswoo.dts-screener-list`) polls
 [`scripts/screener_list_cron_wrapper.sh`](scripts/screener_list_cron_wrapper.sh)
-every 5 minutes. The wrapper runs the update at **08:30 and 09:15 New York
-time**, Monday to Friday. A slot missed while the Mac was asleep catches up
+every 5 minutes. The wrapper runs the update, list and alerts, at **08:30
+and 09:15 New York time**, Monday to Friday. A slot missed while the Mac was asleep catches up
 once, until 12:00. If TradingView isn't running, the wrapper starts it in
 the background with the debugging port. It never closes a TradingView that
 is already open, so one opened from the Dock (no port) can't be reached:
