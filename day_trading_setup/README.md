@@ -104,7 +104,7 @@ the alerts copy those settings:
 |---|---|---|
 | Entries, with entry / stop / target | always sent | on |
 | New A+ OUTSIDE setups | *alert() when an A+ OUTSIDE setup appears* | on |
-| 2R target hit and exits | *alert() on the 2R target and on exits* | off |
+| 2R target hit and exits (STOP / BE / TRAIL / EOD) | *alert() on the 2R target and on exits* | on |
 
 Flip a switch on the chart and the next run replaces the alerts to match.
 
@@ -317,9 +317,9 @@ Click ⏰ **Alert**, then set:
 - **Frequency:** once per bar close
 - **Notifications:** turn on app push
 
-This one alert covers entries and new A+ setups on that symbol, plus the 2R
-target and exits if you switch on *alert() on the 2R target and on exits*
-in the indicator's settings before creating it. A message looks like this:
+This one alert covers entries, new A+ setups, the 2R target and exits on
+that symbol. The A+ messages and the 2R / exit messages each have a switch
+in the indicator's settings. A message looks like this:
 
 `DTS: LONG NVDA @ 177.16 | stop 176.40 | target 178.68 (2R) | ORH breakout + 8 EMA retest`
 

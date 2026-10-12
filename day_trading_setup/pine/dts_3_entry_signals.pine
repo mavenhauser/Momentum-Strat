@@ -57,7 +57,7 @@ txtSize   = input.string("Small", "Text size", options = ["Tiny", "Small", "Norm
 // Declared last on purpose: input ids are positional, so new inputs go at the end to keep
 // saved chart settings and alerts lined up.
 G_AL = "Alert messages"
-exitAlerts = input.bool(false, "alert() on the 2R target and on exits", group = G_AL, tooltip = "Off: alerts carry entries and (if enabled above) new A+ setups only. On: also the 2R target hit and every exit (STOP / BE / TRAIL / EOD). The chart labels are drawn either way.", display = display.none)
+exitAlerts = input.bool(true, "alert() on the 2R target and on exits", group = G_AL, tooltip = "On: alerts also carry the 2R target hit and every exit (STOP / BE / TRAIL / EOD). Off: entries and (if enabled above) new A+ setups only. The chart labels are drawn either way.", display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744

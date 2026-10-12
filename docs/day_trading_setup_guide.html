@@ -468,7 +468,7 @@
           <tr><td class="k">Volume</td><td>Volume bars</td><td class="soft">On the price pane, by your choice.</td></tr>
           <tr><td class="k">DTS Screener</td><td>Which stocks are outside yesterday's and premarket range</td><td class="soft">Saved script, version 6.0.</td></tr>
           <tr><td class="k">DTS Trend</td><td>Trend ribbon, key levels, breakout markers, market structure</td><td class="soft">Saved script, version 7.0. Bar coloring off.</td></tr>
-          <tr><td class="k">DTS Entry</td><td>Entry signals, stop and target, checklist panel, A+ banner</td><td class="soft">Saved script, version 3.0.</td></tr>
+          <tr><td class="k">DTS Entry</td><td>Entry signals, stop and target, checklist panel, A+ banner</td><td class="soft">Saved script, version 4.0.</td></tr>
         </tbody>
       </table>
     </div>
@@ -656,12 +656,12 @@
 
   <section>
     <h2 class="section-title">Alerts</h2>
-    <p><b>20 alerts are live</b> (set up 2026-10-12): one <code>DTS Entry · TICKER</code> alert for each of the 20 screener tickers. Each sends <b>entries</b> (with entry, stop and target) and <b>new A+ setups</b> only. They notify by phone app push and on-screen pop-up, with no sound, and never expire.</p>
+    <p><b>20 alerts are live</b> (set up 2026-10-12): one <code>DTS Entry · TICKER</code> alert for each of the 20 screener tickers. Each sends <b>entries</b> (with entry, stop and target), <b>new A+ setups</b>, the <b>2R target hit</b> and every <b>exit</b> (stop, break-even, trail, end of day). They notify by phone app push and on-screen pop-up, with no sound, and never expire. There is no alert for screener flips.</p>
     <ul class="plain">
       <li><b>They follow the daily list.</b> Each morning's run deletes the alerts of the tickers that left the list and creates alerts for the new ones. The 12 fixed tickers keep theirs.</li>
       <li><b>They stay current.</b> An alert that has stopped, or was made with an older script version or different settings, is replaced on the next run.</li>
-      <li><b>What they send follows the chart.</b> DTS Entry has a switch for A+ messages (on) and one for 2R and exit messages (off). Change a switch on the chart and the next run replaces the alerts to match.</li>
-      <li><b>No screener-flip alert and no sound.</b> In the first hour the original setup fired 29 times with a tone each time, over half of them flips and heads-ups, so the flips, the 2R and exit messages and the sound were removed.</li>
+      <li><b>What they send follows the chart.</b> DTS Entry has a switch for A+ messages and one for 2R and exit messages, both on. Change a switch on the chart and the next run replaces the alerts to match.</li>
+      <li><b>No screener-flip alert and no sound.</b> In the first hour the original setup fired 29 times with a tone each time, 7 of them screener flips, so the flip alert and the sound were removed.</li>
       <li>Only alerts named <code>DTS Entry · …</code> are managed. Anything else on the account is left alone.</li>
     </ul>
     <p>For reference, the indicators offer two kinds of alert.</p>
@@ -696,7 +696,7 @@
       <li><span class="badge done">Done</span><span><b>README extended:</b> premarket vs regular hours routine, and a full entry guide.</span></li>
       <li><span class="badge done">Done</span><span><b>Integrity check</b> (2026-10-03): the three saved scripts were compared with the repo and found identical. The outputs were then recomputed from raw 5-minute bars on PENG: PDH / PDL on 154 of 154 bars, ORH / ORL on 231 of 231, VWAP on 234 of 234, the ribbon on 220 of 220, and a bar-by-bar replay of the entry and exit rules matched all 12 labels.</span></li>
       <li><span class="badge done">Done</span><span><b>Live signal traced</b> (2026-10-05): TSLA <code>LONG · PWH retest</code>, entry 376.34, fired at the close of the 10:50 bar. The earlier green closes at 10:00–10:10 were skipped for being 2.7 to 3.0 above the 8 EMA against a limit of about 1.35.</span></li>
-      <li><span class="badge done">Done</span><span><b>Alerts</b> (2026-10-12): 20 DTS Entry alerts created and verified active, then trimmed the same day to entries and A+ setups only, silent, after they proved too noisy. DTS Entry went to version 3.0 for the new 2R / exit switch. The morning job keeps the alerts in step with the list.</span></li>
+      <li><span class="badge done">Done</span><span><b>Alerts</b> (2026-10-12): 20 DTS Entry alerts created and verified active, then made silent and the screener-flip alert dropped the same day, after they proved too noisy. DTS Entry went to version 4.0, which adds a switch for the 2R and exit messages (left on). The morning job keeps the alerts in step with the list.</span></li>
       <li><span class="badge done">Done</span><span><b>Daily screener list</b> (2026-10-09): updater script and a launchd job that rebuilds the 20 tickers each trading morning. Tested by hand and through launchd.</span></li>
     </ul>
 
