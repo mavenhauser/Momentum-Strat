@@ -93,23 +93,32 @@ node day_trading_setup/scripts/update_screener_list.mjs --alerts-plan     # show
 (`--remote-debugging-port=9222`) and a tab on the **Day Trading Set Up**
 layout. It writes to every tab that has that layout.
 
-**Alerts follow the list.** With `--alerts` the updater keeps 21 TradingView
-alerts in step with the 20 tickers:
+**Alerts follow the list.** With `--alerts` the updater keeps 20 TradingView
+alerts in step with the 20 tickers: **`DTS Entry · <TICKER>`**, one per
+ticker (DTS Entry → *Any alert() function call*, 5-minute, regular session).
 
-- **`DTS Entry · <TICKER>`**, one per ticker: DTS Entry → *Any alert()
-  function call*, 5-minute, regular session. It sends entries, 2R hits,
-  exits and new A+ setups for that ticker.
-- **`DTS Screener · flips`**, one alert: fires when any ticker flips to ▲ or
-  ▼. It holds a copy of the ticker list, so it is replaced whenever the list
-  changes, and it only reports flips that happen after it was created.
+What an alert sends is set by DTS Entry's own settings on the chart, and
+the alerts copy those settings:
+
+| Message | Setting on DTS Entry | Now |
+|---|---|---|
+| Entries, with entry / stop / target | always sent | on |
+| New A+ OUTSIDE setups | *alert() when an A+ OUTSIDE setup appears* | on |
+| 2R target hit and exits | *alert() on the 2R target and on exits* | off |
+
+Flip a switch on the chart and the next run replaces the alerts to match.
 
 Each run deletes the alerts of tickers that left the list, creates the
-missing ones, and replaces any that are stopped or were made with an older
-script version or different settings, so the alerts always match the
-indicators on the chart. The 12 fixed alerts normally stay untouched. Only
-alerts with those two name patterns are ever changed. They notify by app
-push, on-screen pop-up and sound (no webhook, no email), never expire, and
-run on the `BATS` (Cboe One) real-time feed the charts use.
+missing ones, and replaces any that are stopped or differ from the chart's
+script version or settings. The 12 fixed alerts normally stay untouched.
+They notify by app push and on-screen pop-up (no sound, webhook or email),
+never expire, and run on the `BATS` (Cboe One) real-time feed the charts
+use. Only alerts named `DTS Entry · …` or `DTS Screener · flips` are ever
+changed.
+
+There is no screener-flip alert: it fired on every ▲ / ▼ flip across 20
+tickers and was too noisy. `WITH_SCREENER_ALERT` in the script turns it
+back on.
 
 **Schedule.** A launchd job (`com.jameswoo.dts-screener-list`) polls
 [`scripts/screener_list_cron_wrapper.sh`](scripts/screener_list_cron_wrapper.sh)
@@ -308,8 +317,9 @@ Click ⏰ **Alert**, then set:
 - **Frequency:** once per bar close
 - **Notifications:** turn on app push
 
-This one alert covers entries, the 2R target and exits on that symbol. A
-message looks like this:
+This one alert covers entries and new A+ setups on that symbol, plus the 2R
+target and exits if you switch on *alert() on the 2R target and on exits*
+in the indicator's settings before creating it. A message looks like this:
 
 `DTS: LONG NVDA @ 177.16 | stop 176.40 | target 178.68 (2R) | ORH breakout + 8 EMA retest`
 

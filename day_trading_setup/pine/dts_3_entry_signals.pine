@@ -54,6 +54,11 @@ showPanel = input.bool(true, "Setup checklist panel", group = G_UI, display = di
 panelPos  = input.string("Bottom right", "Position", options = ["Top left", "Top right", "Bottom left", "Bottom right"], group = G_UI, display = display.none)
 txtSize   = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal"], group = G_UI, display = display.none)
 
+// Declared last on purpose: input ids are positional, so new inputs go at the end to keep
+// saved chart settings and alerts lined up.
+G_AL = "Alert messages"
+exitAlerts = input.bool(false, "alert() on the 2R target and on exits", group = G_AL, tooltip = "Off: alerts carry entries and (if enabled above) new A+ setups only. On: also the 2R target hit and every exit (STOP / BE / TRAIL / EOD). The chart labels are drawn either way.", display = display.none)
+
 C_BULL = #00E676
 C_BEAR = #FF1744
 C_OR   = #FFEB3B
@@ -247,9 +252,10 @@ if pos != 0 and bar_index > entBar
     if exitNow
         isWin = pos == 1 ? exitPx > entPx : exitPx < entPx
         label.new(bar_index, pos == 1 ? high : low, exitTxt + " " + fmt(exitPx), style = pos == 1 ? label.style_label_down : label.style_label_up, color = isWin ? color.new(C_BULL, 20) : color.new(C_DIM, 20), textcolor = color.black, size = size.tiny)
-        alert("DTS: EXIT " + (pos == 1 ? "LONG " : "SHORT ") + syminfo.ticker + " (" + exitTxt + ") @ " + fmt(exitPx), alert.freq_once_per_bar_close)
+        if exitAlerts
+            alert("DTS: EXIT " + (pos == 1 ? "LONG " : "SHORT ") + syminfo.ticker + " (" + exitTxt + ") @ " + fmt(exitPx), alert.freq_once_per_bar_close)
         pos := 0
-    else if tgtNow
+    else if tgtNow and exitAlerts
         alert("DTS: " + syminfo.ticker + " hit " + str.tostring(rr) + "R target @ " + fmt(tgtPx) + " - take partial, stop to break-even " + fmt(entPx), alert.freq_once_per_bar_close)
 
 // --- Arm on a key-level breakout (highest level broken wins for longs, lowest for shorts).

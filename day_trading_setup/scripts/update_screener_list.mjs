@@ -12,11 +12,14 @@
 // session's % change, highest first.
 //
 // With --alerts it also keeps TradingView alerts in step with the list: one "DTS Entry"
-// alert per ticker (entries, 2R hits, exits, A+ setups) and one "DTS Screener" alert for
-// trend flips. Alerts for tickers that left the list are deleted, missing ones created,
-// and any that are stopped or on an old script version / settings are replaced. Only
+// alert per ticker. What an alert sends is decided by the indicator's own settings on the
+// chart (entries always; new A+ setups and 2R / exit messages each have a switch), so
+// changing a switch there changes the alerts on the next run. Alerts for tickers that left
+// the list are deleted, missing ones created, and any that are stopped or differ from the
+// chart's script version, settings or the notification choices below are replaced. Only
 // alerts whose name starts with "DTS Entry · " or equals "DTS Screener · flips" are ever
-// touched. Notifications: app push, on-screen pop-up and sound; no webhook, no email.
+// touched. Notifications: app push and on-screen pop-up; no sound, webhook or email.
+// The screener-flip alert is switched off (WITH_SCREENER_ALERT); a leftover one is removed.
 //
 // Usage:  node update_screener_list.mjs                    dry run: print the list
 //         node update_screener_list.mjs --apply            also write it into TradingView
@@ -45,6 +48,7 @@ const SCREENER_ALERT = 'DTS Screener · flips';
 // a symbol only as its 5-minute clock, so it sits on SPY.
 const FEED = 'BATS';
 const SCREENER_ALERT_SYMBOL = 'BATS:SPY';
+const WITH_SCREENER_ALERT = false;
 
 const apply = process.argv.includes('--apply');
 const alertsPlan = process.argv.includes('--alerts-plan');
@@ -145,26 +149,27 @@ function alertSyncExpression(params) {
     function body(symbol, name, ser) {
       return { conditions: [{ type: 'pine_alert', series: [ser], resolution: '5' }],
         symbol: '=' + JSON.stringify({ adjustment: 'splits', 'currency-id': 'USD', session: 'regular', symbol: symbol }),
-        resolution: '5', message: '', sound_file: 'alert/fired', sound_duration: 0, popup: true, auto_deactivate: false,
+        resolution: '5', message: '', sound_file: null, sound_duration: 0, popup: true, auto_deactivate: false,
         email: false, sms_over_email: false, mobile_push: true, web_hook: null, name: name, expiration: null, active: true, ignore_warnings: true };
     }
-    var entry = series(P.entryStudy), screener = series(P.screenerStudy);
+    function notifiesAsWanted(a) { return !a.sound_file && a.popup === true && a.mobile_push === true && !a.web_hook && !a.email; }
+    var entry = series(P.entryStudy), screener = P.withScreener ? series(P.screenerStudy) : null;
     var listed = await fetch('https://pricealerts.tradingview.com/list_alerts', { credentials: 'include' }).then(function(r){ return r.json(); });
     if (listed.s !== 'ok') throw new Error('could not list alerts: ' + JSON.stringify(listed).slice(0, 200));
     var want = {}; P.tickers.forEach(function(t){ want[t.ticker] = t; });
-    var have = {}, drop = [], out = { kept: [], created: [], deleted: [], errors: [], entry_script_version: entry.pine_version, screener_script_version: screener.pine_version };
+    var have = {}, drop = [], out = { kept: [], created: [], deleted: [], errors: [], entry_script_version: entry.pine_version };
     (listed.r || []).forEach(function(a){
       if (typeof a.name !== 'string') return;
       var isScreener = a.name === P.screenerName, isEntry = a.name.indexOf(P.entryPrefix) === 0;
       if (!isScreener && !isEntry) return;                      // not ours: never touched
       var key = isScreener ? '#screener' : a.name.slice(P.entryPrefix.length);
       var got = a.condition && a.condition.series && a.condition.series[0];
-      var ok = a.active && !have[key] && (isScreener ? same(screener, got) : (!!want[key] && same(entry, got)));
+      var ok = a.active && !have[key] && notifiesAsWanted(a) && (isScreener ? (P.withScreener && same(screener, got)) : (!!want[key] && same(entry, got)));
       if (ok) { have[key] = true; out.kept.push(a.name); } else drop.push(a);
     });
     var make = [];
     P.tickers.forEach(function(t){ if (!have[t.ticker]) make.push({ name: P.entryPrefix + t.ticker, symbols: t.symbols, ser: entry }); });
-    if (!have['#screener']) make.push({ name: P.screenerName, symbols: [P.screenerSymbol], ser: screener });
+    if (P.withScreener && !have['#screener']) make.push({ name: P.screenerName, symbols: [P.screenerSymbol], ser: screener });
     if (P.planOnly) { out.would_delete = drop.map(function(a){ return a.name; }); out.would_create = make.map(function(m){ return m.name; }); return out; }
     if (drop.length) {
       var d = await call('delete_alerts', { alert_ids: drop.map(function(a){ return a.alert_id; }) });
@@ -188,7 +193,7 @@ async function syncAlerts(tickers, planOnly) {
   const { CDP, pages } = await chartPages();
   const expression = alertSyncExpression({
     layout: LAYOUT, entryStudy: ENTRY_STUDY, screenerStudy: STUDY, entryPrefix: ENTRY_PREFIX, screenerName: SCREENER_ALERT,
-    screenerSymbol: SCREENER_ALERT_SYMBOL, planOnly, tickers,
+    screenerSymbol: SCREENER_ALERT_SYMBOL, withScreener: WITH_SCREENER_ALERT, planOnly, tickers,
   });
   for (const t of pages) {
     let c;
