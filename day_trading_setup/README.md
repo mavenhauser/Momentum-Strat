@@ -421,6 +421,10 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
 - **Holding:** DTS Entry runs with *Flat by 15:55* off and *Max sessions
   held* = 2, so a trade can be held overnight and is closed by a `TIME`
   exit at 15:55 the next session.
+- **Entry window:** the script's default is 09:35–12:00 ET. On the Day
+  Trading Set Up chart it is set to **09:35–15:30** (since 2026-10-14), so a
+  late-day entry becomes an overnight swing closed by the next session's
+  `TIME` exit. The alerts copy the chart setting.
 - **Orders:** limit at mid; anything unfilled after 30 s is cancelled and
   retried once at the ask (buy) or bid (sell). Before every sale the real
   IBKR position is read, and never more than that is sold.
