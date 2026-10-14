@@ -58,6 +58,7 @@ txtSize   = input.string("Small", "Text size", options = ["Tiny", "Small", "Norm
 // saved chart settings and alerts lined up.
 G_AL = "Alert messages"
 exitAlerts = input.bool(true, "alert() on the 2R target and on exits", group = G_AL, tooltip = "On: alerts also carry the 2R target hit and every exit (STOP / BE / TRAIL / EOD). Off: entries and (if enabled above) new A+ setups only. The chart labels are drawn either way.", display = display.none)
+holdSessions = input.int(2, "Max sessions held when 'Flat by 15:55' is off", minval = 1, group = G_RISK, tooltip = "Only used when 'Flat by 15:55 New York' is unchecked. 1 = close at 15:55 on the entry day, 2 = may be held overnight and is closed at 15:55 the next session (TIME exit), and so on. Stops, the 2R target and the trail still apply at any time.", display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744
@@ -169,6 +170,8 @@ inWindow   = not na(time(timeframe.period, entrySess, NY))
 trailEma   = trailSrc == "8 EMA" ? e8 : e21
 eodTs      = timestamp(NY, year(time, NY), month(time, NY), dayofmonth(time, NY), 15, 55)
 isEod      = eodExit and rth and time_close >= eodTs
+var int heldSessions = 0   // regular sessions the open trade has been held, counting the entry day
+isTimeUp   = not eodExit and rth and time_close >= eodTs and heldSessions >= holdSessions
 
 var int   pos = 0          // 1 long, -1 short, 0 flat
 var float entPx = na
@@ -198,6 +201,8 @@ var float  sSwing = na
 
 if chartNewDay
     tradesToday := 0
+    if pos != 0
+        heldSessions += 1
     lArmed := false
     lRetest := false
     lSwing := na
@@ -241,6 +246,10 @@ if pos != 0 and bar_index > entBar
         exitNow := true
         exitPx  := close
         exitTxt := "EOD"
+    else if not exitNow and isTimeUp
+        exitNow := true
+        exitPx  := close
+        exitTxt := "TIME"
     line.set_x2(lnEnt, bar_index)
     line.set_x2(lnStp, bar_index)
     line.set_x2(lnTgt, bar_index)
@@ -350,6 +359,7 @@ if longSig or shortSig
     tgtHit := false
     entBar := bar_index
     tradesToday += 1
+    heldSessions := 1
     lnEnt := line.new(bar_index, entPx, bar_index + 1, entPx, color = color.new(color.white, 30), width = 1)
     lnStp := line.new(bar_index, stpPx, bar_index + 1, stpPx, color = C_BEAR, style = line.style_dashed)
     lnTgt := line.new(bar_index, tgtPx, bar_index + 1, tgtPx, color = C_BULL, style = line.style_dashed)
