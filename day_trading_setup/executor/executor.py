@@ -386,7 +386,7 @@ def main(argv=None):
             {"ENTRY": on_entry, "TARGET": on_target, "EXIT": on_exit}[sig.kind](broker, state, sig, t)
         except Exception as e:
             log.exception("failed handling %s", sig.raw)
-            notify(f"DTS {mode_tag()}: ERROR handling '{sig.raw[:80]}': {e}")
+            notify(f"DTS {mode_tag()}: ERROR handling '{sig.raw[:80]}': {type(e).__name__} {e}".rstrip())
             return 1
         finally:
             broker.close()
