@@ -126,7 +126,24 @@ class Broker:
         return settings.DRY_RUN_NLV, "dry-run default"
 
     def chain(self, ticker):
-        return self.tt.get_option_chain(symbol=ticker)
+        """Full option chain from TastyTrade. Large chains are slow (AMD: ~15 s for
+        7,000+ contracts, which tripped the shared client's 15 s limit live on
+        2026-10-14), so this allows 60 s and retries once."""
+        from tastytrade.instruments import get_option_chain
+        cache = self.tt._chain_cache
+        if ticker not in cache:
+            last = None
+            for _ in range(2):
+                try:
+                    self.tt._run(self.tt.session.refresh())
+                    cache[ticker] = self.tt._run(get_option_chain(self.tt.session, ticker), timeout=60)
+                    break
+                except Exception as e:
+                    last = e
+                    log.warning("option chain for %s failed (%s), retrying", ticker, type(e).__name__)
+            else:
+                raise RuntimeError(f"option chain for {ticker} unavailable: {type(last).__name__} {last}")
+        return cache[ticker]
 
     def snapshot(self, streamer_symbols):
         return self.tt.get_option_market_snapshot(streamer_symbols)
@@ -138,14 +155,16 @@ class Broker:
         seen live 2026-10-14: IBKR 6.75/6.90 vs TastyTrade 6.85/7.00 on the same
         TSLA put), so IBKR is only used when TastyTrade has no two-sided quote.
         None if neither has one."""
-        from tastytrade.instruments import OptionType
-        exp = date.fromisoformat(pos["expiry"])
-        for o in self.chain(pos["ticker"]).get(exp, []):
-            if float(o.strike_price) == pos["strike"] and o.option_type == OptionType(pos["right"]):
-                q = self.snapshot([o.streamer_symbol]).get(o.streamer_symbol) or {}
-                if q.get("bid") and q.get("ask"):
-                    return q["bid"], q["ask"], "TastyTrade"
-                break
+        sym = pos.get("streamer")
+        if not sym:                           # positions opened before the symbol was stored
+            from tastytrade.instruments import OptionType
+            exp = date.fromisoformat(pos["expiry"])
+            sym = next((o.streamer_symbol for o in self.chain(pos["ticker"]).get(exp, [])
+                        if float(o.strike_price) == pos["strike"] and o.option_type == OptionType(pos["right"])), None)
+        if sym:
+            q = self.snapshot([sym]).get(sym) or {}
+            if q.get("bid") and q.get("ask"):
+                return q["bid"], q["ask"], "TastyTrade"
         if self.ib:
             bid, ask = self.ib.get_option_bid_ask(pos["expiry_ib"], pos["strike"], pos["right"],
                                                   trading_class=None, symbol=pos["ticker"])
@@ -207,7 +226,8 @@ def choose_contract(broker, sig, today):
         q = snap.get(opts[k].streamer_symbol) or {}
         if contracts.liquid(q):
             return {"ticker": sig.ticker, "right": right, "expiry": expiry.isoformat(),
-                    "expiry_ib": expiry.strftime("%Y%m%d"), "strike": k}, None
+                    "expiry_ib": expiry.strftime("%Y%m%d"), "strike": k,
+                    "streamer": opts[k].streamer_symbol}, None
     return None, f"no liquid {right} near {sig.price} for {expiry} (tried {', '.join(f'{k:g}' for k in tried)})"
 
 
