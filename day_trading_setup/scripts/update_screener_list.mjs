@@ -18,7 +18,9 @@
 // the list are deleted, missing ones created, and any that are stopped or differ from the
 // chart's script version, settings or the notification choices below are replaced. Only
 // alerts whose name starts with "DTS Entry · " or equals "DTS Screener · flips" are ever
-// touched. Notifications: app push and on-screen pop-up; no sound, webhook or email.
+// touched. Notifications: app push and on-screen pop-up; no sound or email. Each alert also
+// posts its message to the DTS executor's webhook on this Mac (via the ngrok tunnel) when
+// ~/.dts-executor/secret exists; that is how the IBKR paper executor receives signals.
 // The screener-flip alert is switched off (WITH_SCREENER_ALERT); a leftover one is removed.
 //
 // Usage:  node update_screener_list.mjs                    dry run: print the list
@@ -49,6 +51,8 @@ const SCREENER_ALERT = 'DTS Screener · flips';
 const FEED = 'BATS';
 const SCREENER_ALERT_SYMBOL = 'BATS:SPY';
 const WITH_SCREENER_ALERT = false;
+const WEBHOOK_BASE = 'https://sherill-sudoriparous-soothedly.ngrok-free.dev/dts/';
+const WEBHOOK_SECRET_FILE = `${process.env.HOME}/.dts-executor/secret`;
 
 const apply = process.argv.includes('--apply');
 const alertsPlan = process.argv.includes('--alerts-plan');
@@ -150,9 +154,9 @@ function alertSyncExpression(params) {
       return { conditions: [{ type: 'pine_alert', series: [ser], resolution: '5' }],
         symbol: '=' + JSON.stringify({ adjustment: 'splits', 'currency-id': 'USD', session: 'regular', symbol: symbol }),
         resolution: '5', message: '', sound_file: null, sound_duration: 0, popup: true, auto_deactivate: false,
-        email: false, sms_over_email: false, mobile_push: true, web_hook: null, name: name, expiration: null, active: true, ignore_warnings: true };
+        email: false, sms_over_email: false, mobile_push: true, web_hook: P.webhook || null, name: name, expiration: null, active: true, ignore_warnings: true };
     }
-    function notifiesAsWanted(a) { return !a.sound_file && a.popup === true && a.mobile_push === true && !a.web_hook && !a.email; }
+    function notifiesAsWanted(a) { return !a.sound_file && a.popup === true && a.mobile_push === true && !a.email && (a.web_hook || null) === (P.webhook || null); }
     var entry = series(P.entryStudy), screener = P.withScreener ? series(P.screenerStudy) : null;
     var listed = await fetch('https://pricealerts.tradingview.com/list_alerts', { credentials: 'include' }).then(function(r){ return r.json(); });
     if (listed.s !== 'ok') throw new Error('could not list alerts: ' + JSON.stringify(listed).slice(0, 200));
@@ -189,11 +193,18 @@ function alertSyncExpression(params) {
   })()`;
 }
 
+function webhookUrl() {
+  try {
+    const secret = readFileSync(WEBHOOK_SECRET_FILE, 'utf8').trim();
+    return secret ? WEBHOOK_BASE + secret : null;
+  } catch { return null; }
+}
+
 async function syncAlerts(tickers, planOnly) {
   const { CDP, pages } = await chartPages();
   const expression = alertSyncExpression({
     layout: LAYOUT, entryStudy: ENTRY_STUDY, screenerStudy: STUDY, entryPrefix: ENTRY_PREFIX, screenerName: SCREENER_ALERT,
-    screenerSymbol: SCREENER_ALERT_SYMBOL, withScreener: WITH_SCREENER_ALERT, planOnly, tickers,
+    screenerSymbol: SCREENER_ALERT_SYMBOL, withScreener: WITH_SCREENER_ALERT, webhook: webhookUrl(), planOnly, tickers,
   });
   for (const t of pages) {
     let c;

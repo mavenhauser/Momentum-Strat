@@ -1,0 +1,373 @@
+"""Act on one DTS Entry alert by trading weekly options on the IBKR paper account.
+
+TradingView decides every entry, stop, target and exit; this only executes.
+LONG -> buy a call, SHORT -> buy a put, this week's expiry, strike nearest the
+TradingView entry price, about 1% of net liquidation in premium. The 2R alert
+sells half, any EXIT alert (STOP / BE / TRAIL / EOD / TIME) sells the rest.
+IBKR prices are used only to fill the option orders.
+
+Stateless per invocation (like the Momentum trader): one alert in, state in
+state/dts_positions.json, a file lock so alerts are handled one at a time in
+arrival order.
+
+  python -m day_trading_setup.executor.executor --message "DTS: LONG NVDA @ ..."
+  python -m day_trading_setup.executor.executor --sweep    # 15:56 ET safety close
+  python -m day_trading_setup.executor.executor --status
+
+Dry run unless DTS_EXECUTE=1: contract choice, sizing and quotes are real, no
+orders are sent, fills are simulated at mid and kept in a separate state file.
+SAFETY: refuses to start unless IBKR_PORT is a paper port (7497 / 4002), and
+never sells more contracts than IBKR reports actually held.
+"""
+import argparse
+import fcntl
+import hashlib
+import json
+import logging
+import os
+import sys
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
+from src import config
+from day_trading_setup.executor import contracts, settings, signals
+
+NY = ZoneInfo("America/New_York")
+log = logging.getLogger("dts")
+
+
+# ---------------------------------------------------------------- utilities
+
+def now_ny():
+    return datetime.now(NY)
+
+
+def notify(text):
+    log.info("notify: %s", text.replace("\n", " | "))
+    if not settings.NOTIFY:
+        return
+    try:
+        from src import telegram_client
+        telegram_client.send_message(text, parse_mode=None)
+    except Exception as e:  # a Telegram outage must never block trading
+        log.warning("telegram failed: %s", e)
+
+
+def state_path():
+    return settings.STATE_FILE if settings.EXECUTE else settings.DRY_STATE_FILE
+
+
+def load_state():
+    p = state_path()
+    if p.exists():
+        return json.loads(p.read_text())
+    return {"positions": {}, "closed": [], "processed": {}}
+
+
+def save_state(state):
+    p = state_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    # keep the duplicate-check memory and history bounded
+    state["processed"] = dict(sorted(state["processed"].items(), key=lambda kv: kv[1])[-500:])
+    state["closed"] = state["closed"][-300:]
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, indent=2, default=str))
+    os.replace(tmp, p)
+
+
+def mode_tag():
+    return "PAPER" if settings.EXECUTE else "DRY RUN"
+
+
+def assert_paper_port():
+    if config.IBKR_PORT not in settings.PAPER_PORTS:
+        sys.exit(f"REFUSING TO RUN: IBKR_PORT={config.IBKR_PORT} is not a paper port {settings.PAPER_PORTS}.")
+
+
+# ---------------------------------------------------------------- broker
+
+class Broker:
+    """IBKR for account value, real positions, live quotes and orders; TastyTrade
+    for the option chain and liquidity snapshot (same split as the Momentum trader)."""
+
+    def __init__(self):
+        self.ib = None
+        self.tt = None
+
+    def connect(self):
+        assert_paper_port()
+        from src.tastytrade_client import TastytradeClient
+        self.tt = TastytradeClient()
+        self.tt.connect()
+        try:
+            from src.ibkr_client import IBKRClient
+            client = IBKRClient(client_id=settings.IBKR_CLIENT_ID)
+            client.connect()
+            self.ib = client
+        except Exception as e:
+            if settings.EXECUTE:
+                raise RuntimeError(f"IBKR not reachable on port {config.IBKR_PORT}: {e}")
+            log.warning("IBKR not reachable (%s) - dry run continues on TastyTrade quotes only", e)
+
+    def close(self):
+        for c in (self.ib, self.tt):
+            try:
+                if c:
+                    c.disconnect()
+            except Exception:
+                pass
+
+    def nlv(self):
+        v = self.ib.get_account_value("NetLiquidation") if self.ib else None
+        if v:
+            return v, "IBKR"
+        if settings.EXECUTE:
+            raise RuntimeError("could not read net liquidation from IBKR")
+        return settings.DRY_RUN_NLV, "dry-run default"
+
+    def chain(self, ticker):
+        return self.tt.get_option_chain(symbol=ticker)
+
+    def snapshot(self, streamer_symbols):
+        return self.tt.get_option_market_snapshot(streamer_symbols)
+
+    def quote(self, pos):
+        """(bid, ask, source) for the contract: IBKR's own quote first, TastyTrade
+        as fallback. None if neither has a two-sided quote."""
+        if self.ib:
+            bid, ask = self.ib.get_option_bid_ask(pos["expiry_ib"], pos["strike"], pos["right"],
+                                                  trading_class=None, symbol=pos["ticker"])
+            if bid is not None:
+                return bid, ask, "IBKR"
+        from tastytrade.instruments import OptionType
+        exp = date.fromisoformat(pos["expiry"])
+        for o in self.chain(pos["ticker"]).get(exp, []):
+            if float(o.strike_price) == pos["strike"] and o.option_type == OptionType(pos["right"]):
+                q = self.snapshot([o.streamer_symbol]).get(o.streamer_symbol) or {}
+                if q.get("bid") and q.get("ask"):
+                    return q["bid"], q["ask"], "TastyTrade"
+        return None
+
+    def real_position(self, pos):
+        return self.ib.get_option_position(pos["expiry_ib"], pos["strike"], pos["right"], pos["ticker"])
+
+    def _order(self, action, pos, qty, price):
+        place = self.ib.buy_to_open if action == "BUY" else self.ib.sell_to_close
+        trade = place(pos["expiry_ib"], pos["strike"], pos["right"], qty, price,
+                      trading_class=None, symbol=pos["ticker"])
+        trade = self.ib.wait_for_fill(trade, timeout_seconds=settings.ORDER_FILL_TIMEOUT_SECONDS)
+        return int(trade.orderStatus.filled or 0), float(trade.orderStatus.avgFillPrice or 0)
+
+    def fill(self, action, pos, qty):
+        """Limit at mid; anything unfilled after the timeout is cancelled and retried
+        once at the aggressive side (ask to buy, bid to sell). Returns
+        (filled, avg_price, note)."""
+        q = self.quote(pos)
+        if not q:
+            return 0, None, "no two-sided quote"
+        bid, ask, src = q
+        mid = round((bid + ask) / 2, 2)
+        if not settings.EXECUTE:
+            return qty, mid, f"simulated at mid {mid:.2f} ({src} {bid:.2f}/{ask:.2f})"
+        filled, avg = self._order(action, pos, qty, mid)
+        total, cost = filled, filled * avg
+        if filled < qty:
+            q2 = self.quote(pos)
+            if q2:
+                price2 = round(q2[1] if action == "BUY" else q2[0], 2)
+                f2, a2 = self._order(action, pos, qty - filled, price2)
+                total, cost = total + f2, cost + f2 * a2
+        avg_all = round(cost / total, 4) if total else None
+        return total, avg_all, f"{total}/{qty} filled ({src} quote {bid:.2f}/{ask:.2f})"
+
+
+# ---------------------------------------------------------------- handlers
+
+def describe(pos):
+    kind = "CALL" if pos["right"] == "C" else "PUT"
+    return f"{pos['ticker']} {pos['expiry']} {pos['strike']:g} {kind}"
+
+
+def choose_contract(broker, sig, today):
+    from tastytrade.instruments import OptionType
+    right = "C" if sig.side == "LONG" else "P"
+    chain = broker.chain(sig.ticker)
+    expiry = contracts.pick_expiry(list(chain.keys()), today)
+    if expiry is None:
+        return None, "no option expiries listed"
+    opts = {float(o.strike_price): o for o in chain[expiry] if o.option_type == OptionType(right)}
+    tried = contracts.strikes_by_distance(opts.keys(), sig.price, settings.STRIKES_TO_TRY)
+    snap = broker.snapshot([opts[k].streamer_symbol for k in tried])
+    for k in tried:
+        q = snap.get(opts[k].streamer_symbol) or {}
+        if contracts.liquid(q):
+            return {"ticker": sig.ticker, "right": right, "expiry": expiry.isoformat(),
+                    "expiry_ib": expiry.strftime("%Y%m%d"), "strike": k}, None
+    return None, f"no liquid {right} near {sig.price} for {expiry} (tried {', '.join(f'{k:g}' for k in tried)})"
+
+
+def on_entry(broker, state, sig, t):
+    hm = (t.hour, t.minute)
+    if t.weekday() >= 5 or not (settings.ENTRY_START <= hm < settings.ENTRY_END):
+        return notify(f"DTS {mode_tag()}: ignored {sig.side} {sig.ticker} - outside the regular session")
+    if sig.ticker in state["positions"]:
+        return notify(f"DTS {mode_tag()}: ignored {sig.side} {sig.ticker} - already holding {describe(state['positions'][sig.ticker])}")
+    if len(state["positions"]) >= settings.MAX_OPEN_POSITIONS:
+        return notify(f"DTS {mode_tag()}: skipped {sig.side} {sig.ticker} - already at the limit of {settings.MAX_OPEN_POSITIONS} open positions")
+    pos, why = choose_contract(broker, sig, t.date())
+    if not pos:
+        return notify(f"DTS {mode_tag()}: skipped {sig.side} {sig.ticker} - {why}")
+    q = broker.quote(pos)
+    if not q:
+        return notify(f"DTS {mode_tag()}: skipped {sig.side} {sig.ticker} - no quote for {describe(pos)}")
+    nlv, nlv_src = broker.nlv()
+    qty = contracts.contracts_for(nlv, q[1])
+    filled, avg, note = broker.fill("BUY", pos, qty)
+    if not filled:
+        return notify(f"DTS {mode_tag()}: {sig.side} {sig.ticker} NOT opened - {describe(pos)} x{qty}: {note}")
+    pos.update(side=sig.side, qty=filled, open_qty=filled, avg_cost=avg, tv_entry=sig.price, tv_stop=sig.stop,
+               tv_target=sig.target, level=sig.level, opened_at=t.isoformat(), trimmed=False,
+               events=[{"t": t.isoformat(), "alert": sig.raw, "action": f"BUY {filled} @ {avg}"}])
+    state["positions"][sig.ticker] = pos
+    notify(f"DTS {mode_tag()}: BOUGHT {filled} x {describe(pos)} @ {avg:.2f}\n"
+           f"TradingView {sig.side} {sig.ticker} @ {sig.price} | stop {sig.stop} | target {sig.target} ({sig.level})\n"
+           f"premium ~${filled * avg * 100:,.0f} = {filled * avg * 100 / nlv:.1%} of ${nlv:,.0f} ({nlv_src}) | {note}")
+
+
+def _sell(broker, state, pos, qty, t, why, alert_raw):
+    if settings.EXECUTE:
+        real = int(broker.real_position(pos))
+        if real < qty:
+            log.warning("state says %s open, IBKR holds %s - selling only what is held", qty, real)
+            qty = max(real, 0)
+    if qty <= 0:
+        return 0, None, "nothing held on IBKR"
+    filled, avg, note = broker.fill("SELL", pos, qty)
+    pos["open_qty"] -= filled
+    pos["proceeds"] = pos.get("proceeds", 0.0) + filled * (avg or 0.0)
+    pos["events"].append({"t": t.isoformat(), "alert": alert_raw, "action": f"SELL {filled} @ {avg} ({why})"})
+    return filled, avg, note
+
+
+def _close_record(state, pos, t, why):
+    pnl = (pos.get("proceeds", 0.0) - pos["qty"] * pos["avg_cost"]) * 100
+    state["closed"].append({**pos, "closed_at": t.isoformat(), "close_reason": why, "pnl_usd": round(pnl, 2)})
+    del state["positions"][pos["ticker"]]
+    return pnl
+
+
+def on_target(broker, state, sig, t):
+    pos = state["positions"].get(sig.ticker)
+    if not pos or pos["trimmed"]:
+        return log.info("2R alert for %s with no untrimmed position - ignored", sig.ticker)
+    n = contracts.trim_quantity(pos["open_qty"])
+    filled, avg, note = _sell(broker, state, pos, n, t, "2R trim", sig.raw)
+    pos["trimmed"] = True
+    if filled:
+        notify(f"DTS {mode_tag()}: 2R hit on TradingView ({sig.ticker} @ {sig.price}) - SOLD {filled} x {describe(pos)} @ {avg:.2f}, "
+               f"{pos['open_qty']} left | {note}")
+    else:
+        notify(f"DTS {mode_tag()}: 2R hit on {sig.ticker} but the trim did not fill - {note}")
+    if pos["open_qty"] <= 0:
+        pnl = _close_record(state, pos, t, "2R (fully sold)")
+        notify(f"DTS {mode_tag()}: {sig.ticker} closed at 2R, P&L ${pnl:,.0f}")
+
+
+def close_position(broker, state, pos, t, why, alert_raw):
+    filled, avg, note = _sell(broker, state, pos, pos["open_qty"], t, why, alert_raw)
+    if pos["open_qty"] > 0:
+        return notify(f"DTS {mode_tag()}: CLOSE INCOMPLETE {describe(pos)} ({why}) - {pos['open_qty']} still open | {note}")
+    pnl = _close_record(state, pos, t, why)
+    price = f"{avg:.2f}" if avg else "-"
+    notify(f"DTS {mode_tag()}: CLOSED {describe(pos)} ({why}) - sold {filled} @ {price}, trade P&L ${pnl:,.0f} | {note}")
+
+
+def on_exit(broker, state, sig, t):
+    pos = state["positions"].get(sig.ticker)
+    if not pos:
+        return log.info("exit alert for %s with no open position - ignored", sig.ticker)
+    close_position(broker, state, pos, t, f"TradingView {sig.reason} @ {sig.price}", sig.raw)
+
+
+def sweep(broker, state, t):
+    """Backup closes at 15:56 ET: anything expiring today, and anything past the
+    max hold if TradingView's TIME alert never arrived."""
+    if t.weekday() >= 5 or (t.hour, t.minute) < settings.SWEEP_AT or t.hour >= 16:
+        return
+    for pos in list(state["positions"].values()):
+        exp = date.fromisoformat(pos["expiry"])
+        held = contracts.sessions_held(datetime.fromisoformat(pos["opened_at"]).date(), t.date())
+        if exp <= t.date():
+            close_position(broker, state, pos, t, "expiry day, closed by the 15:56 sweep", "sweep")
+        elif held >= settings.MAX_HOLD_SESSIONS:
+            close_position(broker, state, pos, t, f"held {held} sessions, closed by the 15:56 sweep", "sweep")
+
+
+# ---------------------------------------------------------------- main
+
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--message")
+    ap.add_argument("--received", help="ISO time the alert was received (default: now)")
+    ap.add_argument("--sweep", action="store_true")
+    ap.add_argument("--status", action="store_true")
+    a = ap.parse_args(argv)
+
+    settings.LOG_DIR.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
+                        handlers=[logging.FileHandler(settings.LOG_DIR / "dts_executor.log"), logging.StreamHandler()])
+    for noisy in ("tastytrade", "websockets", "httpx", "httpcore", "ib_insync", "asyncio"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    settings.STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    with open(settings.LOCK_FILE, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)          # one alert at a time, in arrival order
+        state = load_state()
+        if a.status:
+            print(json.dumps({"mode": mode_tag(), "open": state["positions"], "closed": state["closed"][-10:]}, indent=2))
+            return 0
+        t = datetime.fromisoformat(a.received).astimezone(NY) if a.received else now_ny()
+
+        if a.sweep:
+            due = [p for p in state["positions"].values()]
+            if not due or t.weekday() >= 5 or (t.hour, t.minute) < settings.SWEEP_AT or t.hour >= 16:
+                return 0
+            broker = Broker()
+            try:
+                broker.connect()
+                sweep(broker, state, t)
+            finally:
+                broker.close()
+                save_state(state)
+            return 0
+
+        sig = signals.parse(a.message or "")
+        if sig.kind in ("IGNORED", "APLUS"):
+            log.info("%s alert, no action: %s", sig.kind, sig.raw)
+            return 0
+        key = hashlib.sha1(f"{sig.raw}|{t.strftime('%Y-%m-%d %H')}:{t.minute // 5}".encode()).hexdigest()
+        if key in state["processed"]:
+            log.info("duplicate alert ignored: %s", sig.raw)
+            return 0
+        state["processed"][key] = t.isoformat()
+        if sig.kind in ("TARGET", "EXIT") and sig.ticker not in state["positions"]:
+            log.info("%s alert for %s with no open position - ignored", sig.kind, sig.ticker)
+            save_state(state)
+            return 0
+
+        broker = Broker()
+        try:
+            broker.connect()
+            {"ENTRY": on_entry, "TARGET": on_target, "EXIT": on_exit}[sig.kind](broker, state, sig, t)
+        except Exception as e:
+            log.exception("failed handling %s", sig.raw)
+            notify(f"DTS {mode_tag()}: ERROR handling '{sig.raw[:80]}': {e}")
+            return 1
+        finally:
+            broker.close()
+            save_state(state)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

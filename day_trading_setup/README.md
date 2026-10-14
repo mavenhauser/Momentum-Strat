@@ -397,6 +397,81 @@ These rules haven't been backtested. Paper-trade the signals and compare
 them with what you'd have taken by hand before sizing up. Every threshold
 (2R, 0.75 ATR, the 09:35–12:00 window, 3 trades a day) is a setting.
 
+## Acting on the signals: IBKR paper executor
+
+[`executor/`](executor/) turns DTS Entry alerts into weekly-option trades on
+the **Interactive Brokers paper account**. TradingView decides every entry,
+stop, target and exit; IBKR's prices are used only to fill the option
+orders.
+
+```
+TradingView alert (DTS Entry, any alert() call, webhook on)
+  -> ngrok tunnel  https://sherill-sudoriparous-soothedly.ngrok-free.dev/dts/<secret>
+  -> receiver.py   127.0.0.1:8090, logs state/dts_alert_inbox.jsonl
+  -> executor.py   one alert at a time -> IBKR paper (TWS, port 7497)
+```
+
+| Alert | What the executor does |
+|---|---|
+| `DTS: LONG …` / `DTS: SHORT …` | Buys a call / a put. Expiry: this week's last listed expiry (normally Friday, 0DTE on Friday itself). Strike: nearest to TradingView's entry price; if it fails the liquidity check (two-sided quote, spread ≤ 15% of mid, open interest ≥ 100) the next nearest is tried. Size: premium ≈ 1% of net liquidation, at least 1 contract. |
+| `DTS: … hit 2R target …` | Sells half the contracts (a single contract is sold whole). |
+| `DTS: EXIT … (STOP / BE / TRAIL / EOD / TIME)` | Sells the rest. |
+| `DTS: A+ OUTSIDE …` | Nothing (information only). |
+
+- **Holding:** DTS Entry runs with *Flat by 15:55* off and *Max sessions
+  held* = 2, so a trade can be held overnight and is closed by a `TIME`
+  exit at 15:55 the next session.
+- **Orders:** limit at mid; anything unfilled after 30 s is cancelled and
+  retried once at the ask (buy) or bid (sell). Before every sale the real
+  IBKR position is read, and never more than that is sold.
+- **Limits:** one position per ticker (DTS allows one), at most 5 open,
+  entries only 09:30–16:00 ET on weekdays, duplicate alerts ignored.
+- **Safety sweep** (`--sweep`, every minute, acts from 15:56 ET): closes any
+  option expiring that day and anything held 2 sessions whose `TIME` alert
+  never arrived.
+- **Notifications:** every action goes to the Telegram chat in `.env`.
+- **Paper only:** it refuses to start unless `IBKR_PORT` is 7497 or 4002.
+
+**Dry run is the default.** With `DTS_EXECUTE` unset or `0` it does
+everything except send orders: real chain, quotes and sizing, simulated
+fills at mid, kept in `state/dts_positions_dry.json`. To place paper
+orders, set `DTS_EXECUTE` to `1` in the receiver and sweep jobs and
+reload them:
+
+```bash
+plutil -replace EnvironmentVariables.DTS_EXECUTE -string 1 ~/Library/LaunchAgents/com.jameswoo.dts-receiver.plist
+```
+
+```bash
+plutil -replace EnvironmentVariables.DTS_EXECUTE -string 1 ~/Library/LaunchAgents/com.jameswoo.dts-sweep.plist
+```
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.jameswoo.dts-receiver
+```
+
+Paper mode uses `state/dts_positions.json`. Check either mode with:
+
+```bash
+venv/bin/python3 -m day_trading_setup.executor.executor --status
+```
+
+**Services** (launchd, all in `~/Library/LaunchAgents`):
+
+| Job | What |
+|---|---|
+| `com.jameswoo.dts-receiver` | The webhook receiver, always on. Log: `logs/dts_receiver.log`. |
+| `com.jameswoo.dts-tunnel` | ngrok to port 8090, always on. Log: `~/.dts-executor/dts-tunnel.log`. Uses the static ngrok address that the SPX project's (currently stopped) tunnel also uses, so only one of the two can be online. |
+| `com.jameswoo.dts-sweep` | The 15:56 ET safety sweep, every minute. |
+
+The URL secret is in `~/.dts-executor/secret` (owner-only). The daily
+screener job writes it into each alert's webhook, so changing the secret
+only needs that job to run again. Needs: TradingView open with the
+debugging port (for the alerts to be kept in sync), TWS logged in to the
+paper account, and Python allowed to read the Documents folder (macOS asks
+once). Executor log: `logs/dts_executor.log`. Unit tests:
+`venv/bin/python3 -m unittest day_trading_setup.executor.test_dts_executor`.
+
 ## Limitations
 
 - **Request limit:** DTS 1 makes one request per ticker, so at most 20,
