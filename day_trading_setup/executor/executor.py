@@ -132,13 +132,12 @@ class Broker:
         return self.tt.get_option_market_snapshot(streamer_symbols)
 
     def quote(self, pos):
-        """(bid, ask, source) for the contract: IBKR's own quote first, TastyTrade
-        as fallback. None if neither has a two-sided quote."""
-        if self.ib:
-            bid, ask = self.ib.get_option_bid_ask(pos["expiry_ib"], pos["strike"], pos["right"],
-                                                  trading_class=None, symbol=pos["ticker"])
-            if bid is not None:
-                return bid, ask, "IBKR"
+        """(bid, ask, source) for the contract: TastyTrade's real-time quote first,
+        IBKR's as fallback. This account's IBKR API option data is 15-minute
+        delayed (error 10091, no real-time options subscription for the API -
+        seen live 2026-10-14: IBKR 6.75/6.90 vs TastyTrade 6.85/7.00 on the same
+        TSLA put), so IBKR is only used when TastyTrade has no two-sided quote.
+        None if neither has one."""
         from tastytrade.instruments import OptionType
         exp = date.fromisoformat(pos["expiry"])
         for o in self.chain(pos["ticker"]).get(exp, []):
@@ -146,6 +145,12 @@ class Broker:
                 q = self.snapshot([o.streamer_symbol]).get(o.streamer_symbol) or {}
                 if q.get("bid") and q.get("ask"):
                     return q["bid"], q["ask"], "TastyTrade"
+                break
+        if self.ib:
+            bid, ask = self.ib.get_option_bid_ask(pos["expiry_ib"], pos["strike"], pos["right"],
+                                                  trading_class=None, symbol=pos["ticker"])
+            if bid is not None:
+                return bid, ask, "IBKR (may be 15-min delayed)"
         return None
 
     def real_position(self, pos):
