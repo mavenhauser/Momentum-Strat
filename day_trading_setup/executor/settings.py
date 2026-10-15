@@ -41,11 +41,20 @@ MIN_CONTRACTS = 1            # if 1% buys less than one contract, buy one anyway
 # even on Friday itself (0DTE), per the agreed rule. Strike: nearest to the
 # TradingView entry price; if that strike fails the liquidity check, the next
 # nearest is tried.
-STRIKES_TO_TRY = 4
+STRIKES_TO_TRY = 4           # fallback: nearest strikes tried for a single contract
+# Strike ladder (2026-10-15): from the strike nearest the money, step out of the
+# money until a strike buys TARGET_CONTRACTS within the budget; failing that,
+# MIN_CONTRACTS_TO_TRIM (so half can be sold at 2R and half trailed); never
+# below MIN_DELTA. If none qualifies, buy 1 contract of the nearest liquid strike.
+TARGET_CONTRACTS = 4
+MIN_CONTRACTS_TO_TRIM = 2
+MIN_DELTA = 0.25
+STRIKES_TO_SCAN = 12          # out-of-the-money strikes examined beyond the nearest one
 MIN_OPEN_INTEREST = 100
 MAX_SPREAD_FRACTION = 0.15   # (ask - bid) / mid must be at or below this
 
-# At the 2R alert: sell half (rounded down). A single contract is sold whole.
+# At the 2R alert: sell half (rounded down). A single contract is held through 2R
+# and exits on the trail, break-even, stop or time exit.
 TRIM_FRACTION = 0.5
 
 # Hard limits.

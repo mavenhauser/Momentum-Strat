@@ -281,15 +281,17 @@ def choose_contract(broker, sig, today):
     if expiry is None:
         return None, "no option expiries listed"
     opts = {float(o.strike_price): o for o in chain[expiry] if o.option_type == OptionType(right)}
-    tried = contracts.strikes_by_distance(opts.keys(), sig.price, settings.STRIKES_TO_TRY)
-    snap = broker.snapshot([opts[k].streamer_symbol for k in tried])
-    for k in tried:
-        q = snap.get(opts[k].streamer_symbol) or {}
-        if contracts.liquid(q):
-            return {"ticker": sig.ticker, "right": right, "expiry": expiry.isoformat(),
-                    "expiry_ib": expiry.strftime("%Y%m%d"), "strike": k,
-                    "streamer": opts[k].streamer_symbol}, None
-    return None, f"no liquid {right} near {sig.price} for {expiry} (tried {', '.join(f'{k:g}' for k in tried)})"
+    look = set(contracts.strike_ladder(opts.keys(), sig.price, right, settings.STRIKES_TO_SCAN))
+    look |= set(contracts.strikes_by_distance(opts.keys(), sig.price, settings.STRIKES_TO_TRY))
+    snap = broker.snapshot([opts[k].streamer_symbol for k in look])
+    quotes = {k: snap.get(opts[k].streamer_symbol) or {} for k in look}
+    nlv, _ = broker.nlv()
+    k, qty, rule, delta = contracts.choose_strike(quotes, sig.price, right, nlv * settings.RISK_FRACTION)
+    if k is None:
+        return None, f"{rule} ({right}, {expiry})"
+    return {"ticker": sig.ticker, "right": right, "expiry": expiry.isoformat(),
+            "expiry_ib": expiry.strftime("%Y%m%d"), "strike": k, "streamer": opts[k].streamer_symbol,
+            "qty_plan": qty, "delta": delta, "sizing_rule": rule}, None
 
 
 def skip(state, sig, t, reason):
@@ -315,7 +317,7 @@ def on_entry(broker, state, sig, t):
         skip(state, sig, t, "no quote")
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\nNo quote for <b>{h(describe(pos))}</b>")
     nlv, nlv_src = broker.nlv()
-    qty = contracts.contracts_for(nlv, q[1])
+    qty = pos.pop("qty_plan")
     filled, avg, note = broker.fill("BUY", pos, qty)
     if not filled:
         skip(state, sig, t, f"order not filled: {note}")
@@ -333,6 +335,7 @@ def on_entry(broker, state, sig, t):
            f"TradingView {signal_line(sig)} @ {sig.price}\n"
            f"Stop {sig.stop} · Target {sig.target} · {h(sig.level)} breakout\n\n"
            f"Premium <b>${filled * avg * 100:,.0f}</b> = {filled * avg * 100 / nlv:.1%} of ${nlv:,.0f} ({h(nlv_src)})\n"
+           f"Strike chosen: delta {abs(pos['delta']) if pos.get('delta') is not None else float('nan'):.2f} · {h(pos.get('sizing_rule', ''))}\n"
            f"<i>{h(note)}</i>")
 
 
@@ -365,6 +368,12 @@ def on_target(broker, state, sig, t):
     if not pos or pos["trimmed"]:
         return log.info("2R alert for %s with no untrimmed position - ignored", sig.ticker)
     n = contracts.trim_quantity(pos["open_qty"])
+    if n == 0:
+        pos["trimmed"] = True
+        pos["events"].append({"t": t.isoformat(), "alert": sig.raw, "action": "HOLD at 2R (single contract)"})
+        return notify(f"{title('2R TARGET HIT')}\n<b>Holding 1 × {h(describe(pos))}</b>\n"
+                      f"A single contract isn't split: it rides to the trail, break-even or stop\n\n"
+                      f"TradingView: {h(sig.ticker)} reached {sig.price}")
     filled, avg, note = _sell(broker, state, pos, n, t, "2R trim", sig.raw)
     pos["trimmed"] = True
     if filled:

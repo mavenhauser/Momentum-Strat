@@ -48,12 +48,54 @@ def contracts_for(nlv: float, premium: float) -> int:
 
 
 def trim_quantity(open_qty: int) -> int:
-    """Contracts to sell at the 2R alert: half rounded down; a single contract whole."""
-    if open_qty <= 0:
+    """Contracts to sell at the 2R alert: half rounded down. A single contract is
+    held (0) so it can ride the trail, like the other half of a larger position."""
+    if open_qty <= 1:
         return 0
-    if open_qty == 1:
-        return 1
     return max(1, math.floor(open_qty * settings.TRIM_FRACTION))
+
+
+def strike_ladder(strikes, entry: float, right: str, n_otm: int):
+    """The strike nearest the TradingView entry price, then strikes further out of
+    the money (higher for calls, lower for puts), nearest first."""
+    strikes = sorted(set(strikes))
+    if not strikes:
+        return []
+    nearest = min(strikes, key=lambda k: (abs(k - entry), k))
+    otm = [k for k in strikes if (k > nearest if right == "C" else k < nearest)]
+    otm.sort(key=lambda k: abs(k - nearest))
+    return [nearest] + otm[:n_otm]
+
+
+def choose_strike(quotes: dict, entry: float, right: str, budget: float):
+    """Pick the strike and quantity for one entry.
+
+    quotes: {strike: {"bid", "ask", "delta", "open_interest"}} for the ladder and the
+    nearest strikes. Returns (strike, qty, rule, delta) or (None, 0, reason, None).
+
+      1. nearest-the-money strike on the ladder buying >= TARGET_CONTRACTS, delta >= MIN_DELTA
+      2. else the same buying >= MIN_CONTRACTS_TO_TRIM
+      3. else 1 contract of the nearest liquid strike (held through 2R)
+    """
+    ladder = strike_ladder(quotes.keys(), entry, right, settings.STRIKES_TO_SCAN)
+
+    def qty_at(k):
+        ask = quotes[k].get("ask")
+        return math.floor(budget / (ask * 100)) if ask and ask > 0 else 0
+
+    def ok(k):
+        d = quotes[k].get("delta")
+        return liquid(quotes[k]) and d is not None and abs(d) >= settings.MIN_DELTA
+
+    for need, rule in ((settings.TARGET_CONTRACTS, f"{settings.TARGET_CONTRACTS}+ contracts"),
+                       (settings.MIN_CONTRACTS_TO_TRIM, f"{settings.MIN_CONTRACTS_TO_TRIM}+ contracts (no strike gave {settings.TARGET_CONTRACTS} at delta {settings.MIN_DELTA}+)")):
+        for k in ladder:
+            if ok(k) and qty_at(k) >= need:
+                return k, qty_at(k), rule, quotes[k].get("delta")
+    for k in strikes_by_distance(quotes.keys(), entry, settings.STRIKES_TO_TRY):
+        if liquid(quotes[k]):
+            return k, max(1, qty_at(k)), "1 contract (none cheap enough for 2 at delta 0.25+), held through 2R", quotes[k].get("delta")
+    return None, 0, "no liquid strike near the entry price", None
 
 
 def sessions_held(entry_day: date, today: date) -> int:
