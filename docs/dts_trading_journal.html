@@ -58,6 +58,14 @@
   .monthnav button:disabled { opacity: 0.4; cursor: default; }
   .monthnav h2 { font-family: var(--serif); font-size: 1.25rem; min-width: 9.5rem; text-align: center; }
 
+  .equity { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 1rem 2rem; align-items: center; margin-top: 1.2rem; padding: 1.1rem 1.3rem; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 3px; }
+  @media (max-width: 680px) { .equity { grid-template-columns: 1fr; } }
+  .equity .label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); }
+  .equity .big { display: block; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 2.1rem; font-weight: 700; letter-spacing: -0.01em; line-height: 1.15; margin-top: 0.2rem; overflow-wrap: anywhere; }
+  .equity .chg { display: block; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 600; margin-top: 0.15rem; }
+  .equity .basis { display: block; font-size: 12.5px; color: var(--ink-soft); margin-top: 0.35rem; max-width: 46ch; }
+  .equity svg { display: block; width: 100%; height: auto; max-width: 100%; }
+  .equity .axis { font-family: var(--mono); font-size: 9px; fill: var(--ink-faint); }
   .stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; margin-top: 1.2rem; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 3px; }
   .stat { padding: 0.8rem 1rem; border-left: 1px solid var(--rule); min-width: 0; }
   .stat:first-child { border-left: 0; }
@@ -137,6 +145,7 @@
     </div>
   </header>
 
+  <section class="equity" id="equity" aria-label="Strategy account" hidden></section>
   <section class="stats" id="stats" aria-label="Month totals"></section>
   <div class="cal" id="cal" role="grid" aria-label="Trading days"></div>
   <div class="empty" id="empty" hidden></div>
@@ -159,7 +168,7 @@
   const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const nyToday = () => { try { return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date()); } catch (e) { return isoOf(new Date()); } };
 
-  const S = { days: {}, loaded: false, month: null, selected: null };
+  const S = { days: {}, loaded: false, month: null, selected: null, settings: null };
   const pnl = (o) => (o ? o.pnl_real : null);       // realistic: bought at the ask, sold at the bid
 
   function monthOf(iso) { const d = parseDay(iso); return { y: d.getUTCFullYear(), m: d.getUTCMonth() }; }
@@ -256,7 +265,46 @@
       ${errs ? `<h3 class="sub">Errors</h3>${errs}` : ""}`;
   }
 
+  function renderEquity() {
+    const el = $("equity"); const st = S.settings;
+    const start = st && num(st.starting_balance);
+    if (start === null || start === undefined) { el.hidden = true; return; }
+    const keys = Object.keys(S.days).sort().filter((k) => !st.start_date || k >= st.start_date);
+    const pts = [{ d: st.start_date || (keys[0] || ""), v: start }];
+    let cum = 0;
+    for (const k of keys) { cum += num(S.days[k].summary?.pnl_real) || 0; pts.push({ d: k, v: start + cum }); }
+    const now = start + cum, pct = start ? (cum / start) * 100 : 0;
+    const since = st.start_date ? parseDay(st.start_date).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "";
+    // equity curve: one scale for marks and labels, start = first point
+    const W = 320, H = 92, L = 4, R = 4, T = 10, B = 18;
+    const vs = pts.map((p) => p.v); let lo = Math.min(...vs), hi = Math.max(...vs);
+    if (hi - lo < start * 0.002) { const pad = start * 0.001; lo -= pad; hi += pad; }
+    const x = (i) => L + (pts.length === 1 ? (W - L - R) / 2 : (i * (W - L - R)) / (pts.length - 1));
+    const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+    const line = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
+    const area = `${line} L${x(pts.length - 1).toFixed(1)},${(H - B).toFixed(1)} L${x(0).toFixed(1)},${(H - B).toFixed(1)} Z`;
+    const yb = y(start).toFixed(1); const last = pts[pts.length - 1];
+    const fmtShort = (iso) => (iso ? parseDay(iso).toLocaleDateString("en-US", { day: "numeric", month: "short", timeZone: "UTC" }) : "");
+    el.hidden = false;
+    el.innerHTML = `
+      <div>
+        <span class="label">Strategy account</span>
+        <span class="big">$${Math.round(now).toLocaleString("en-US")}</span>
+        <span class="chg ${tone(cum)}">${money(cum)} (${cum >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(2)}%) since ${esc(since)}</span>
+        <span class="basis">Starting balance $${Math.round(start).toLocaleString("en-US")} plus the realistic P&amp;L of every recorded trade. Strategy only: the IBKR paper account also holds other strategies' positions.</span>
+      </div>
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Strategy account from $${Math.round(start).toLocaleString("en-US")} to $${Math.round(now).toLocaleString("en-US")} over ${keys.length} trading day${keys.length === 1 ? "" : "s"}">
+        <line x1="${L}" x2="${W - R}" y1="${yb}" y2="${yb}" stroke="var(--rule-strong)" stroke-dasharray="3 3" stroke-width="1"></line>
+        <path d="${area}" fill="var(--accent-soft)" stroke="none"></path>
+        <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"></path>
+        <circle cx="${x(pts.length - 1).toFixed(1)}" cy="${y(last.v).toFixed(1)}" r="3.5" fill="var(--accent)"></circle>
+        <text class="axis" x="${L}" y="${H - 4}">${esc(fmtShort(pts[0].d))}</text>
+        <text class="axis" x="${W - R}" y="${H - 4}" text-anchor="end">${esc(fmtShort(last.d))}</text>
+      </svg>`;
+  }
+
   function render() {
+    renderEquity();
     const keys = Object.keys(S.days).sort();
     if (!S.month) S.month = keys.length ? monthOf(keys[keys.length - 1]) : monthOf(nyToday());
     if (!S.selected && keys.length) S.selected = keys[keys.length - 1];
@@ -273,6 +321,7 @@
   (async () => {
     const db = window.claude && window.claude.use ? await window.claude.use("db") : null;
     if (!db) { $("status").textContent = "The journal's data isn't available in this view. Open it on claude.ai while signed in."; S.loaded = true; render(); return; }
+    db.doc("settings/journal").onSnapshot((doc) => { S.settings = doc.exists ? doc.data() : null; render(); }, () => {});
     db.collection("days").onSnapshot((snap) => {
       const next = {};
       for (const doc of snap.docs) { if (!doc.exists) continue; const v = doc.data(); if (v && typeof v.date === "string") next[v.date] = v; }
