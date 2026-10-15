@@ -102,8 +102,7 @@ def ibkr_status(up, detail=""):
     f.write_text(now_ny().strftime("%H:%M ET"))
     effect = ("<b>Paper orders cannot be placed</b> until it is back: entries are skipped, "
               "exits fail and are retried on the next alert." if settings.EXECUTE else
-              "Dry run continues, but sizing falls back to the <b>$100k placeholder</b> "
-              "and IBKR quotes are unavailable.")
+              "Dry run continues on TastyTrade quotes; sizing is unaffected (notional account).")
     notify(f"{title('⚠️ IBKR NOT CONNECTED')}\n<b>TWS isn't accepting connections on port {config.IBKR_PORT}.</b>\n"
            f"Check TWS is open and logged in to the paper account.\n\n{effect}\n\n<i>{h(detail)}</i>")
 
@@ -162,12 +161,9 @@ class Broker:
                 pass
 
     def nlv(self):
-        v = self.ib.get_account_value("NetLiquidation") if self.ib else None
-        if v:
-            return v, "IBKR"
-        if settings.EXECUTE:
-            raise RuntimeError("could not read net liquidation from IBKR")
-        return settings.DRY_RUN_NLV, "dry-run default"
+        """Account size trades are sized off: the notional strategy account
+        (settings.SIZING_ACCOUNT), so sizing never depends on IBKR being reachable."""
+        return settings.SIZING_ACCOUNT, "notional"
 
     def chain(self, ticker):
         """Full option chain from TastyTrade. Large chains are slow (AMD: ~15 s for

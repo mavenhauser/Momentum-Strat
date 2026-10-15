@@ -694,7 +694,7 @@
       <table class="wide">
         <thead><tr><th>Alert</th><th>What the executor does</th></tr></thead>
         <tbody>
-          <tr><td class="k">LONG / SHORT</td><td>Buys a <b>call</b> / a <b>put</b>. Expiry: this week's (normally Friday, 0DTE on Friday itself). Strike: nearest to TradingView's entry price, or the next nearest if that one fails the liquidity check (two-sided quote, spread ≤ 15% of mid, open interest ≥ 100). Size: premium ≈ <b>1% of net liquidation</b>, at least 1 contract.</td></tr>
+          <tr><td class="k">LONG / SHORT</td><td>Buys a <b>call</b> / a <b>put</b>. Expiry: this week's (normally Friday, 0DTE on Friday itself). Strike: nearest to TradingView's entry price, or the next nearest if that one fails the liquidity check (two-sided quote, spread ≤ 15% of mid, open interest ≥ 100). Size: premium ≈ <b>1% of a $100k notional account</b> (about $1,000, rounded down, at least 1 contract), not the paper account's own value.</td></tr>
           <tr><td class="k">2R target hit</td><td>Sells <b>half</b> (a single contract is sold whole).</td></tr>
           <tr><td class="k">EXIT</td><td>Sells the rest: STOP, BE, TRAIL, EOD or TIME.</td></tr>
           <tr><td class="k">A+ setup</td><td>Nothing; information only.</td></tr>

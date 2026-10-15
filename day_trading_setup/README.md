@@ -413,7 +413,7 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
 
 | Alert | What the executor does |
 |---|---|
-| `DTS: LONG …` / `DTS: SHORT …` | Buys a call / a put. Expiry: this week's last listed expiry (normally Friday, 0DTE on Friday itself). Strike: nearest to TradingView's entry price; if it fails the liquidity check (two-sided quote, spread ≤ 15% of mid, open interest ≥ 100) the next nearest is tried. Size: premium ≈ 1% of net liquidation, at least 1 contract. |
+| `DTS: LONG …` / `DTS: SHORT …` | Buys a call / a put. Expiry: this week's last listed expiry (normally Friday, 0DTE on Friday itself). Strike: nearest to TradingView's entry price; if it fails the liquidity check (two-sided quote, spread ≤ 15% of mid, open interest ≥ 100) the next nearest is tried. Size: premium ≈ 1% of a **$100k notional strategy account** (about $1,000, rounded down to whole contracts, at least 1), not the paper account's own value. |
 | `DTS: … hit 2R target …` | Sells half the contracts (a single contract is sold whole). |
 | `DTS: EXIT … (STOP / BE / TRAIL / EOD / TIME)` | Sells the rest. |
 | `DTS: A+ OUTSIDE …` | Nothing (information only). |

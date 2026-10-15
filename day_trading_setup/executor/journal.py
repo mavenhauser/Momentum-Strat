@@ -114,8 +114,8 @@ def trade_entry(trade, day, lines):
     if buy and buy["ask"] is not None and all(s["bid"] is not None for s in sells):
         real = round((sum(s["qty"] * s["bid"] for s in sells) - buy["qty"] * buy["ask"]) * 100, 2)
     notes = []
-    if src and "IBKR" not in src:
-        notes.append(f"sized off the {src} account size (IBKR not connected)")
+    if src == "dry-run default":
+        notes.append("sized off the $100k placeholder (IBKR not connected), about a tenth of that day's normal size")
     if buy and buy.get("source") == "IBKR" and buy["t"] < "2026-10-14T10:21":
         notes.append("entry priced off IBKR's 15-minute-delayed quote")
     return {
@@ -160,7 +160,7 @@ def build_day(day, mode="dry"):
     pm = [t["pnl_mid"] for t in trades if t["pnl_mid"] is not None]
     best = max(trades, key=lambda t: t["pnl_real"] if t["pnl_real"] is not None else -1e18, default=None)
     worst = min(trades, key=lambda t: t["pnl_real"] if t["pnl_real"] is not None else 1e18, default=None)
-    accounts = [t["account"] for t in trades if t["account"] and t["sized_off"] == "IBKR"]
+    accounts = [t["account"] for t in trades if t["account"] and t["sized_off"] in ("IBKR", "notional")]
     return {
         "date": day.isoformat(),
         "mode": "PAPER" if mode == "paper" else "DRY RUN",

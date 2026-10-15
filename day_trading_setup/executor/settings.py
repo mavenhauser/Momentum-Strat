@@ -29,10 +29,13 @@ SECRET_FILE = Path.home() / ".dts-executor" / "secret"
 IBKR_CLIENT_ID = 47          # SPX scalp = 1, Momentum Strategy = 45
 PAPER_PORTS = (7497, 4002)   # same hard guard as the Momentum trader
 
-# Position sizing: option premium paid per trade, as a fraction of net liquidation.
+# Position sizing: option premium paid per trade, as a fraction of a NOTIONAL
+# strategy account (not the IBKR paper account's value, which also holds other
+# strategies). 1% of $100k = about $1,000 of premium per trade. Matches the
+# starting balance of the DTS Trading Journal (2026-10-15).
+SIZING_ACCOUNT = 100_000
 RISK_FRACTION = 0.01
 MIN_CONTRACTS = 1            # if 1% buys less than one contract, buy one anyway
-DRY_RUN_NLV = 100_000        # used only in dry run when IBKR isn't reachable
 
 # Contract selection. Expiry: this week's last listed expiry (normally Friday),
 # even on Friday itself (0DTE), per the agreed rule. Strike: nearest to the
