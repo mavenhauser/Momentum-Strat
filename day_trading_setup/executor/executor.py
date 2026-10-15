@@ -22,7 +22,9 @@ never sells more contracts than IBKR reports actually held.
 import argparse
 import fcntl
 import hashlib
+import html
 import json
+import re
 import logging
 import os
 import sys
@@ -43,12 +45,15 @@ def now_ny():
 
 
 def notify(text):
-    log.info("notify: %s", text.replace("\n", " | "))
+    """Telegram message in HTML: <b>bold</b> for the key facts, blank lines between
+    paragraphs. The log gets the same text without tags, on one line."""
+    plain = re.sub(r"<[^>]+>", "", text)
+    log.info("notify: %s", html.unescape(re.sub(r"\n+", " | ", plain)))
     if not settings.NOTIFY:
         return
     try:
         from src import telegram_client
-        telegram_client.send_message(text, parse_mode=None)
+        telegram_client.send_message(text, parse_mode="HTML")
     except Exception as e:  # a Telegram outage must never block trading
         log.warning("telegram failed: %s", e)
 
@@ -209,7 +214,27 @@ class Broker:
 
 def describe(pos):
     kind = "CALL" if pos["right"] == "C" else "PUT"
-    return f"{pos['ticker']} {pos['expiry']} {pos['strike']:g} {kind}"
+    return f"{pos['ticker']} {pos['strike']:g} {kind}"
+
+
+def h(x):
+    return html.escape(str(x))
+
+
+def title(action):
+    return f"<b>DTS {mode_tag()} · {action}</b>"
+
+
+def expiry_label(pos):
+    return date.fromisoformat(pos["expiry"]).strftime("%a %d %b")
+
+
+def money(x):
+    return f"{'+' if x >= 0 else '−'}${abs(x):,.0f}"
+
+
+def signal_line(sig):
+    return f"<b>{h(sig.side)} {h(sig.ticker)}</b>"
 
 
 def choose_contract(broker, sig, today):
@@ -234,29 +259,33 @@ def choose_contract(broker, sig, today):
 def on_entry(broker, state, sig, t):
     hm = (t.hour, t.minute)
     if t.weekday() >= 5 or not (settings.ENTRY_START <= hm < settings.ENTRY_END):
-        return notify(f"DTS {mode_tag()}: ignored {sig.side} {sig.ticker} - outside the regular session")
+        return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nOutside the regular session")
     if sig.ticker in state["positions"]:
-        return notify(f"DTS {mode_tag()}: ignored {sig.side} {sig.ticker} - already holding {describe(state['positions'][sig.ticker])}")
+        return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nAlready holding <b>{h(describe(state['positions'][sig.ticker]))}</b>")
     if len(state["positions"]) >= settings.MAX_OPEN_POSITIONS:
-        return notify(f"DTS {mode_tag()}: skipped {sig.side} {sig.ticker} - already at the limit of {settings.MAX_OPEN_POSITIONS} open positions")
+        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\nAlready at the limit of {settings.MAX_OPEN_POSITIONS} open positions")
     pos, why = choose_contract(broker, sig, t.date())
     if not pos:
-        return notify(f"DTS {mode_tag()}: skipped {sig.side} {sig.ticker} - {why}")
+        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n{h(why)}")
     q = broker.quote(pos)
     if not q:
-        return notify(f"DTS {mode_tag()}: skipped {sig.side} {sig.ticker} - no quote for {describe(pos)}")
+        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\nNo quote for <b>{h(describe(pos))}</b>")
     nlv, nlv_src = broker.nlv()
     qty = contracts.contracts_for(nlv, q[1])
     filled, avg, note = broker.fill("BUY", pos, qty)
     if not filled:
-        return notify(f"DTS {mode_tag()}: {sig.side} {sig.ticker} NOT opened - {describe(pos)} x{qty}: {note}")
+        return notify(f"{title('NOT OPENED')}\n{signal_line(sig)}\n<b>{qty} × {h(describe(pos))}</b> · expiry {expiry_label(pos)}\n\n<i>{h(note)}</i>")
     pos.update(side=sig.side, qty=filled, open_qty=filled, avg_cost=avg, tv_entry=sig.price, tv_stop=sig.stop,
                tv_target=sig.target, level=sig.level, opened_at=t.isoformat(), trimmed=False,
                events=[{"t": t.isoformat(), "alert": sig.raw, "action": f"BUY {filled} @ {avg}"}])
     state["positions"][sig.ticker] = pos
-    notify(f"DTS {mode_tag()}: BOUGHT {filled} x {describe(pos)} @ {avg:.2f}\n"
-           f"TradingView {sig.side} {sig.ticker} @ {sig.price} | stop {sig.stop} | target {sig.target} ({sig.level})\n"
-           f"premium ~${filled * avg * 100:,.0f} = {filled * avg * 100 / nlv:.1%} of ${nlv:,.0f} ({nlv_src}) | {note}")
+    notify(f"{title('BOUGHT')}\n"
+           f"<b>{filled} × {h(describe(pos))}</b>\n"
+           f"Expiry {expiry_label(pos)} · price <b>{avg:.2f}</b>\n\n"
+           f"TradingView {signal_line(sig)} @ {sig.price}\n"
+           f"Stop {sig.stop} · Target {sig.target} · {h(sig.level)} breakout\n\n"
+           f"Premium <b>${filled * avg * 100:,.0f}</b> = {filled * avg * 100 / nlv:.1%} of ${nlv:,.0f} ({h(nlv_src)})\n"
+           f"<i>{h(note)}</i>")
 
 
 def _sell(broker, state, pos, qty, t, why, alert_raw):
@@ -289,22 +318,31 @@ def on_target(broker, state, sig, t):
     filled, avg, note = _sell(broker, state, pos, n, t, "2R trim", sig.raw)
     pos["trimmed"] = True
     if filled:
-        notify(f"DTS {mode_tag()}: 2R hit on TradingView ({sig.ticker} @ {sig.price}) - SOLD {filled} x {describe(pos)} @ {avg:.2f}, "
-               f"{pos['open_qty']} left | {note}")
+        notify(f"{title('2R TARGET HIT')}\n"
+               f"<b>SOLD {filled} × {h(describe(pos))}</b> @ <b>{avg:.2f}</b>\n"
+               + (f"{pos['open_qty']} left, riding to the trail or break-even\n\n" if pos["open_qty"] > 0
+                  else "Nothing left: the whole position was sold\n\n") +
+               f"TradingView: {h(sig.ticker)} reached {sig.price}\n"
+               f"<i>{h(note)}</i>")
     else:
-        notify(f"DTS {mode_tag()}: 2R hit on {sig.ticker} but the trim did not fill - {note}")
+        notify(f"{title('2R TRIM NOT FILLED')}\n<b>{h(describe(pos))}</b>\nTradingView: {h(sig.ticker)} reached {sig.price}\n\n<i>{h(note)}</i>")
     if pos["open_qty"] <= 0:
         pnl = _close_record(state, pos, t, "2R (fully sold)")
-        notify(f"DTS {mode_tag()}: {sig.ticker} closed at 2R, P&L ${pnl:,.0f}")
+        notify(f"{title('CLOSED')}\n<b>{h(describe(pos))}</b>\nFully sold at 2R\n\nTrade P&amp;L: <b>{money(pnl)}</b>")
 
 
 def close_position(broker, state, pos, t, why, alert_raw):
     filled, avg, note = _sell(broker, state, pos, pos["open_qty"], t, why, alert_raw)
     if pos["open_qty"] > 0:
-        return notify(f"DTS {mode_tag()}: CLOSE INCOMPLETE {describe(pos)} ({why}) - {pos['open_qty']} still open | {note}")
+        return notify(f"{title('CLOSE INCOMPLETE')}\n<b>{h(describe(pos))}</b>\n<b>{pos['open_qty']} still open</b>\nReason: {h(why)}\n\n<i>{h(note)}</i>")
     pnl = _close_record(state, pos, t, why)
     price = f"{avg:.2f}" if avg else "-"
-    notify(f"DTS {mode_tag()}: CLOSED {describe(pos)} ({why}) - sold {filled} @ {price}, trade P&L ${pnl:,.0f} | {note}")
+    notify(f"{title('CLOSED')}\n"
+           f"<b>{h(describe(pos))}</b>\n"
+           f"Sold {filled} @ <b>{price}</b>\n"
+           f"Reason: {h(why)}\n\n"
+           f"Trade P&amp;L: <b>{money(pnl)}</b>\n"
+           f"<i>{h(note)}</i>")
 
 
 def on_exit(broker, state, sig, t):
@@ -386,7 +424,7 @@ def main(argv=None):
             {"ENTRY": on_entry, "TARGET": on_target, "EXIT": on_exit}[sig.kind](broker, state, sig, t)
         except Exception as e:
             log.exception("failed handling %s", sig.raw)
-            notify(f"DTS {mode_tag()}: ERROR handling '{sig.raw[:80]}': {type(e).__name__} {e}".rstrip())
+            notify(f"{title('ERROR')}\nAlert: <code>{h(sig.raw[:120])}</code>\n\n<b>{type(e).__name__}</b> {h(e)}".rstrip())
             return 1
         finally:
             broker.close()
