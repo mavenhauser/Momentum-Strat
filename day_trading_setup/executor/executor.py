@@ -134,6 +134,7 @@ class Broker:
     def __init__(self):
         self.ib = None
         self.tt = None
+        self.last_quote = (None, None, None)   # (bid, ask, source) behind the last fill, for the journal
 
     def connect(self):
         assert_paper_port()
@@ -233,6 +234,7 @@ class Broker:
         if not q:
             return 0, None, "no two-sided quote"
         bid, ask, src = q
+        self.last_quote = (bid, ask, src)
         mid = round((bid + ask) / 2, 2)
         if not settings.EXECUTE:
             return qty, mid, f"simulated at mid {mid:.2f} ({src} {bid:.2f}/{ask:.2f})"
@@ -294,6 +296,11 @@ def choose_contract(broker, sig, today):
     return None, f"no liquid {right} near {sig.price} for {expiry} (tried {', '.join(f'{k:g}' for k in tried)})"
 
 
+def skip(state, sig, t, reason):
+    state.setdefault("skipped", []).append({"t": t.isoformat(), "side": sig.side, "ticker": sig.ticker, "reason": reason})
+    state["skipped"] = state["skipped"][-500:]
+
+
 def on_entry(broker, state, sig, t):
     hm = (t.hour, t.minute)
     if t.weekday() >= 5 or not (settings.ENTRY_START <= hm < settings.ENTRY_END):
@@ -301,21 +308,28 @@ def on_entry(broker, state, sig, t):
     if sig.ticker in state["positions"]:
         return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nAlready holding <b>{h(describe(state['positions'][sig.ticker]))}</b>")
     if len(state["positions"]) >= settings.MAX_OPEN_POSITIONS:
+        skip(state, sig, t, f"position limit ({settings.MAX_OPEN_POSITIONS} open)")
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\nAlready at the limit of {settings.MAX_OPEN_POSITIONS} open positions")
     pos, why = choose_contract(broker, sig, t.date())
     if not pos:
+        skip(state, sig, t, why)
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n{h(why)}")
     q = broker.quote(pos)
     if not q:
+        skip(state, sig, t, "no quote")
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\nNo quote for <b>{h(describe(pos))}</b>")
     nlv, nlv_src = broker.nlv()
     qty = contracts.contracts_for(nlv, q[1])
     filled, avg, note = broker.fill("BUY", pos, qty)
     if not filled:
+        skip(state, sig, t, f"order not filled: {note}")
         return notify(f"{title('NOT OPENED')}\n{signal_line(sig)}\n<b>{qty} × {h(describe(pos))}</b> · expiry {expiry_label(pos)}\n\n<i>{h(note)}</i>")
     pos.update(side=sig.side, qty=filled, open_qty=filled, avg_cost=avg, tv_entry=sig.price, tv_stop=sig.stop,
                tv_target=sig.target, level=sig.level, opened_at=t.isoformat(), trimmed=False,
-               events=[{"t": t.isoformat(), "alert": sig.raw, "action": f"BUY {filled} @ {avg}"}])
+               events=[{"t": t.isoformat(), "alert": sig.raw, "action": f"BUY {filled} @ {avg}",
+                        "qty": filled, "price": avg, "bid": broker.last_quote[0], "ask": broker.last_quote[1],
+                        "quote_source": broker.last_quote[2]}],
+               nlv=nlv, nlv_source=nlv_src)
     state["positions"][sig.ticker] = pos
     notify(f"{title('BOUGHT')}\n"
            f"<b>{filled} × {h(describe(pos))}</b>\n"
@@ -337,7 +351,9 @@ def _sell(broker, state, pos, qty, t, why, alert_raw):
     filled, avg, note = broker.fill("SELL", pos, qty)
     pos["open_qty"] -= filled
     pos["proceeds"] = pos.get("proceeds", 0.0) + filled * (avg or 0.0)
-    pos["events"].append({"t": t.isoformat(), "alert": alert_raw, "action": f"SELL {filled} @ {avg} ({why})"})
+    pos["events"].append({"t": t.isoformat(), "alert": alert_raw, "action": f"SELL {filled} @ {avg} ({why})",
+                          "qty": filled, "price": avg, "bid": broker.last_quote[0], "ask": broker.last_quote[1],
+                          "quote_source": broker.last_quote[2], "why": why})
     return filled, avg, note
 
 

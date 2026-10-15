@@ -1,0 +1,297 @@
+<title>DTS Trading Journal</title>
+<style>
+  /* Layout: a trading-desk ledger. Month header with totals, a Mon–Fri calendar
+     where each day is a P&L cell, and the selected day's full trade log below. */
+  :root {
+    --paper: #eef1f0;
+    --paper-raised: #ffffff;
+    --ink: #16232a;
+    --ink-soft: #56666f;
+    --ink-faint: #8b979c;
+    --accent: #1f6f64;
+    --accent-soft: #e4efec;
+    --rule: #d6dcda;
+    --rule-strong: #b9c2bf;
+    --gain: #1f7a4d;
+    --gain-soft: #dcefe4;
+    --loss: #b3423c;
+    --loss-soft: #f6e1df;
+    --warn: #9a6a1f;
+    --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
+    --sans: -apple-system, "Seravek", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #12181a; --paper-raised: #1a2225; --ink: #e9efee; --ink-soft: #9db0ac; --ink-faint: #647573;
+      --accent: #5fb8a9; --accent-soft: #1c2b29; --rule: #2a3538; --rule-strong: #3c4a4d;
+      --gain: #4ec98a; --gain-soft: #17302a; --loss: #e2716a; --loss-soft: #3a2121; --warn: #d3a54e;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #12181a; --paper-raised: #1a2225; --ink: #e9efee; --ink-soft: #9db0ac; --ink-faint: #647573;
+    --accent: #5fb8a9; --accent-soft: #1c2b29; --rule: #2a3538; --rule-strong: #3c4a4d;
+    --gain: #4ec98a; --gain-soft: #17302a; --loss: #e2716a; --loss-soft: #3a2121; --warn: #d3a54e;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--paper); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  .sheet { max-width: 1080px; margin: 0 auto; padding-block: 2.4rem 4rem; padding-inline: 1.5rem; }
+  @media (max-width: 480px) { .sheet { padding-inline: 1rem; padding-block: 1.6rem 3rem; } }
+  h1, h2, h3 { text-wrap: balance; font-weight: 600; margin: 0; }
+  button { font: inherit; color: inherit; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .gain { color: var(--gain); } .loss { color: var(--loss); } .flat { color: var(--ink-soft); }
+
+  .masthead { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 1rem 2rem; padding-bottom: 1.2rem; border-bottom: 2px solid var(--ink); }
+  .eyebrow { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+  .masthead h1 { font-family: var(--serif); font-size: 2rem; letter-spacing: -0.01em; margin-top: 0.15rem; }
+  .masthead p { margin: 0.3rem 0 0; color: var(--ink-soft); max-width: 60ch; font-size: 14px; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
+  .seg { display: inline-flex; border: 1px solid var(--rule-strong); border-radius: 3px; overflow: hidden; }
+  .seg button { background: var(--paper-raised); border: 0; padding: 0.3rem 0.7rem; font-size: 12.5px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+  .monthnav { display: inline-flex; align-items: center; gap: 0.4rem; }
+  .monthnav button { background: var(--paper-raised); border: 1px solid var(--rule-strong); border-radius: 3px; width: 2rem; height: 2rem; cursor: pointer; }
+  .monthnav button:disabled { opacity: 0.4; cursor: default; }
+  .monthnav h2 { font-family: var(--serif); font-size: 1.25rem; min-width: 9.5rem; text-align: center; }
+
+  .stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; margin-top: 1.2rem; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 3px; }
+  .stat { padding: 0.8rem 1rem; border-left: 1px solid var(--rule); min-width: 0; }
+  .stat:first-child { border-left: 0; }
+  .stat .label { display: block; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+  .stat .v { display: block; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.15rem; font-weight: 600; margin-top: 0.15rem; }
+  .stat .sub { display: block; font-size: 12px; color: var(--ink-soft); }
+  @media (max-width: 820px) { .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } .stat:nth-child(4) { border-left: 0; } .stat:nth-child(n+4) { border-top: 1px solid var(--rule); } }
+  @media (max-width: 480px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .stat:nth-child(odd) { border-left: 0; } .stat:nth-child(n+3) { border-top: 1px solid var(--rule); } .stat:nth-child(4) { border-left: 1px solid var(--rule); } }
+
+  .cal { margin-top: 1.2rem; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+  .dow { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); padding: 0 0.2rem 0.2rem; }
+  .day { position: relative; min-height: 6.4rem; padding: 0.5rem 0.6rem; border: 1px solid var(--rule); border-radius: 3px; background: var(--paper-raised); text-align: left; display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+  .day.out { background: transparent; border-style: dashed; opacity: 0.45; }
+  .day.has { cursor: pointer; }
+  .day.has:hover { border-color: var(--rule-strong); }
+  .day.win { background: var(--gain-soft); border-color: color-mix(in srgb, var(--gain) 35%, var(--rule)); }
+  .day.lose { background: var(--loss-soft); border-color: color-mix(in srgb, var(--loss) 35%, var(--rule)); }
+  .day.sel { outline: 2px solid var(--ink); outline-offset: -1px; }
+  .day.today .num::after { content: "today"; margin-left: 0.4rem; font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+  .day .num { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+  .day .pnl { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.05rem; font-weight: 700; margin-top: auto; overflow-wrap: anywhere; }
+  .day .meta { font-size: 11.5px; color: var(--ink-soft); }
+  .chip { display: inline-block; font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; border: 1px solid currentColor; border-radius: 2px; padding: 0 0.3rem; line-height: 1.5; }
+  .chip.dry { color: var(--warn); } .chip.paper { color: var(--accent); } .chip.open { color: var(--ink-soft); }
+  .day .chips { position: absolute; top: 0.45rem; right: 0.5rem; display: flex; gap: 0.25rem; }
+  @media (max-width: 560px) { .day { min-height: 4.6rem; padding: 0.4rem; } .day .pnl { font-size: 0.82rem; } .day .meta, .day .chips { display: none; } .dow { font-size: 9.5px; } }
+
+  .empty { margin-top: 1.2rem; padding: 1.4rem 1.5rem; border: 1px dashed var(--rule-strong); border-radius: 3px; color: var(--ink-soft); background: var(--paper-raised); }
+  .empty b { color: var(--ink); }
+
+  .detail { margin-top: 2rem; }
+  .detail-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem 0.8rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--rule-strong); }
+  .detail-head h2 { font-family: var(--serif); font-size: 1.35rem; }
+  .tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.6rem; margin-top: 1rem; }
+  .tile { background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 3px; padding: 0.7rem 0.9rem; min-width: 0; }
+  .tile .label { display: block; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+  .tile .v { display: block; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.2rem; font-weight: 700; }
+  .tile .sub { display: block; font-size: 12px; color: var(--ink-soft); }
+  @media (max-width: 760px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  h3.sub { font-family: var(--serif); font-size: 1.02rem; margin: 1.5rem 0 0.6rem; }
+  .notes { margin: 0.9rem 0 0; padding-left: 1.1rem; color: var(--ink); max-width: 80ch; font-size: 14px; }
+  .notes li { margin-bottom: 0.25rem; }
+  .table-wrap { overflow-x: auto; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 3px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 760px; }
+  th, td { padding: 0.5rem 0.65rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--rule); }
+  thead th { font-family: var(--mono); font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; border-bottom: 1px solid var(--rule-strong); white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+  th.n { text-align: right; }
+  td.t { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--ink-soft); }
+  td .small { display: block; font-size: 12px; color: var(--ink-soft); }
+  td .flag { display: block; font-size: 12px; color: var(--warn); }
+  .side { font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
+  .side.long { color: var(--gain); } .side.short { color: var(--loss); }
+  .skips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .skip { font-size: 12.5px; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 3px; padding: 0.2rem 0.5rem; }
+  .skip .t { font-family: var(--mono); color: var(--ink-faint); margin-right: 0.3rem; }
+  .err { font-size: 13px; color: var(--loss); background: var(--loss-soft); border-radius: 3px; padding: 0.4rem 0.7rem; margin-top: 0.4rem; overflow-wrap: anywhere; }
+  .status { margin-top: 0.8rem; font-size: 12.5px; color: var(--ink-faint); font-family: var(--mono); }
+  footer { margin-top: 2.6rem; padding-top: 1rem; border-top: 1px solid var(--rule); font-size: 12px; color: var(--ink-faint); font-family: var(--mono); }
+  @media (prefers-reduced-motion: no-preference) { .day.has { transition: border-color 120ms ease; } }
+</style>
+
+<div class="sheet">
+  <header class="masthead">
+    <div>
+      <span class="eyebrow">Day Trading Setup · IBKR executor</span>
+      <h1>DTS Trading Journal</h1>
+      <p>Every trading day the DTS executor acted on, booked on the day each trade closed. Realistic P&amp;L buys at the ask and sells at the bid; at mid is what the executor recorded.</p>
+    </div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="P&amp;L basis">
+        <button type="button" id="basis-real" aria-pressed="true">Realistic</button>
+        <button type="button" id="basis-mid" aria-pressed="false">At mid</button>
+      </div>
+      <div class="monthnav">
+        <button type="button" id="prev" aria-label="Previous month">‹</button>
+        <h2 id="month">—</h2>
+        <button type="button" id="next" aria-label="Next month">›</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="stats" id="stats" aria-label="Month totals"></section>
+  <div class="cal" id="cal" role="grid" aria-label="Trading days"></div>
+  <div class="empty" id="empty" hidden></div>
+  <section class="detail" id="detail" hidden></section>
+  <div class="status" id="status">Loading journal…</div>
+
+  <footer>Updated by Claude after each trading day from the executor's records (day_trading_setup/executor/journal.py). Dry-run days are simulated fills; no orders were sent.</footer>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const num = (x) => (typeof x === "number" && isFinite(x) ? x : null);
+  const money = (x) => { x = num(x); if (x === null) return "—"; const s = Math.abs(x).toLocaleString("en-US", { maximumFractionDigits: 0 }); return (x > 0 ? "+$" : x < 0 ? "−$" : "$") + s; };
+  const tone = (x) => (num(x) === null || x === 0 ? "flat" : x > 0 ? "gain" : "loss");
+  const px = (x) => (num(x) === null ? "—" : x.toFixed(2));
+  const parseDay = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d, 12)); };
+  const isoOf = (dt) => dt.toISOString().slice(0, 10);
+  const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const nyToday = () => { try { return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date()); } catch (e) { return isoOf(new Date()); } };
+
+  let basis = "real";
+  try { if (localStorage.getItem("dts-journal-basis") === "mid") basis = "mid"; } catch (e) {}
+  const S = { days: {}, loaded: false, month: null, selected: null };
+  const pnl = (o) => (o ? (basis === "mid" ? o.pnl_mid : o.pnl_real) : null);
+
+  function monthOf(iso) { const d = parseDay(iso); return { y: d.getUTCFullYear(), m: d.getUTCMonth() }; }
+  function daysInMonth(y, m) {
+    // Weekdays only: from the Monday of the week holding the month's first weekday
+    // to the Friday of the week holding its last weekday.
+    const wd = (d) => (d.getUTCDay() + 6) % 7;                    // Monday = 0
+    const start = new Date(Date.UTC(y, m, 1, 12));
+    if (wd(start) > 4) start.setUTCDate(start.getUTCDate() + (7 - wd(start)));
+    start.setUTCDate(start.getUTCDate() - wd(start));
+    const end = new Date(Date.UTC(y, m + 1, 0, 12));
+    if (wd(end) > 4) end.setUTCDate(end.getUTCDate() - (wd(end) - 4));
+    end.setUTCDate(end.getUTCDate() + (4 - wd(end)));
+    const out = [];
+    for (const d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) if (wd(d) <= 4) out.push(new Date(d));
+    return out;
+  }
+
+  function renderStats(y, m) {
+    const list = Object.values(S.days).filter((d) => { const t = monthOf(d.date); return t.y === y && t.m === m; });
+    const trades = list.reduce((a, d) => a + (d.summary?.trades || 0), 0);
+    const wins = list.reduce((a, d) => a + (d.summary?.wins || 0), 0);
+    const net = list.reduce((a, d) => a + (num(pnl(d.summary)) || 0), 0);
+    const by = list.filter((d) => num(pnl(d.summary)) !== null).sort((a, b) => pnl(b.summary) - pnl(a.summary));
+    const best = by[0], worst = by[by.length - 1];
+    const fmtD = (d) => (d ? parseDay(d.date).toLocaleDateString("en-US", { weekday: "short", day: "numeric", timeZone: "UTC" }) : "—");
+    const greenDays = list.filter((d) => num(pnl(d.summary)) > 0).length;
+    $("stats").innerHTML = [
+      ["Net P&amp;L", `<span class="${tone(net)}">${list.length ? money(net) : "—"}</span>`, basis === "mid" ? "at mid" : "realistic"],
+      ["Trading days", list.length || "—", list.length ? `${greenDays} green · ${list.length - greenDays} red` : "none yet"],
+      ["Trades", trades || "—", trades ? `${wins} won · ${trades - wins} lost` : ""],
+      ["Win rate", trades ? Math.round((wins / trades) * 100) + "%" : "—", "by trade"],
+      ["Best day", best ? `<span class="${tone(pnl(best.summary))}">${money(pnl(best.summary))}</span>` : "—", fmtD(best)],
+      ["Worst day", worst ? `<span class="${tone(pnl(worst.summary))}">${money(pnl(worst.summary))}</span>` : "—", fmtD(worst)],
+    ].map(([l, v, s]) => `<div class="stat"><span class="label">${l}</span><span class="v">${v}</span><span class="sub">${s}</span></div>`).join("");
+  }
+
+  function renderCal() {
+    const { y, m } = S.month;
+    $("month").textContent = `${MONTHS[m]} ${y}`;
+    const keys = Object.keys(S.days).sort();
+    const firstM = keys.length ? monthOf(keys[0]) : { y, m };
+    const today = nyToday(); const tM = monthOf(today);
+    $("prev").disabled = y * 12 + m <= firstM.y * 12 + firstM.m;
+    $("next").disabled = y * 12 + m >= tM.y * 12 + tM.m;
+    renderStats(y, m);
+    const head = ["Mon", "Tue", "Wed", "Thu", "Fri"].map((d) => `<div class="dow" role="columnheader">${d}</div>`).join("");
+    const cells = daysInMonth(y, m).map((dt) => {
+      const iso = isoOf(dt); const d = S.days[iso]; const out = dt.getUTCMonth() !== m;
+      const cls = ["day"]; if (out) cls.push("out"); if (iso === today) cls.push("today");
+      let body = "";
+      if (d && !out) {
+        const v = pnl(d.summary); cls.push("has", v > 0 ? "win" : v < 0 ? "lose" : "even"); if (iso === S.selected) cls.push("sel");
+        const chips = `<span class="chips"><span class="chip ${d.mode === "PAPER" ? "paper" : "dry"}">${d.mode === "PAPER" ? "Paper" : "Dry"}</span>${d.summary?.open ? `<span class="chip open">${d.summary.open} open</span>` : ""}</span>`;
+        body = `${chips}<span class="pnl ${tone(v)}">${money(v)}</span><span class="meta">${d.summary?.trades || 0} trades · ${d.summary?.wins || 0}W ${d.summary?.losses || 0}L</span>`;
+      }
+      const tag = d && !out ? "button" : "div";
+      return `<${tag} class="${cls.join(" ")}" ${tag === "button" ? `type="button" data-day="${iso}" aria-pressed="${iso === S.selected}" aria-label="${esc(iso)}: ${esc(money(pnl(d.summary)))}"` : ""} role="gridcell"><span class="num">${dt.getUTCDate()}</span>${body}</${tag}>`;
+    }).join("");
+    $("cal").innerHTML = head + cells;
+    $("cal").querySelectorAll("button[data-day]").forEach((b) => b.addEventListener("click", () => { S.selected = b.dataset.day; render(); $("detail").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }); }));
+  }
+
+  function contract(t) { return `<b>${esc(t.ticker)} ${esc(t.strike)} ${t.right === "C" ? "CALL" : "PUT"}</b><span class="small">exp ${esc(parseDay(t.expiry).toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" }))}</span>`; }
+  function exits(t) { return (t.sells || []).map((s) => `${esc(s.kind)} ${esc(s.qty)} @ ${px(s.price)}`).join("<br>") || "—"; }
+
+  function renderDetail() {
+    const d = S.days[S.selected]; const el = $("detail");
+    if (!d) { el.hidden = true; return; }
+    el.hidden = false;
+    const s = d.summary || {}; const v = pnl(s);
+    const long = parseDay(d.date).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+    const trades = (d.trades || []).map((t) => {
+      const tv = `<span class="side ${t.side === "LONG" ? "long" : "short"}">${esc(t.side)}</span> @ ${px(t.tv_entry)}<span class="small">stop ${px(t.tv_stop)} · target ${px(t.tv_target)}${t.level ? " · " + esc(t.level) : ""}</span>`;
+      const flags = (t.notes || []).map((n) => `<span class="flag">${esc(n)}</span>`).join("");
+      return `<tr><td class="t">${esc(t.opened)}–${esc(t.closed || "")}</td><td>${contract(t)}${flags}</td><td>${tv}</td><td class="n">${esc(t.qty)}</td><td class="n">${px(t.buy?.price)}<span class="small">ask ${px(t.buy?.ask)}</span></td><td class="t">${exits(t)}</td><td>${esc(t.result || "")}</td><td class="n ${tone(t.pnl_mid)}">${money(t.pnl_mid)}</td><td class="n ${tone(t.pnl_real)}"><b>${money(t.pnl_real)}</b></td></tr>`;
+    }).join("");
+    const opens = (d.open || []).map((t) => `<tr><td class="t">${esc(t.opened)}</td><td>${contract(t)}</td><td><span class="side ${t.side === "LONG" ? "long" : "short"}">${esc(t.side)}</span> @ ${px(t.tv_entry)}<span class="small">stop ${px(t.tv_stop)} · target ${px(t.tv_target)}</span></td><td class="n">${esc(t.qty)}</td><td class="n">${px(t.buy?.price)}</td></tr>`).join("");
+    const skips = (d.skipped || []).map((k) => `<span class="skip"><span class="t">${esc(String(k.t).slice(11, 16))}</span><b>${esc(k.side)} ${esc(k.ticker)}</b> · ${esc(k.reason)}</span>`).join("");
+    const errs = (d.errors || []).map((e) => `<div class="err"><span class="mono">${esc(String(e.t).slice(11, 16))}</span> ${esc(e.text)}</div>`).join("");
+    el.innerHTML = `
+      <div class="detail-head"><h2>${esc(long)}</h2><span class="chip ${d.mode === "PAPER" ? "paper" : "dry"}">${esc(d.mode)}</span>${d.account ? `<span class="small" style="color:var(--ink-soft);font-size:13px">account $${Math.round(d.account).toLocaleString("en-US")}</span>` : ""}</div>
+      <div class="tiles">
+        <div class="tile"><span class="label">Net P&amp;L</span><span class="v ${tone(v)}">${money(v)}</span><span class="sub">${basis === "mid" ? "at mid" : "realistic"}</span></div>
+        <div class="tile"><span class="label">${basis === "mid" ? "Realistic" : "At mid"}</span><span class="v ${tone(basis === "mid" ? s.pnl_real : s.pnl_mid)}">${money(basis === "mid" ? s.pnl_real : s.pnl_mid)}</span><span class="sub">for comparison</span></div>
+        <div class="tile"><span class="label">Trades</span><span class="v">${esc(s.trades ?? 0)}</span><span class="sub">${esc(s.wins ?? 0)} won · ${esc(s.losses ?? 0)} lost</span></div>
+        <div class="tile"><span class="label">Premium used</span><span class="v">$${Math.round(s.premium || 0).toLocaleString("en-US")}</span><span class="sub">sum of entries</span></div>
+        <div class="tile"><span class="label">Skipped</span><span class="v">${esc(s.skipped ?? 0)}</span><span class="sub">${esc(s.errors ?? 0)} error${s.errors === 1 ? "" : "s"}</span></div>
+      </div>
+      ${(d.notes || []).length ? `<ul class="notes">${d.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
+      <h3 class="sub">Closed trades</h3>
+      ${trades ? `<div class="table-wrap"><table><thead><tr><th>In–out (ET)</th><th>Contract</th><th>TradingView signal</th><th class="n">Qty</th><th class="n">Bought</th><th>Sold</th><th>Result</th><th class="n">At mid</th><th class="n">Realistic</th></tr></thead><tbody>${trades}</tbody></table></div>` : `<p class="small" style="color:var(--ink-soft)">No trades closed this day.</p>`}
+      ${opens ? `<h3 class="sub">Still open at the end of the day</h3><div class="table-wrap"><table><thead><tr><th>Opened</th><th>Contract</th><th>TradingView signal</th><th class="n">Qty</th><th class="n">Bought</th></tr></thead><tbody>${opens}</tbody></table></div>` : ""}
+      ${skips ? `<h3 class="sub">Signals not taken</h3><div class="skips">${skips}</div>` : ""}
+      ${errs ? `<h3 class="sub">Errors</h3>${errs}` : ""}`;
+  }
+
+  function render() {
+    const keys = Object.keys(S.days).sort();
+    if (!S.month) S.month = keys.length ? monthOf(keys[keys.length - 1]) : monthOf(nyToday());
+    if (!S.selected && keys.length) S.selected = keys[keys.length - 1];
+    $("basis-real").setAttribute("aria-pressed", basis === "real"); $("basis-mid").setAttribute("aria-pressed", basis === "mid");
+    renderCal(); renderDetail();
+    const empty = $("empty");
+    if (S.loaded && !keys.length) { empty.hidden = false; empty.innerHTML = "<b>No trading days recorded yet.</b> Each day the executor acts on DTS signals is added here after the close."; }
+    else empty.hidden = true;
+  }
+
+  $("prev").addEventListener("click", () => { const { y, m } = S.month; S.month = m ? { y, m: m - 1 } : { y: y - 1, m: 11 }; render(); });
+  $("next").addEventListener("click", () => { const { y, m } = S.month; S.month = m < 11 ? { y, m: m + 1 } : { y: y + 1, m: 0 }; render(); });
+  const setBasis = (b) => { basis = b; try { localStorage.setItem("dts-journal-basis", b); } catch (e) {} render(); };
+  $("basis-real").addEventListener("click", () => setBasis("real"));
+  $("basis-mid").addEventListener("click", () => setBasis("mid"));
+
+  render();
+  (async () => {
+    const db = window.claude && window.claude.use ? await window.claude.use("db") : null;
+    if (!db) { $("status").textContent = "The journal's data isn't available in this view. Open it on claude.ai while signed in."; S.loaded = true; render(); return; }
+    db.collection("days").onSnapshot((snap) => {
+      const next = {};
+      for (const doc of snap.docs) { if (!doc.exists) continue; const v = doc.data(); if (v && typeof v.date === "string") next[v.date] = v; }
+      S.days = next; S.loaded = true;
+      if (S.selected && !next[S.selected]) S.selected = null;
+      $("status").textContent = `${Object.keys(next).length} trading day${Object.keys(next).length === 1 ? "" : "s"} recorded`;
+      render();
+    }, (err) => { $("status").textContent = "Couldn't load the journal: " + (err && err.message ? err.message : "unknown error"); S.loaded = true; render(); });
+  })();
+})();
+</script>
