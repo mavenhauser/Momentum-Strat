@@ -27,6 +27,7 @@ import json
 import re
 import logging
 import os
+import socket
 import sys
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -84,6 +85,41 @@ def mode_tag():
     return "PAPER" if settings.EXECUTE else "DRY RUN"
 
 
+def ibkr_status(up, detail=""):
+    """Record IBKR reachability and tell the user on a change: a warning when it
+    first goes down, a note when it comes back. Repeated failures stay quiet."""
+    f = settings.IBKR_DOWN_FILE
+    if up:
+        if f.exists():
+            since = f.read_text().strip()
+            f.unlink()
+            notify(f"{title('IBKR RECONNECTED')}\nTWS is accepting connections again on port {config.IBKR_PORT}.\n\n"
+                   f"<i>Down since {h(since)}</i>")
+        return
+    if f.exists():
+        return
+    settings.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    f.write_text(now_ny().strftime("%H:%M ET"))
+    effect = ("<b>Paper orders cannot be placed</b> until it is back: entries are skipped, "
+              "exits fail and are retried on the next alert." if settings.EXECUTE else
+              "Dry run continues, but sizing falls back to the <b>$100k placeholder</b> "
+              "and IBKR quotes are unavailable.")
+    notify(f"{title('⚠️ IBKR NOT CONNECTED')}\n<b>TWS isn't accepting connections on port {config.IBKR_PORT}.</b>\n"
+           f"Check TWS is open and logged in to the paper account.\n\n{effect}\n\n<i>{h(detail)}</i>")
+
+
+def check_tws_port(t):
+    """Cheap reachability probe (a plain TCP connect, no API session), run by the
+    sweep job every 5 minutes during market hours."""
+    if t.weekday() >= 5 or not (settings.HEALTH_START <= (t.hour, t.minute) < settings.HEALTH_END) or t.minute % 5:
+        return
+    try:
+        with socket.create_connection((config.IBKR_HOST, config.IBKR_PORT), timeout=3):
+            ibkr_status(True)
+    except OSError as e:
+        ibkr_status(False, f"port check: {e}")
+
+
 def assert_paper_port():
     if config.IBKR_PORT not in settings.PAPER_PORTS:
         sys.exit(f"REFUSING TO RUN: IBKR_PORT={config.IBKR_PORT} is not a paper port {settings.PAPER_PORTS}.")
@@ -109,7 +145,9 @@ class Broker:
             client = IBKRClient(client_id=settings.IBKR_CLIENT_ID)
             client.connect()
             self.ib = client
+            ibkr_status(True)
         except Exception as e:
+            ibkr_status(False, f"{type(e).__name__}: {e}")
             if settings.EXECUTE:
                 raise RuntimeError(f"IBKR not reachable on port {config.IBKR_PORT}: {e}")
             log.warning("IBKR not reachable (%s) - dry run continues on TastyTrade quotes only", e)
@@ -392,6 +430,7 @@ def main(argv=None):
         t = datetime.fromisoformat(a.received).astimezone(NY) if a.received else now_ny()
 
         if a.sweep:
+            check_tws_port(t)
             due = [p for p in state["positions"].values()]
             if not due or t.weekday() >= 5 or (t.hour, t.minute) < settings.SWEEP_AT or t.hour >= 16:
                 return 0

@@ -56,3 +56,9 @@ ENTRY_END = (16, 0)
 SWEEP_AT = (15, 56)
 
 ORDER_FILL_TIMEOUT_SECONDS = 30
+
+# IBKR connection watch. Set while TWS isn't accepting API connections, so the
+# Telegram warning goes out once per outage, plus once when it comes back.
+IBKR_DOWN_FILE = STATE_DIR / "dts_ibkr_down"
+HEALTH_START = (9, 25)        # the sweep job checks the TWS port every 5 min from here
+HEALTH_END = (16, 0)
