@@ -387,8 +387,8 @@
     <p class="dek">Three alert-only TradingView indicators for intraday opening-range breakout trades: wait for a stock to break a key level, let it pull back to the 8 EMA or the broken level, and enter when a candle closes back above the 8 EMA. This page records what each indicator does, how to trade with them, and what was built and fixed to get them running on the Day Trading Set Up layout. Separate from the Momentum Strategy (Variant H) system and shares no code with it.</p>
     <div class="meta-row">
       <span><b>Prepared</b> 2026-10-03</span>
-      <span><b>Updated</b> 2026-10-12: screener list rule changed to momentum + Magnificent 7 + top premarket gainers</span>
-      <span><b>Built</b> 2026-10-01 to 2026-10-09</span>
+      <span><b>Updated</b> 2026-10-15: IBKR executor and its first dry-run session</span>
+      <span><b>Built</b> 2026-10-01 to 2026-10-15</span>
       <span><b>Instrument</b> Pine Script v6 indicators: DTS Screener, DTS Trend, DTS Entry</span>
       <span><b>Repo</b> mavenhauser/Momentum-Strat · branch day-trading-setup</span>
       <span><b>Status</b> running live, not backtested</span>
@@ -685,6 +685,73 @@
   </section>
 
   <section>
+    <h2 class="section-title">Acting on the signals: IBKR executor</h2>
+    <p>Since 2026-10-14 every DTS Entry alert also goes to a small program on this Mac that trades <b>weekly options on the Interactive Brokers paper account</b>. TradingView decides every entry, stop, target and exit. IBKR's prices are only used to fill the option orders.</p>
+    <div class="lineage">
+      <span class="node">TradingView alert</span><span class="src"> · DTS Entry, webhook on</span><span class="arrow">→</span><span class="node">ngrok tunnel</span><span class="arrow">→</span><span class="node">receiver</span><span class="src"> · this Mac</span><span class="arrow">→</span><span class="node pick">executor</span><span class="arrow">→</span><span class="node">IBKR paper</span><span class="src"> · TWS</span>
+    </div>
+    <div class="table-wrap" style="margin-top: 1rem;">
+      <table class="wide">
+        <thead><tr><th>Alert</th><th>What the executor does</th></tr></thead>
+        <tbody>
+          <tr><td class="k">LONG / SHORT</td><td>Buys a <b>call</b> / a <b>put</b>. Expiry: this week's (normally Friday, 0DTE on Friday itself). Strike: nearest to TradingView's entry price, or the next nearest if that one fails the liquidity check (two-sided quote, spread ≤ 15% of mid, open interest ≥ 100). Size: premium ≈ <b>1% of net liquidation</b>, at least 1 contract.</td></tr>
+          <tr><td class="k">2R target hit</td><td>Sells <b>half</b> (a single contract is sold whole).</td></tr>
+          <tr><td class="k">EXIT</td><td>Sells the rest: STOP, BE, TRAIL, EOD or TIME.</td></tr>
+          <tr><td class="k">A+ setup</td><td>Nothing; information only.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul class="plain" style="margin-top: 0.9rem;">
+      <li><b>Holding:</b> trades may be held overnight and are closed by a <code>TIME</code> exit at 15:55 the next session. On the chart the entry window is 09:35–15:30, so late entries become overnight swings.</li>
+      <li><b>Orders:</b> limit at mid, priced off TastyTrade's live quote (IBKR's option data on this account is 15 minutes delayed). Anything unfilled after 30 seconds is retried once at the ask or bid. The real IBKR position is read before every sale.</li>
+      <li><b>Limits:</b> one position per ticker, at most 5 open, paper account only. A 15:56 sweep closes options expiring that day.</li>
+      <li><b>Telegram:</b> every action is sent with the key facts in bold (action, contract, <b>CALL</b> / <b>PUT</b>, price, P&amp;L) in separate paragraphs. A warning is sent if TWS stops accepting connections, checked every 5 minutes during market hours.</li>
+      <li><b>Dry run by default:</b> real chain, quotes and sizing, simulated fills, no orders. Paper orders start only when <code>DTS_EXECUTE=1</code> is set.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2 class="section-title">First dry-run session: 2026-10-14</h2>
+    <div class="ticket">
+      <div><span class="label">Trades closed</span><span class="v">14</span></div>
+      <div><span class="label">P&amp;L at mid</span><span class="v pos">+$17,543</span></div>
+      <div><span class="label">Realistic P&amp;L</span><span class="v pos">+$11,289</span></div>
+      <div><span class="label">Signals skipped (cap)</span><span class="v">12</span></div>
+    </div>
+    <p style="margin-top: 0.8rem; color: var(--ink-soft); font-size: 14px;">Simulated fills only. "Realistic" buys at the ask and sells at the bid from the quotes logged at each fill; it is the figure to judge by, about +1.1% of the $1.02M paper account. One UNH call bought at 15:05 was held overnight and is not counted.</p>
+    <div class="table-wrap">
+      <table class="wide">
+        <thead><tr><th>#</th><th>Entry–exit (ET)</th><th>Contract</th><th>TradingView result</th><th>At mid</th><th>Realistic</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td class="num">10:20–10:25</td><td>TSLA 367.5 <b>PUT</b> × 14</td><td class="soft">Stop</td><td class="num neg">−700</td><td class="num neg"><b>−1,050</b></td></tr>
+          <tr><td class="num">2</td><td class="num">10:30–10:35</td><td>CVX 220 <b>CALL</b> × 51</td><td class="soft">Stop</td><td class="num pos">+510</td><td class="num neg"><b>−612</b></td></tr>
+          <tr><td class="num">3</td><td class="num">10:40–11:25</td><td>AMZN 257.5 <b>PUT</b> × 29</td><td class="soft">2R + trail</td><td class="num pos">+645</td><td class="num pos"><b>+180</b></td></tr>
+          <tr><td class="num">4</td><td class="num">10:45–11:00</td><td>JNJ 250 <b>CALL</b> × 27</td><td class="soft">2R + break-even</td><td class="num neg">−621</td><td class="num neg"><b>−1,755</b></td></tr>
+          <tr><td class="num">5</td><td class="num">10:55–12:45</td><td>NVDA 225 <b>PUT</b> × 29</td><td class="soft">2R + trail</td><td class="num pos">+3,573</td><td class="num pos"><b>+3,370</b></td></tr>
+          <tr><td class="num">6</td><td class="num">10:55–11:00</td><td>AVGO 350 <b>PUT</b> × 22</td><td class="soft">Stop</td><td class="num pos">+88</td><td class="num neg"><b>−330</b></td></tr>
+          <tr><td class="num">7</td><td class="num">10:56–12:50</td><td>DELL 525 <b>PUT</b> × 8</td><td class="soft">2R + trail</td><td class="num pos">+5,432</td><td class="num pos"><b>+4,880</b></td></tr>
+          <tr><td class="num">8</td><td class="num">11:05–11:50</td><td>JNJ 250 <b>CALL</b> × 29</td><td class="soft">2R + trail</td><td class="num pos">+916</td><td class="num neg"><b>−5</b></td></tr>
+          <tr><td class="num">9</td><td class="num">11:05–14:55</td><td>MSFT 537.5 <b>PUT</b> × 23</td><td class="soft">2R + trail</td><td class="num pos">+4,271</td><td class="num pos"><b>+3,600</b></td></tr>
+          <tr><td class="num">10</td><td class="num">11:30–12:35</td><td>TSLA 367.5 <b>PUT</b> × 17</td><td class="soft">2R + trail</td><td class="num pos">+2,323</td><td class="num pos"><b>+2,135</b></td></tr>
+          <tr><td class="num">11</td><td class="num">11:55–15:15</td><td>WMT 115 <b>CALL</b> × 11 *</td><td class="soft">2R + trail</td><td class="num pos">+308</td><td class="num pos"><b>+258</b></td></tr>
+          <tr><td class="num">12</td><td class="num">12:50–14:20</td><td>GOOGL 350 <b>PUT</b> × 2 *</td><td class="soft">2R + trail</td><td class="num pos">+175</td><td class="num pos"><b>+135</b></td></tr>
+          <tr><td class="num">13</td><td class="num">12:50–15:30</td><td>PLTR 202.5 <b>PUT</b> × 3 *</td><td class="soft">2R + trail</td><td class="num pos">+421</td><td class="num pos"><b>+408</b></td></tr>
+          <tr><td class="num">14</td><td class="num">12:55–15:20</td><td>IBM 232.5 <b>PUT</b> × 2 *</td><td class="soft">2R + trail</td><td class="num pos">+202</td><td class="num pos"><b>+75</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top: 0.6rem; font-size: 13px; color: var(--ink-soft);">* Sized at about a tenth of normal: TWS stopped accepting connections at 11:45 ET, so these entries fell back to the $100k placeholder. Sized off the real account they would have made roughly +$8,800 instead of +$876. In paper mode they would have been missed instead.</p>
+    <h3 class="sub">What the day showed</h3>
+    <ul class="plain">
+      <li><b>Two halves.</b> 10:20–11:00 was mostly one-bar stop-outs and tiny targets. After 11:00 the short setups trended, and every trade that reached 2R and then trailed made money. NVDA, DELL and MSFT made most of the profit.</li>
+      <li><b>Mostly one bet.</b> 10 of 14 trades were shorts on tech names on a day tech fell. One trending day is not evidence that the setup works.</li>
+      <li><b>Tight stops don't suit options.</b> Several signals had stops and targets of a few tenths of a percent, smaller than the option spread plus the gap between the target touch and the bar-close fill. Two trades TradingView scored as 2R winners (JNJ, AMZN early) lost money at that stage.</li>
+      <li><b>A "gain at target ≥ 2× spread" filter</b> would have skipped only the two JNJ trades (about +$1,760 better). The quick stop-outs (TSLA, CVX, AVGO) need a minimum stop distance instead.</li>
+      <li><b>The 5-position cap</b> skipped 12 signals and filled with correlated short-tech trades. One more AMD entry was lost to an option-chain timeout.</li>
+    </ul>
+  </section>
+
+  <section>
     <h2 class="section-title">What was done</h2>
     <ul class="status-list">
       <li><span class="badge done">Done</span><span><b>Three scripts written</b> (2026-10-01, cloud session): the original single indicator was split into DTS Screener, DTS Trend and DTS Entry, with PWH / PWL, flag tags, market structure, the A+ banner and a dynamic ticker list added.</span></li>
@@ -697,6 +764,8 @@
       <li><span class="badge done">Done</span><span><b>Integrity check</b> (2026-10-03): the three saved scripts were compared with the repo and found identical. The outputs were then recomputed from raw 5-minute bars on PENG: PDH / PDL on 154 of 154 bars, ORH / ORL on 231 of 231, VWAP on 234 of 234, the ribbon on 220 of 220, and a bar-by-bar replay of the entry and exit rules matched all 12 labels.</span></li>
       <li><span class="badge done">Done</span><span><b>Live signal traced</b> (2026-10-05): TSLA <code>LONG · PWH retest</code>, entry 376.34, fired at the close of the 10:50 bar. The earlier green closes at 10:00–10:10 were skipped for being 2.7 to 3.0 above the 8 EMA against a limit of about 1.35.</span></li>
       <li><span class="badge done">Done</span><span><b>Alerts</b> (2026-10-12): 20 DTS Entry alerts created and verified active, then made silent and the screener-flip alert dropped the same day, after they proved too noisy. DTS Entry went to version 4.0, which adds a switch for the 2R and exit messages (left on). The morning job keeps the alerts in step with the list.</span></li>
+      <li><span class="badge done">Done</span><span><b>IBKR executor</b> (2026-10-14): TradingView alerts → tunnel → receiver → executor, trading weekly options on the paper account. Tested end to end on live alerts in dry run. DTS Entry went to version 5.0 to allow overnight holds with a TIME exit.</span></li>
+      <li><span class="badge done">Done</span><span><b>First dry-run session</b> (2026-10-14): 14 trades closed, about +$11,300 at realistic fills. Results above.</span></li>
       <li><span class="badge done">Done</span><span><b>Daily screener list</b> (2026-10-09): updater script and a launchd job that rebuilds the 20 tickers each trading morning. Tested by hand and through launchd.</span></li>
     </ul>
 
@@ -742,6 +811,30 @@
       </dl>
     </div>
 
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">FIX-6</span><h4>Orders priced off delayed IBKR quotes</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>The first live entry (TSLA put) used IBKR's quote, 6.75/6.90, while the live market was 6.85/7.00. IBKR returned error 10091: no real-time options data for the API on this account, so quotes are 15 minutes delayed.</dd>
+        <dt>Fix</dt><dd>Orders are priced off TastyTrade's live quote first. IBKR is a fallback only, labelled as possibly delayed.</dd>
+      </dl>
+    </div>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">FIX-7</span><h4>AMD entry lost to a chain timeout</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>AMD's option chain (over 7,000 contracts) took about 15 seconds, the shared client's limit, so the entry failed with an empty error message.</dd>
+        <dt>Fix</dt><dd>Chain downloads allow 60 seconds with one retry, exits quote the stored contract without downloading the chain, and error messages name the error type.</dd>
+      </dl>
+    </div>
+
+    <div class="bug">
+      <div class="bug-head"><span class="bug-id">FIX-8</span><h4>TWS dropped unnoticed</h4></div>
+      <dl>
+        <dt>Symptom</dt><dd>TWS stopped accepting connections at 11:45 ET, and nothing said so. Four entries were sized off the $100k placeholder.</dd>
+        <dt>Fix</dt><dd>A Telegram warning on the first failure and a note on reconnect, plus a check of the TWS port every 5 minutes during market hours.</dd>
+      </dl>
+    </div>
+
     <h3 class="sub">Commits on day-trading-setup</h3>
     <div class="table-wrap">
       <table class="wide">
@@ -758,6 +851,12 @@
           <tr><td class="num">354dfb4</td><td class="num">10-03</td><td>DTS Trend: default bar coloring to Off</td></tr>
           <tr><td class="num">4707282</td><td class="num">10-03</td><td>Add this guide page</td></tr>
           <tr><td class="num">b63edf0</td><td class="num">10-09</td><td>Screener: daily ticker list updater and schedule</td></tr>
+          <tr><td class="num">08d3a84</td><td class="num">10-12</td><td>Daily updater keeps TradingView alerts in step with the list</td></tr>
+          <tr><td class="num">6036aa5</td><td class="num">10-14</td><td>IBKR executor: weekly options on the paper account from DTS Entry alerts</td></tr>
+          <tr><td class="num">5ec325c</td><td class="num">10-14</td><td>Executor: price orders off TastyTrade's live quote</td></tr>
+          <tr><td class="num">9f58b7a</td><td class="num">10-14</td><td>Executor: survive slow option chains</td></tr>
+          <tr><td class="num">3631087</td><td class="num">10-15</td><td>Executor: Telegram messages in bold, multi-paragraph format</td></tr>
+          <tr><td class="num">f93b3a1</td><td class="num">10-15</td><td>Executor: warning when IBKR is unreachable</td></tr>
         </tbody>
       </table>
     </div>
@@ -768,7 +867,8 @@
     <ul class="status-list">
       <li><span class="badge open">Open</span><span><b>Not backtested.</b> There is no win rate, average R or drawdown figure for these rules. Every threshold (2R, 0.75 ATR, the 09:35–12:00 window, 3 trades a day) is an untested default.</span></li>
       <li><span class="badge open">Open</span><span><b>Paper-trade first.</b> Log the signals for a few weeks and compare them with what you would have taken by hand.</span></li>
-      <li><span class="badge unconfirmed">Unconfirmed</span><span><b>A full live trade.</b> A live entry was traced on TSLA (2026-10-05) and was still open when checked. A complete live sequence through 2R and exit has not been watched end to end.</span></li>
+      <li><span class="badge open">Decide</span><span><b>Paper orders.</b> The executor is still in dry run. Switch on only once TWS can stay connected all session.</span></li>
+      <li><span class="badge open">Decide</span><span><b>Trade filters.</b> A minimum stop distance (for the one-bar stop-outs), a "gain at target ≥ 2× spread" check (for tight targets), and whether the 5-position cap should become per-direction or per-sector.</span></li>
       <li><span class="badge unconfirmed">Unconfirmed</span><span><b>An unattended morning run of the daily list.</b> The first one, on 2026-10-12, failed: TradingView had been opened without its remote-control connection, so the job could not write the list. The list was applied after a restart, and the job now starts TradingView itself when it is closed. That auto-start has not yet been seen working unattended. The log is <code>~/.dts-screener/screener_list_cron.log</code>.</span></li>
       <li><span class="badge unconfirmed">Unconfirmed</span><span><b>Phone push.</b> The alerts fired on the Mac within minutes of going live (29 in the first hour). Whether the push reaches your phone has not been confirmed.</span></li>
     </ul>
@@ -781,7 +881,7 @@
   <div class="final-call">
     <span class="eyebrow">Where it stands</span>
     <h2>The tooling works. The edge is unproven.</h2>
-    <p>All three indicators compile, run and agree with TradingView's own VWAP and levels. The layout is saved on a 5-minute chart, and the daily routine is <b>ETH before 09:30 to pick names, RTH from 09:30 to trade</b>. Take entries only when the banner reads A or A+ OUTSIDE, the panel reads a clean trend, and the LONG or SHORT label prints on a closed candle.</p>
+    <p>The signals now drive a dry-run options executor on the IBKR paper account; its first session ended about +$11,300 at realistic fills on a strongly trending day. All three indicators compile, run and agree with TradingView's own VWAP and levels. The layout is saved on a 5-minute chart, and the daily routine is <b>ETH before 09:30 to pick names, RTH from 09:30 to trade</b>. Take entries only when the banner reads A or A+ OUTSIDE, the panel reads a clean trend, and the LONG or SHORT label prints on a closed candle.</p>
     <p class="caveat">Nothing here has been backtested. Treat every signal as a prompt to look, and size it as a paper trade until you have your own record of how the setup performs.</p>
   </div>
 
