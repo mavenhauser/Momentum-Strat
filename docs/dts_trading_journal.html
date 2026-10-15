@@ -91,7 +91,7 @@
   .detail { margin-top: 2rem; }
   .detail-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem 0.8rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--rule-strong); }
   .detail-head h2 { font-family: var(--serif); font-size: 1.35rem; }
-  .tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.6rem; margin-top: 1rem; }
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.6rem; margin-top: 1rem; }
   .tile { background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 3px; padding: 0.7rem 0.9rem; min-width: 0; }
   .tile .label { display: block; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
   .tile .v { display: block; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.2rem; font-weight: 700; }
@@ -126,13 +126,9 @@
     <div>
       <span class="eyebrow">Day Trading Setup · IBKR executor</span>
       <h1>DTS Trading Journal</h1>
-      <p>Every trading day the DTS executor acted on, booked on the day each trade closed. Realistic P&amp;L buys at the ask and sells at the bid; at mid is what the executor recorded.</p>
+      <p>Every trading day the DTS executor acted on, booked on the day each trade closed. P&amp;L is realistic: options bought at the ask and sold at the bid.</p>
     </div>
     <div class="controls">
-      <div class="seg" role="group" aria-label="P&amp;L basis">
-        <button type="button" id="basis-real" aria-pressed="true">Realistic</button>
-        <button type="button" id="basis-mid" aria-pressed="false">At mid</button>
-      </div>
       <div class="monthnav">
         <button type="button" id="prev" aria-label="Previous month">‹</button>
         <h2 id="month">—</h2>
@@ -163,10 +159,8 @@
   const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const nyToday = () => { try { return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date()); } catch (e) { return isoOf(new Date()); } };
 
-  let basis = "real";
-  try { if (localStorage.getItem("dts-journal-basis") === "mid") basis = "mid"; } catch (e) {}
   const S = { days: {}, loaded: false, month: null, selected: null };
-  const pnl = (o) => (o ? (basis === "mid" ? o.pnl_mid : o.pnl_real) : null);
+  const pnl = (o) => (o ? o.pnl_real : null);       // realistic: bought at the ask, sold at the bid
 
   function monthOf(iso) { const d = parseDay(iso); return { y: d.getUTCFullYear(), m: d.getUTCMonth() }; }
   function daysInMonth(y, m) {
@@ -194,7 +188,7 @@
     const fmtD = (d) => (d ? parseDay(d.date).toLocaleDateString("en-US", { weekday: "short", day: "numeric", timeZone: "UTC" }) : "—");
     const greenDays = list.filter((d) => num(pnl(d.summary)) > 0).length;
     $("stats").innerHTML = [
-      ["Net P&amp;L", `<span class="${tone(net)}">${list.length ? money(net) : "—"}</span>`, basis === "mid" ? "at mid" : "realistic"],
+      ["Net P&amp;L", `<span class="${tone(net)}">${list.length ? money(net) : "—"}</span>`, "realistic"],
       ["Trading days", list.length || "—", list.length ? `${greenDays} green · ${list.length - greenDays} red` : "none yet"],
       ["Trades", trades || "—", trades ? `${wins} won · ${trades - wins} lost` : ""],
       ["Win rate", trades ? Math.round((wins / trades) * 100) + "%" : "—", "by trade"],
@@ -241,7 +235,7 @@
     const trades = (d.trades || []).map((t) => {
       const tv = `<span class="side ${t.side === "LONG" ? "long" : "short"}">${esc(t.side)}</span> @ ${px(t.tv_entry)}<span class="small">stop ${px(t.tv_stop)} · target ${px(t.tv_target)}${t.level ? " · " + esc(t.level) : ""}</span>`;
       const flags = (t.notes || []).map((n) => `<span class="flag">${esc(n)}</span>`).join("");
-      return `<tr><td class="t">${esc(t.opened)}–${esc(t.closed || "")}</td><td>${contract(t)}${flags}</td><td>${tv}</td><td class="n">${esc(t.qty)}</td><td class="n">${px(t.buy?.price)}<span class="small">ask ${px(t.buy?.ask)}</span></td><td class="t">${exits(t)}</td><td>${esc(t.result || "")}</td><td class="n ${tone(t.pnl_mid)}">${money(t.pnl_mid)}</td><td class="n ${tone(t.pnl_real)}"><b>${money(t.pnl_real)}</b></td></tr>`;
+      return `<tr><td class="t">${esc(t.opened)}–${esc(t.closed || "")}</td><td>${contract(t)}${flags}</td><td>${tv}</td><td class="n">${esc(t.qty)}</td><td class="n">${px(t.buy?.price)}<span class="small">ask ${px(t.buy?.ask)}</span></td><td class="t">${exits(t)}</td><td>${esc(t.result || "")}</td><td class="n ${tone(t.pnl_real)}"><b>${money(t.pnl_real)}</b></td></tr>`;
     }).join("");
     const opens = (d.open || []).map((t) => `<tr><td class="t">${esc(t.opened)}</td><td>${contract(t)}</td><td><span class="side ${t.side === "LONG" ? "long" : "short"}">${esc(t.side)}</span> @ ${px(t.tv_entry)}<span class="small">stop ${px(t.tv_stop)} · target ${px(t.tv_target)}</span></td><td class="n">${esc(t.qty)}</td><td class="n">${px(t.buy?.price)}</td></tr>`).join("");
     const skips = (d.skipped || []).map((k) => `<span class="skip"><span class="t">${esc(String(k.t).slice(11, 16))}</span><b>${esc(k.side)} ${esc(k.ticker)}</b> · ${esc(k.reason)}</span>`).join("");
@@ -249,15 +243,14 @@
     el.innerHTML = `
       <div class="detail-head"><h2>${esc(long)}</h2><span class="chip ${d.mode === "PAPER" ? "paper" : "dry"}">${esc(d.mode)}</span>${d.account ? `<span class="small" style="color:var(--ink-soft);font-size:13px">account $${Math.round(d.account).toLocaleString("en-US")}</span>` : ""}</div>
       <div class="tiles">
-        <div class="tile"><span class="label">Net P&amp;L</span><span class="v ${tone(v)}">${money(v)}</span><span class="sub">${basis === "mid" ? "at mid" : "realistic"}</span></div>
-        <div class="tile"><span class="label">${basis === "mid" ? "Realistic" : "At mid"}</span><span class="v ${tone(basis === "mid" ? s.pnl_real : s.pnl_mid)}">${money(basis === "mid" ? s.pnl_real : s.pnl_mid)}</span><span class="sub">for comparison</span></div>
+        <div class="tile"><span class="label">Net P&amp;L</span><span class="v ${tone(v)}">${money(v)}</span><span class="sub">realistic</span></div>
         <div class="tile"><span class="label">Trades</span><span class="v">${esc(s.trades ?? 0)}</span><span class="sub">${esc(s.wins ?? 0)} won · ${esc(s.losses ?? 0)} lost</span></div>
         <div class="tile"><span class="label">Premium used</span><span class="v">$${Math.round(s.premium || 0).toLocaleString("en-US")}</span><span class="sub">sum of entries</span></div>
         <div class="tile"><span class="label">Skipped</span><span class="v">${esc(s.skipped ?? 0)}</span><span class="sub">${esc(s.errors ?? 0)} error${s.errors === 1 ? "" : "s"}</span></div>
       </div>
       ${(d.notes || []).length ? `<ul class="notes">${d.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
       <h3 class="sub">Closed trades</h3>
-      ${trades ? `<div class="table-wrap"><table><thead><tr><th>In–out (ET)</th><th>Contract</th><th>TradingView signal</th><th class="n">Qty</th><th class="n">Bought</th><th>Sold</th><th>Result</th><th class="n">At mid</th><th class="n">Realistic</th></tr></thead><tbody>${trades}</tbody></table></div>` : `<p class="small" style="color:var(--ink-soft)">No trades closed this day.</p>`}
+      ${trades ? `<div class="table-wrap"><table><thead><tr><th>In–out (ET)</th><th>Contract</th><th>TradingView signal</th><th class="n">Qty</th><th class="n">Bought</th><th>Sold</th><th>Result</th><th class="n">P&amp;L</th></tr></thead><tbody>${trades}</tbody></table></div>` : `<p class="small" style="color:var(--ink-soft)">No trades closed this day.</p>`}
       ${opens ? `<h3 class="sub">Still open at the end of the day</h3><div class="table-wrap"><table><thead><tr><th>Opened</th><th>Contract</th><th>TradingView signal</th><th class="n">Qty</th><th class="n">Bought</th></tr></thead><tbody>${opens}</tbody></table></div>` : ""}
       ${skips ? `<h3 class="sub">Signals not taken</h3><div class="skips">${skips}</div>` : ""}
       ${errs ? `<h3 class="sub">Errors</h3>${errs}` : ""}`;
@@ -267,7 +260,6 @@
     const keys = Object.keys(S.days).sort();
     if (!S.month) S.month = keys.length ? monthOf(keys[keys.length - 1]) : monthOf(nyToday());
     if (!S.selected && keys.length) S.selected = keys[keys.length - 1];
-    $("basis-real").setAttribute("aria-pressed", basis === "real"); $("basis-mid").setAttribute("aria-pressed", basis === "mid");
     renderCal(); renderDetail();
     const empty = $("empty");
     if (S.loaded && !keys.length) { empty.hidden = false; empty.innerHTML = "<b>No trading days recorded yet.</b> Each day the executor acts on DTS signals is added here after the close."; }
@@ -276,9 +268,6 @@
 
   $("prev").addEventListener("click", () => { const { y, m } = S.month; S.month = m ? { y, m: m - 1 } : { y: y - 1, m: 11 }; render(); });
   $("next").addEventListener("click", () => { const { y, m } = S.month; S.month = m < 11 ? { y, m: m + 1 } : { y: y + 1, m: 0 }; render(); });
-  const setBasis = (b) => { basis = b; try { localStorage.setItem("dts-journal-basis", b); } catch (e) {} render(); };
-  $("basis-real").addEventListener("click", () => setBasis("real"));
-  $("basis-mid").addEventListener("click", () => setBasis("mid"));
 
   render();
   (async () => {
