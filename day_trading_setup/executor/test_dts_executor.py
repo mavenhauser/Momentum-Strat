@@ -45,10 +45,14 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(contracts.strikes_by_distance([170, 175, 177.5, 180, 182.5], 177.16, 3), [177.5, 175, 180])
 
     def test_liquidity(self):
-        self.assertTrue(contracts.liquid({"bid": 2.0, "ask": 2.2, "open_interest": 500}))
-        self.assertFalse(contracts.liquid({"bid": 2.0, "ask": 2.6, "open_interest": 500}))   # spread 26%
-        self.assertFalse(contracts.liquid({"bid": 0, "ask": 0.1, "open_interest": 500}))
-        self.assertFalse(contracts.liquid({"bid": 2.0, "ask": 2.1, "open_interest": 10}))
+        v = {"volume": 800}
+        self.assertTrue(contracts.liquid({"bid": 2.0, "ask": 2.2, "open_interest": 500, **v}))
+        self.assertFalse(contracts.liquid({"bid": 2.0, "ask": 2.6, "open_interest": 500, **v}))   # spread 26%
+        self.assertFalse(contracts.liquid({"bid": 0, "ask": 0.1, "open_interest": 500, **v}))
+        self.assertFalse(contracts.liquid({"bid": 2.0, "ask": 2.1, "open_interest": 10, **v}))
+        self.assertFalse(contracts.liquid({"bid": 2.0, "ask": 2.1, "open_interest": 500, "volume": 401}))   # CVX 10-14
+        self.assertFalse(contracts.liquid({"bid": 2.0, "ask": 2.1, "open_interest": 500, "volume": float("nan")}))
+        self.assertFalse(contracts.liquid({"bid": 2.0, "ask": 2.1, "open_interest": 500}))                  # unknown
 
     def test_sizing(self):
         self.assertEqual(contracts.contracts_for(100_000, 2.50), 10)          # 2.5% default: $2,500 / $250
@@ -80,7 +84,7 @@ class ContractTest(unittest.TestCase):
         self.assertEqual([contracts.trim_quantity(q) for q in (0, 1, 2, 3, 4, 5)], [0, 0, 1, 1, 2, 2])
 
     def q(self, bid, ask, delta, oi=1000):
-        return {"bid": bid, "ask": ask, "delta": delta, "open_interest": oi}
+        return {"bid": bid, "ask": ask, "delta": delta, "open_interest": oi, "volume": 1000}
 
     def test_ladder(self):
         ks = [210, 212.5, 215, 217.5, 220, 222.5, 225]
