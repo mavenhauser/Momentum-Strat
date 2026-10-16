@@ -39,11 +39,16 @@ def liquid(quote) -> bool:
     return oi is None or oi >= settings.MIN_OPEN_INTEREST
 
 
-def contracts_for(nlv: float, premium: float) -> int:
-    """Whole contracts whose total premium is about RISK_FRACTION of the account."""
+def size_fraction(grade):
+    """Fraction of the account to spend on premium for an entry of this grade."""
+    return settings.SIZE_BY_GRADE.get(grade or "", settings.SIZE_DEFAULT)
+
+
+def contracts_for(nlv: float, premium: float, fraction: float = None) -> int:
+    """Whole contracts whose total premium is about `fraction` of the account."""
     if premium is None or premium <= 0:
         return 0
-    n = math.floor(nlv * settings.RISK_FRACTION / (premium * 100))
+    n = math.floor(nlv * (fraction or settings.SIZE_DEFAULT) / (premium * 100))
     return max(n, settings.MIN_CONTRACTS)
 
 
@@ -83,7 +88,7 @@ def covers_spread(quote, move) -> bool:
     return abs(d) * move >= settings.MIN_TARGET_TO_SPREAD * (ask - bid)
 
 
-def choose_strike(quotes: dict, entry: float, right: str, budget: float, move: float = None):
+def choose_strike(quotes: dict, entry: float, right: str, budget: float, move: float = None, min_delta: float = None):
     """Pick the strike and quantity for one entry.
 
     quotes: {strike: {"bid", "ask", "delta", "open_interest"}} for the ladder and the
@@ -96,7 +101,9 @@ def choose_strike(quotes: dict, entry: float, right: str, budget: float, move: f
 
     move: the stock's move from entry to the 2R target. When given, every rule
     also requires the strike to pass covers_spread().
+    min_delta: delta floor (default MIN_DELTA; MIN_DELTA_0DTE on expiry day).
     """
+    floor = settings.MIN_DELTA if min_delta is None else min_delta
     ladder = strike_ladder(quotes.keys(), entry, right, settings.STRIKES_TO_SCAN)
 
     def qty_at(k):
@@ -105,10 +112,10 @@ def choose_strike(quotes: dict, entry: float, right: str, budget: float, move: f
 
     def ok(k):
         d = quotes[k].get("delta")
-        return liquid(quotes[k]) and d is not None and abs(d) >= settings.MIN_DELTA and covers_spread(quotes[k], move)
+        return liquid(quotes[k]) and d is not None and abs(d) >= floor and covers_spread(quotes[k], move)
 
     for need, rule in ((settings.TARGET_CONTRACTS, f"{settings.TARGET_CONTRACTS}+ contracts"),
-                       (settings.MIN_CONTRACTS_TO_TRIM, f"{settings.MIN_CONTRACTS_TO_TRIM}+ contracts (no strike gave {settings.TARGET_CONTRACTS} at delta {settings.MIN_DELTA}+)")):
+                       (settings.MIN_CONTRACTS_TO_TRIM, f"{settings.MIN_CONTRACTS_TO_TRIM}+ contracts (no strike gave {settings.TARGET_CONTRACTS} at delta {floor}+)")):
         for k in ladder:
             if ok(k) and qty_at(k) >= need:
                 return k, qty_at(k), rule, quotes[k].get("delta")
@@ -118,7 +125,7 @@ def choose_strike(quotes: dict, entry: float, right: str, budget: float, move: f
         if liquid(quotes[k]):
             any_liquid = True
             if covers_spread(quotes[k], move):
-                return k, max(1, qty_at(k)), f"1 contract (none cheap enough for 2 at delta {settings.MIN_DELTA}+), held through 2R", quotes[k].get("delta")
+                return k, max(1, qty_at(k)), f"1 contract (none cheap enough for 2 at delta {floor}+), held through 2R", quotes[k].get("delta")
     if any_liquid:
         return None, 0, f"2R target too small for the option spread (needs gain at target >= {settings.MIN_TARGET_TO_SPREAD:g}x spread)", None
     return None, 0, "no liquid strike near the entry price", None

@@ -351,6 +351,16 @@ sRisk = sStop - close
 longSig = canEnter and allowLong and lArmed and lRetest and close > e8 and close > open and close > lLvl and close - e8 <= maxExt * atr and trendOkL and vwapOkL and lRisk > 0 and lRisk <= maxRiskAtr * atr
 shortSig = canEnter and not longSig and allowShort and sArmed and sRetest and close < e8 and close < open and close < sLvl and e8 - close <= maxExt * atr and trendOkS and vwapOkS and sRisk > 0 and sRisk <= maxRiskAtr * atr
 
+// --- Setup grade (also drives the A+ banner below). OUTSIDE LONG: price above
+// both PDH and PMH (outside yesterday's range and the premarket range). Grade =
+// how many of the 4 confirmations line up: clean trend, VWAP side, beyond the
+// opening range, beyond the prior-week level. 4 = A+, 3 = A, 2 = B, else C.
+outLong  = not na(pdh) and close > pdh and (na(pmh) or close > pmh)
+outShort = not na(pdl) and close < pdl and (na(pml) or close < pml)
+ptsL = (trend == 1 ? 1 : 0) + (close > vwapV ? 1 : 0) + (not na(orh) and orDone and close > orh ? 1 : 0) + (not na(pwh) and close > pwh ? 1 : 0)
+ptsS = (trend == -1 ? 1 : 0) + (close < vwapV ? 1 : 0) + (not na(orl) and orDone and close < orl ? 1 : 0) + (not na(pwl) and close < pwl ? 1 : 0)
+f_grade(int pts) => pts >= 4 ? "A+" : pts == 3 ? "A" : pts == 2 ? "B" : "C"
+
 if longSig or shortSig
     pos    := longSig ? 1 : -1
     entPx  := close
@@ -365,9 +375,10 @@ if longSig or shortSig
     lnTgt := line.new(bar_index, tgtPx, bar_index + 1, tgtPx, color = C_BULL, style = line.style_dashed)
     lvlName = longSig ? lName : sName
     side = longSig ? "LONG" : "SHORT"
+    gradeTxt = longSig ? f_grade(ptsL) + (outLong ? " OUTSIDE" : " inside") : f_grade(ptsS) + (outShort ? " OUTSIDE" : " inside")
     txt = side + " · " + lvlName + " retest\nEntry " + fmt(entPx) + "\nStop " + fmt(stpPx) + "\nTarget " + fmt(tgtPx)
     label.new(bar_index, close, txt, yloc = longSig ? yloc.belowbar : yloc.abovebar, style = longSig ? label.style_label_up : label.style_label_down, color = longSig ? #00C853 : #D50000, textcolor = color.white, size = size.small)
-    alert("DTS: " + side + " " + syminfo.ticker + " @ " + fmt(entPx) + " | stop " + fmt(stpPx) + " | target " + fmt(tgtPx) + " (" + str.tostring(rr) + "R) | " + lvlName + " breakout + 8 EMA retest", alert.freq_once_per_bar_close)
+    alert("DTS: " + side + " " + syminfo.ticker + " @ " + fmt(entPx) + " | stop " + fmt(stpPx) + " | target " + fmt(tgtPx) + " (" + str.tostring(rr) + "R) | " + lvlName + " breakout + 8 EMA retest | grade " + gradeTxt, alert.freq_once_per_bar_close)
     if longSig
         lRetest := false
         lSwing := na
@@ -406,13 +417,7 @@ if showPanel and barstate.islast
     table.cell(panel, 1, 6, tradeTxt, text_color = color.white, text_size = ts, text_halign = text.align_left)
 
 // ---------------------------------------------------------------- A+ setup banner
-// OUTSIDE LONG: price above both PDH and PMH (outside yesterday's range and the
-// premarket range). Grade = how many of the 4 confirmations line up.
-outLong  = not na(pdh) and close > pdh and (na(pmh) or close > pmh)
-outShort = not na(pdl) and close < pdl and (na(pml) or close < pml)
-ptsL = (trend == 1 ? 1 : 0) + (close > vwapV ? 1 : 0) + (not na(orh) and orDone and close > orh ? 1 : 0) + (not na(pwh) and close > pwh ? 1 : 0)
-ptsS = (trend == -1 ? 1 : 0) + (close < vwapV ? 1 : 0) + (not na(orl) and orDone and close < orl ? 1 : 0) + (not na(pwl) and close < pwl ? 1 : 0)
-f_grade(int pts) => pts >= 4 ? "A+" : pts == 3 ? "A" : pts == 2 ? "B" : "C"
+// (OUTSIDE / grade computed above the entry block, so the entry alert can carry it)
 aPlusL = rth and outLong and ptsL >= 4
 aPlusS = rth and outShort and ptsS >= 4
 aPlusNew = (aPlusL and not aPlusL[1]) or (aPlusS and not aPlusS[1])

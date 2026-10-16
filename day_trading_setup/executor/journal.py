@@ -128,6 +128,7 @@ def trade_entry(trade, day, lines):
         "pnl_mid": trade.get("pnl_usd") if closed else None, "pnl_real": real if closed else None,
         "premium": round(buy["qty"] * buy["price"] * 100, 2) if buy and buy["price"] else None,
         "sized_off": src, "account": nlv, "notes": notes,
+        "grade": trade.get("grade"), "size_fraction": trade.get("size_fraction"),
     }
 
 

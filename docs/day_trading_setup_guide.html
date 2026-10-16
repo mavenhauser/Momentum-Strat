@@ -681,7 +681,7 @@
       <li>One alert watches one symbol, except the screener. Typical use: keep the screener alert running, and when a ticker flips to ▲, open it and create a DTS Entry alert there.</li>
       <li>An alert keeps the code and settings it was created with. After editing a script or its inputs, delete and recreate the alert.</li>
     </ul>
-    <p>A message looks like this: <code>DTS: LONG NVDA @ 177.16 | stop 176.40 | target 178.68 (2R) | ORH breakout + 8 EMA retest</code></p>
+    <p>A message looks like this: <code>DTS: LONG NVDA @ 177.16 | stop 176.40 | target 178.68 (2R) | ORH breakout + 8 EMA retest | grade A+ OUTSIDE</code>. The grade (added 2026-10-16) sets the trade size.</p>
   </section>
 
   <section>
@@ -694,7 +694,7 @@
       <table class="wide">
         <thead><tr><th>Alert</th><th>What the executor does</th></tr></thead>
         <tbody>
-          <tr><td class="k">LONG / SHORT</td><td>Buys a <b>call</b> / a <b>put</b>. Expiry: this week's (normally Friday, 0DTE on Friday itself). Strike: start nearest TradingView's entry price and step out of the money until one buys <b>4 contracts</b> within the budget, never below <b>0.15 delta</b> (weeklies, so further out of the money is fine); failing that, the nearest that buys <b>2</b>; failing that, <b>1 contract</b>, held through 2R. Every strike must pass the liquidity check (two-sided quote, spread ≤ 15% of mid, open interest ≥ 100). Size: premium ≈ <b>1% of a $100k notional account</b> (about $1,000, rounded down, at least 1 contract), not the paper account's own value.</td></tr>
+          <tr><td class="k">LONG / SHORT</td><td>Buys a <b>call</b> / a <b>put</b>. Expiry: this week's (normally Friday, 0DTE on Friday itself). Strike: start nearest TradingView's entry price and step out of the money until one buys <b>4 contracts</b> within the budget, never below <b>0.15 delta</b> (weeklies, so further out of the money is fine); failing that, the nearest that buys <b>2</b>; failing that, <b>1 contract</b>, held through 2R. Every strike must pass the liquidity check (two-sided quote, spread ≤ 15% of mid, open interest ≥ 100). Size by the setup grade on the entry alert (since 2026-10-16): premium ≈ <b>5%</b> of a $100k notional account for <b>A+ OUTSIDE</b>, <b>3.5%</b> for <b>A OUTSIDE</b>, <b>2.5%</b> for everything else (rounded down, at least 1 contract). Five open positions at most, so no more than 25% of the account in premium at once. Friday (0DTE) uses the same 0.15 delta floor.</td></tr>
           <tr><td class="k">2R target hit</td><td>Sells <b>half</b>, rounded down. A single contract is held and rides to the trail, break-even or stop.</td></tr>
           <tr><td class="k">EXIT</td><td>Sells the rest: STOP, BE, TRAIL, EOD or TIME.</td></tr>
           <tr><td class="k">A+ setup</td><td>Nothing; information only.</td></tr>
@@ -755,7 +755,7 @@
       <li><b>Tiny stops are noise.</b> Stops under about 0.2% of price lost on both days: CVX, JNJ ×2, TSLA #1 on Oct 14; C, MRK and AVGO (a 0.04% stop) on Oct 15. A minimum stop distance is the strongest filter candidate.</li>
       <li><b>A TradingView winner can be an options loser.</b> JNJ's 2R target was $0.50 on the stock against a $0.40 option spread: −$1,755. The option's gain at the target should be at least 2× the spread.</li>
       <li><b>Trade with the tape.</b> Oct 14 trended down and the shorts after 11:00 paid. Oct 15 turned up mid-session: longs and shorts alike stopped out, but at 1% size the nine entries cost only −$202. The UNH call carried overnight from Oct 14 made +$850, so the 2-session hold earned its keep.</li>
-      <li><b>Weeklies can go further out of the money.</b> From Oct 16 the strike ladder accepts down to 0.15 delta (was 0.25), so the 1% budget buys more contracts that gain more from a volatility spike. If no strike is cheap enough for 2, the single-contract fallback now searches out the ladder too, so thin names like JNJ and PM puts are less likely to be skipped.</li>
+      <li><b>Weeklies can go further out of the money.</b> From Oct 16 the strike ladder accepts down to 0.15 delta (was 0.25), so each trade's budget buys more contracts that gain more from a volatility spike. If no strike is cheap enough for 2, the single-contract fallback now searches out the ladder too, so thin names like JNJ and PM puts are less likely to be skipped.</li>
       <li><b>Keep the Mac awake.</b> Most of the "TWS lag" was the laptop sleeping: idle sleep at 15:35 ET on Oct 14, lid closed at 14:38 ET on Oct 15 (UNH's exit and the sweep never ran), and asleep before the Oct 15 open.</li>
     </ol>
   </section>

@@ -321,7 +321,7 @@ This one alert covers entries, new A+ setups, the 2R target and exits on
 that symbol. The A+ messages and the 2R / exit messages each have a switch
 in the indicator's settings. A message looks like this:
 
-`DTS: LONG NVDA @ 177.16 | stop 176.40 | target 178.68 (2R) | ORH breakout + 8 EMA retest`
+`DTS: LONG NVDA @ 177.16 | stop 176.40 | target 178.68 (2R) | ORH breakout + 8 EMA retest | grade A+ OUTSIDE` (the grade was added in DTS Entry v6.0, 2026-10-16)
 
 Add a second alert with **Condition** `DTS Screener` →
 `Any alert() function call` to get ▲/▼ flips across all 20 tickers.
@@ -413,7 +413,7 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
 
 | Alert | What the executor does |
 |---|---|
-| `DTS: LONG …` / `DTS: SHORT …` | Buys a call / a put. Expiry: this week's last listed expiry (normally Friday, 0DTE on Friday itself). Strike: start at the strike nearest TradingView's entry price and step out of the money until one buys **4 contracts** within the budget, never going below **0.15 delta** (weeklies held 1-2 days, so further out of the money is fine); if none does, the nearest strike that buys **2**; if none, **1 contract** of the nearest liquid strike (searching out the ladder if the near ones are too wide), which is then held through 2R. Every strike must pass the liquidity check (two-sided quote, spread ≤ 15% of mid, open interest ≥ 100). Size: premium ≈ 1% of a **$100k notional strategy account** (about $1,000, rounded down to whole contracts, at least 1), not the paper account's own value. |
+| `DTS: LONG …` / `DTS: SHORT …` | Buys a call / a put. Expiry: this week's last listed expiry (normally Friday, 0DTE on Friday itself). Strike: start at the strike nearest TradingView's entry price and step out of the money until one buys **4 contracts** within the budget, never going below **0.15 delta** (weeklies held 1-2 days, so further out of the money is fine); if none does, the nearest strike that buys **2**; if none, **1 contract** of the nearest liquid strike (searching out the ladder if the near ones are too wide), which is then held through 2R. Every strike must pass the liquidity check (two-sided quote, spread ≤ 15% of mid, open interest ≥ 100). Size (since 2026-10-16) by the setup grade the entry alert carries (DTS Entry v6.0+): premium ≈ **5%** of a **$100k notional strategy account** for **A+ OUTSIDE** (all 4 confirmations and beyond the prior day and premarket range), **3.5%** for **A OUTSIDE**, **2.5%** for everything else and for alerts without a grade; rounded down to whole contracts, at least 1. With at most 5 open positions that caps premium out at 25% of the account. Not the paper account's own value. On expiry day (Friday 0DTE) the delta floor is `MIN_DELTA_0DTE` = 0.15. |
 | `DTS: … hit 2R target …` | Sells half the contracts, rounded down. A single contract is held and rides to the trail, break-even or stop. |
 | `DTS: EXIT … (STOP / BE / TRAIL / EOD / TIME)` | Sells the rest. |
 | `DTS: A+ OUTSIDE …` | Nothing (information only). |

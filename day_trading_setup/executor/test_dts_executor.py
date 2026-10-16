@@ -51,9 +51,30 @@ class ContractTest(unittest.TestCase):
         self.assertFalse(contracts.liquid({"bid": 2.0, "ask": 2.1, "open_interest": 10}))
 
     def test_sizing(self):
-        self.assertEqual(contracts.contracts_for(100_000, 2.50), 4)   # $1,000 / $250
-        self.assertEqual(contracts.contracts_for(100_000, 15.0), 1)   # below one contract -> 1
+        self.assertEqual(contracts.contracts_for(100_000, 2.50), 10)          # 2.5% default: $2,500 / $250
+        self.assertEqual(contracts.contracts_for(100_000, 2.50, 0.05), 20)    # A+ OUTSIDE: $5,000 / $250
+        self.assertEqual(contracts.contracts_for(100_000, 30.0), 1)           # below one contract -> 1
         self.assertEqual(contracts.contracts_for(100_000, None), 0)
+
+    def test_size_by_grade(self):
+        self.assertEqual(contracts.size_fraction("A+ OUTSIDE"), 0.05)
+        self.assertEqual(contracts.size_fraction("A OUTSIDE"), 0.035)
+        self.assertEqual(contracts.size_fraction("A+ inside"), settings.SIZE_DEFAULT)
+        self.assertEqual(contracts.size_fraction(None), settings.SIZE_DEFAULT)
+        self.assertTrue(all(f <= 0.05 for f in settings.SIZE_BY_GRADE.values()))
+
+    def test_parse_grade(self):
+        base = "DTS: LONG NVDA @ 177.16 | stop 176.40 | target 178.68 (2R) | ORH breakout + 8 EMA retest"
+        self.assertIsNone(signals.parse(base).grade)                              # pre-v6 alert
+        self.assertEqual(signals.parse(base + " | grade A+ OUTSIDE").grade, "A+ OUTSIDE")
+        s = signals.parse(base + " | grade B inside")
+        self.assertEqual((s.kind, s.grade, s.target), ("ENTRY", "B inside", 178.68))
+
+    def test_min_delta_override(self):
+        # 0DTE floor passed explicitly: a 0.12-delta strike only qualifies if the floor is lowered
+        qs = {100: self.q(4.90, 5.10, 0.55), 102.5: self.q(3.80, 4.00, 0.45), 107.5: self.q(1.90, 2.00, 0.12)}
+        self.assertEqual(contracts.choose_strike(qs, 100.2, "C", 1000, min_delta=0.15)[:2], (102.5, 2))
+        self.assertEqual(contracts.choose_strike(qs, 100.2, "C", 1000, min_delta=0.10)[:2], (107.5, 5))
 
     def test_trim(self):
         self.assertEqual([contracts.trim_quantity(q) for q in (0, 1, 2, 3, 4, 5)], [0, 0, 1, 1, 2, 2])

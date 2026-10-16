@@ -34,7 +34,16 @@ PAPER_PORTS = (7497, 4002)   # same hard guard as the Momentum trader
 # strategies). 1% of $100k = about $1,000 of premium per trade. Matches the
 # starting balance of the DTS Trading Journal (2026-10-15).
 SIZING_ACCOUNT = 100_000
-RISK_FRACTION = 0.01
+# Size by confluence (2026-10-16, was a flat 1%): the entry alert carries DTS
+# Entry's setup grade (points for clean trend, VWAP side, beyond the opening
+# range, beyond the prior-week level; OUTSIDE = beyond both PDH/PMH or PDL/PML).
+# Only the strongest confluence gets the full 5%. With MAX_OPEN_POSITIONS = 5,
+# at most 25% of the account is in premium at once.
+SIZE_BY_GRADE = {
+    "A+ OUTSIDE": 0.05,    # all 4 confirmations and outside the day + premarket range
+    "A OUTSIDE": 0.035,    # 3 of 4, outside
+}
+SIZE_DEFAULT = 0.025       # everything else, and alerts without a grade
 MIN_CONTRACTS = 1            # if 1% buys less than one contract, buy one anyway
 
 # Contract selection. Expiry: this week's last listed expiry (normally Friday),
@@ -49,6 +58,7 @@ STRIKES_TO_TRY = 4           # fallback: nearest strikes tried for a single cont
 TARGET_CONTRACTS = 4
 MIN_CONTRACTS_TO_TRIM = 2
 MIN_DELTA = 0.15             # weeklies held 1-2 days: further OTM is fine, rides the volatility spike (was 0.25 until 2026-10-16)
+MIN_DELTA_0DTE = 0.15        # expiry day (normally Friday): explicit so a later weekday change doesn't touch it; 0.25 is hard to find out of the money on 0DTE
 STRIKES_TO_SCAN = 12          # out-of-the-money strikes examined beyond the nearest one
 MIN_OPEN_INTEREST = 100
 MAX_SPREAD_FRACTION = 0.15   # (ask - bid) / mid must be at or below this
