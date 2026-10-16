@@ -286,7 +286,8 @@ def choose_contract(broker, sig, today):
     snap = broker.snapshot([opts[k].streamer_symbol for k in look])
     quotes = {k: snap.get(opts[k].streamer_symbol) or {} for k in look}
     nlv, _ = broker.nlv()
-    k, qty, rule, delta = contracts.choose_strike(quotes, sig.price, right, nlv * settings.RISK_FRACTION)
+    move = abs(sig.target - sig.price) if sig.target else None
+    k, qty, rule, delta = contracts.choose_strike(quotes, sig.price, right, nlv * settings.RISK_FRACTION, move)
     if k is None:
         return None, f"{rule} ({right}, {expiry})"
     return {"ticker": sig.ticker, "right": right, "expiry": expiry.isoformat(),
@@ -305,6 +306,10 @@ def on_entry(broker, state, sig, t):
         return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nOutside the regular session")
     if sig.ticker in state["positions"]:
         return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nAlready holding <b>{h(describe(state['positions'][sig.ticker]))}</b>")
+    if sig.stop is not None and contracts.stop_pct(sig.price, sig.stop) < settings.MIN_STOP_PCT:
+        why = f"stop too tight: {contracts.stop_pct(sig.price, sig.stop):.2f}% of price (min {settings.MIN_STOP_PCT:g}%)"
+        skip(state, sig, t, why)
+        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\nStop {sig.stop} · Target {sig.target}\n\n<b>{h(why)}</b>")
     if len(state["positions"]) >= settings.MAX_OPEN_POSITIONS:
         skip(state, sig, t, f"position limit ({settings.MAX_OPEN_POSITIONS} open)")
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\nAlready at the limit of {settings.MAX_OPEN_POSITIONS} open positions")

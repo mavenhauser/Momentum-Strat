@@ -1,7 +1,7 @@
 import unittest
 from datetime import date
 
-from day_trading_setup.executor import contracts, signals
+from day_trading_setup.executor import settings, contracts, signals
 
 
 class ParseTest(unittest.TestCase):
@@ -107,6 +107,25 @@ class ContractTest(unittest.TestCase):
               515: wide(0.30), 520: self.q(9.00, 9.40, 0.22)}
         k, qty, rule, d = contracts.choose_strike(qs, 500.5, "C", 1000)
         self.assertEqual((k, qty), (520, 1))
+
+    def test_stop_pct(self):
+        self.assertAlmostEqual(contracts.stop_pct(250.0, 249.75), 0.1)
+        self.assertLess(contracts.stop_pct(250.0, 249.75), settings.MIN_STOP_PCT)
+        self.assertGreaterEqual(contracts.stop_pct(460.98, 464.66), settings.MIN_STOP_PCT)
+
+    def test_spread_filter_moves_to_a_tighter_strike(self):
+        # target $0.50 away: the wide at-the-money strike fails (0.5*0.5 < 2*0.40),
+        # the tight one next to it passes (0.45*0.5 >= 2*0.10)
+        qs = {250: self.q(2.00, 2.40, 0.50), 252.5: self.q(1.00, 1.10, 0.45)}
+        k, qty, rule, d = contracts.choose_strike(qs, 250.1, "C", 1000, move=0.50)
+        self.assertEqual((k, qty), (252.5, 9))
+
+    def test_spread_filter_skips(self):
+        # JNJ-like: every strike's spread is too wide for a $0.50 target
+        qs = {250: self.q(2.00, 2.30, 0.50), 252.5: self.q(1.00, 1.15, 0.40)}
+        k, qty, rule, d = contracts.choose_strike(qs, 250.1, "C", 1000, move=0.50)
+        self.assertIsNone(k)
+        self.assertIn("too small for the option spread", rule)
 
     def test_sessions(self):
         self.assertEqual(contracts.sessions_held(date(2026, 10, 15), date(2026, 10, 15)), 1)   # Thu

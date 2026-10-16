@@ -53,6 +53,16 @@ STRIKES_TO_SCAN = 12          # out-of-the-money strikes examined beyond the nea
 MIN_OPEN_INTEREST = 100
 MAX_SPREAD_FRACTION = 0.15   # (ask - bid) / mid must be at or below this
 
+# Trade filters (2026-10-16, from the Oct 14-15 dry runs).
+# Skip entries whose TradingView stop is closer than this to the entry, as a %
+# of price: on those days every such stop was a one-bar stop-out or a target
+# smaller than the option spread (8 trades, -$2,557 realistic).
+MIN_STOP_PCT = 0.20
+# The option's expected gain at the 2R target (|delta| x the stock move to the
+# target) must be at least this multiple of the strike's bid/ask spread, or the
+# spread eats the win (JNJ on Oct 14: TradingView 2R winner, options -$1,755).
+MIN_TARGET_TO_SPREAD = 2.0
+
 # At the 2R alert: sell half (rounded down). A single contract is held through 2R
 # and exits on the trail, break-even, stop or time exit.
 TRIM_FRACTION = 0.5

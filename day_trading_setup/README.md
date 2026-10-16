@@ -418,6 +418,19 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
 | `DTS: EXIT … (STOP / BE / TRAIL / EOD / TIME)` | Sells the rest. |
 | `DTS: A+ OUTSIDE …` | Nothing (information only). |
 
+- **Trade filters** (since 2026-10-16, from the Oct 14–15 dry runs). An
+  entry is skipped, and logged as skipped, when:
+  - **the stop is too tight:** TradingView's stop is less than **0.20%** of
+    the price from the entry (`MIN_STOP_PCT`). On those two days every such
+    trade was a one-bar stop-out or a target smaller than the option spread:
+    8 trades, −$2,557 realistic.
+  - **the target doesn't cover the spread:** for every strike considered, the
+    option's expected gain at the 2R target (|delta| × the stock's move to
+    the target) must be at least **2×** its bid/ask spread
+    (`MIN_TARGET_TO_SPREAD`). The ladder moves on to a strike that passes;
+    if none does, the entry is skipped. JNJ on Oct 14 was a TradingView 2R
+    winner that lost $1,755 in options for this reason.
+
 - **Holding:** DTS Entry runs with *Flat by 15:55* off and *Max sessions
   held* = 2, so a trade can be held overnight and is closed by a `TIME`
   exit at 15:55 the next session.
@@ -467,6 +480,7 @@ venv/bin/python3 -m day_trading_setup.executor.executor --status
 | `com.jameswoo.dts-receiver` | The webhook receiver, always on. Log: `logs/dts_receiver.log`. |
 | `com.jameswoo.dts-tunnel` | ngrok to port 8090, always on. Log: `~/.dts-executor/dts-tunnel.log`. Uses the static ngrok address that the SPX project's (currently stopped) tunnel also uses, so only one of the two can be online. |
 | `com.jameswoo.dts-sweep` | The 15:56 ET safety sweep, every minute. |
+| `com.jameswoo.dts-keepawake` | Keeps the Mac awake Mon–Fri 09:10–16:10 New York time (`caffeinate`), checked every 2 minutes. Script: `scripts/dts_keepawake.sh`, installed copy in `~/.dts-executor/`. Log: `~/.dts-executor/keepawake.log`. It cannot stop sleep when the lid is closed (unless an external display is attached), only prevents system sleep on AC power, and cannot wake a Mac that is already asleep: for that, `sudo pmset repeat wake MTWRF 21:05:00` (Singapore time for 09:05 ET in daylight time; 22:05 from Nov 2). |
 
 The URL secret is in `~/.dts-executor/secret` (owner-only). The daily
 screener job writes it into each alert's webhook, so changing the secret
