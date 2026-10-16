@@ -62,7 +62,10 @@
   @media (max-width: 680px) { .equity { grid-template-columns: 1fr; } }
   .equity .label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); }
   .equity .big { display: block; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 2.1rem; font-weight: 700; letter-spacing: -0.01em; line-height: 1.15; margin-top: 0.2rem; overflow-wrap: anywhere; }
-  .equity .chg { display: block; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 600; margin-top: 0.15rem; }
+  .equity .rets { display: flex; flex-wrap: wrap; gap: 0.4rem 1.6rem; margin-top: 0.7rem; }
+  .equity .ret { display: flex; flex-direction: column; gap: 0.1rem; }
+  .equity .ret .pct { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.2rem; font-weight: 700; }
+  .equity .ret .amt { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 12px; color: var(--ink-soft); }
   .equity svg { display: block; width: 100%; height: auto; max-width: 100%; }
   .equity .axis { font-family: var(--mono); font-size: 9px; fill: var(--ink-faint); }
   .stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; margin-top: 1.2rem; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 3px; }
@@ -325,6 +328,13 @@
     let cum = 0;
     for (const k of keys) { cum += num(S.days[k].summary?.pnl_real) || 0; pts.push({ d: k, v: start + cum }); }
     const now = start + cum, pct = start ? (cum / start) * 100 : 0;
+    // Month return: the viewed month's P&L over the balance at the start of that month.
+    const mKey = (k) => { const t = monthOf(k); return t.y * 12 + t.m; }; const cur = S.month.y * 12 + S.month.m;
+    const before = keys.filter((k) => mKey(k) < cur).reduce((a, k) => a + (num(S.days[k].summary?.pnl_real) || 0), 0);
+    const mKeys = keys.filter((k) => mKey(k) === cur); const mDays = mKeys.length;
+    const mPnl = mKeys.reduce((a, k) => a + (num(S.days[k].summary?.pnl_real) || 0), 0);
+    const mPct = (start + before) ? (mPnl / (start + before)) * 100 : 0;
+    const pctTxt = (x) => `${x > 0 ? "+" : x < 0 ? "−" : ""}${Math.abs(x).toFixed(2)}%`;
     const since = st.start_date ? parseDay(st.start_date).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "";
     // equity curve: one scale for marks and labels, start = first point
     const W = 320, H = 92, L = 4, R = 4, T = 10, B = 18;
@@ -341,7 +351,10 @@
       <div>
         <span class="label">Strategy account</span>
         <span class="big">$${Math.round(now).toLocaleString("en-US")}</span>
-        <span class="chg ${tone(cum)}">${money(cum)} (${cum >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(2)}%) since ${esc(since)}</span>
+        <div class="rets">
+          <div class="ret"><span class="label">${esc(MONTHS[S.month.m])} return</span><span class="pct ${mDays ? tone(mPnl) : ""}">${mDays ? pctTxt(mPct) : "—"}</span><span class="amt">${mDays ? money(mPnl) : "no trades yet"}</span></div>
+          <div class="ret"><span class="label">Total return</span><span class="pct ${tone(cum)}">${pctTxt(pct)}</span><span class="amt">${money(cum)} since ${esc(since)}</span></div>
+        </div>
       </div>
       <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Strategy account from $${Math.round(start).toLocaleString("en-US")} to $${Math.round(now).toLocaleString("en-US")} over ${keys.length} trading day${keys.length === 1 ? "" : "s"}">
         <line x1="${L}" x2="${W - R}" y1="${yb}" y2="${yb}" stroke="var(--rule-strong)" stroke-dasharray="3 3" stroke-width="1"></line>
@@ -354,9 +367,9 @@
   }
 
   function render() {
-    renderEquity();
     const keys = Object.keys(S.days).sort();
     if (!S.month) S.month = keys.length ? monthOf(keys[keys.length - 1]) : monthOf(nyToday());
+    renderEquity();
     if (!S.selected && keys.length) S.selected = keys[keys.length - 1];
     renderCal(); renderDetail(); renderChanges();
     const empty = $("empty");
