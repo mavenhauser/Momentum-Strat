@@ -9,15 +9,26 @@ def week_friday(today: date) -> date:
     return today + timedelta(days=(4 - today.weekday()) % 7)
 
 
-def pick_expiry(expiries, today: date):
+def pick_expiry(expiries, today: date, now_hm=None):
     """This week's last listed expiry on or before Friday (normally Friday itself;
     Thursday when Friday is a market holiday), including today (0DTE on Friday).
     Falls back to the nearest expiry after today if the ticker has no weekly
-    this week. Returns None if nothing is listed."""
+    this week. Returns None if nothing is listed.
+
+    now_hm: (hour, minute) New York time. If this week's expiry is today and it is
+    before NO_0DTE_BEFORE, next week's expiry is used instead (2026-10-16): in the
+    first hour a same-day option's time value and opening volatility bleed out
+    faster than the move pays (MSFT 537.5P, Oct 16: 2R hit, option -37%)."""
     friday = week_friday(today)
     this_week = sorted(d for d in expiries if today <= d <= friday)
     if this_week:
-        return this_week[-1]
+        pick = this_week[-1]
+        if pick == today and now_hm is not None and now_hm < settings.NO_0DTE_BEFORE:
+            nxt = week_friday(today + timedelta(days=7))
+            next_week = sorted(d for d in expiries if friday < d <= nxt)
+            if next_week:
+                return next_week[-1]
+        return pick
     later = sorted(d for d in expiries if d >= today)
     return later[0] if later else None
 

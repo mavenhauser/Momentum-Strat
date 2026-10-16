@@ -61,6 +61,9 @@ ATM_TOLERANCE_PCT = 0.10
 TARGET_CONTRACTS = 4
 MIN_CONTRACTS_TO_TRIM = 2
 MIN_DELTA = 0.15             # weeklies held 1-2 days: further OTM is fine, rides the volatility spike (was 0.25 until 2026-10-16)
+# On expiry day, entries before this New York time buy next week's expiry instead of
+# the same-day one (2026-10-16).
+NO_0DTE_BEFORE = (10, 30)
 MIN_DELTA_0DTE = 0.15        # expiry day (normally Friday): explicit so a later weekday change doesn't touch it; 0.25 is hard to find out of the money on 0DTE
 STRIKES_TO_SCAN = 12          # out-of-the-money strikes examined beyond the nearest one
 MIN_OPEN_INTEREST = 100

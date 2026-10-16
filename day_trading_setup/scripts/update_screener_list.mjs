@@ -57,6 +57,10 @@ const WEBHOOK_SECRET_FILE = `${process.env.HOME}/.dts-executor/secret`;
 const apply = process.argv.includes('--apply');
 const alertsPlan = process.argv.includes('--alerts-plan');
 const alerts = process.argv.includes('--alerts') || alertsPlan;
+// --list "AMD, NVDA, NYSE:KO, ...": re-sync the alerts for exactly this list (e.g. mid-session
+// after a new DTS Entry version) without rebuilding it or touching the chart, so names with
+// open positions keep their alerts. Use with --alerts (or --alerts-plan to preview).
+const listArg = (() => { const i = process.argv.indexOf('--list'); return i > 0 ? process.argv[i + 1] : null; })();
 const done = (code, obj) => { process.stdout.write(JSON.stringify(obj, null, 2) + '\n'); process.exit(code); };
 const timer = setTimeout(() => done(1, { error: 'timed out' }), alerts ? 150000 : 40000);
 
@@ -263,7 +267,17 @@ async function writeToTradingView(listText) {
   return written;
 }
 
-try {
+if (listArg) {
+  try {
+    const items = listArg.split(',').map(s => s.trim()).filter(Boolean);
+    const alertTickers = items.map(s => { const [ex, sym] = s.includes(':') ? s.split(':') : [null, s];
+      return { ticker: sym, symbols: ex ? [`${FEED}:${sym}`, s] : [`${FEED}:${sym}`] }; });
+    const out = { as_of_new_york: new Date().toLocaleString('sv-SE', { timeZone: 'America/New_York' }), list: items.join(', '), mode: 'kept list' };
+    if (alerts) out.alerts = await syncAlerts(alertTickers, alertsPlan);
+    clearTimeout(timer);
+    done(out.alerts && out.alerts.errors.length ? 1 : 0, out);
+  } catch (e) { done(1, { error: String(e && e.message || e) }); }
+} else try {
   const mom = momentumTickers();
   const mag7Added = MAG7.filter(t => !mom.list.includes(t));
   const fixed = [...mom.list, ...mag7Added];

@@ -265,7 +265,9 @@ if pos != 0 and bar_index > entBar
             alert("DTS: EXIT " + (pos == 1 ? "LONG " : "SHORT ") + syminfo.ticker + " (" + exitTxt + ") @ " + fmt(exitPx), alert.freq_once_per_bar_close)
         pos := 0
     else if tgtNow and exitAlerts
-        alert("DTS: " + syminfo.ticker + " hit " + str.tostring(rr) + "R target @ " + fmt(tgtPx) + " - take partial, stop to break-even " + fmt(entPx), alert.freq_once_per_bar_close)
+        // On the first tick that touches the target (2026-10-16), not at the bar close:
+        // by the close price had often bounced back and the option gain was gone.
+        alert("DTS: " + syminfo.ticker + " hit " + str.tostring(rr) + "R target @ " + fmt(tgtPx) + " - take partial, stop to break-even " + fmt(entPx), alert.freq_once_per_bar)
 
 // --- Arm on a key-level breakout (highest level broken wins for longs, lowest for shorts).
 float  upLvl = na

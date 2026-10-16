@@ -273,11 +273,12 @@ def signal_line(sig):
     return f"<b>{h(sig.side)} {h(sig.ticker)}</b>"
 
 
-def choose_contract(broker, sig, today):
+def choose_contract(broker, sig, t):
+    today = t.date()
     from tastytrade.instruments import OptionType
     right = "C" if sig.side == "LONG" else "P"
     chain = broker.chain(sig.ticker)
-    expiry = contracts.pick_expiry(list(chain.keys()), today)
+    expiry = contracts.pick_expiry(list(chain.keys()), today, (t.hour, t.minute))
     if expiry is None:
         return None, "no option expiries listed"
     opts = {float(o.strike_price): o for o in chain[expiry] if o.option_type == OptionType(right)}
@@ -315,7 +316,7 @@ def on_entry(broker, state, sig, t):
     if len(state["positions"]) >= settings.MAX_OPEN_POSITIONS:
         skip(state, sig, t, f"position limit ({settings.MAX_OPEN_POSITIONS} open)")
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\nAlready at the limit of {settings.MAX_OPEN_POSITIONS} open positions")
-    pos, why = choose_contract(broker, sig, t.date())
+    pos, why = choose_contract(broker, sig, t)
     if not pos:
         skip(state, sig, t, why)
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n{h(why)}")
