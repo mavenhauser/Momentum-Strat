@@ -48,7 +48,7 @@ STRIKES_TO_TRY = 4           # fallback: nearest strikes tried for a single cont
 # below MIN_DELTA. If none qualifies, buy 1 contract of the nearest liquid strike.
 TARGET_CONTRACTS = 4
 MIN_CONTRACTS_TO_TRIM = 2
-MIN_DELTA = 0.25
+MIN_DELTA = 0.15             # weeklies held 1-2 days: further OTM is fine, rides the volatility spike (was 0.25 until 2026-10-16)
 STRIKES_TO_SCAN = 12          # out-of-the-money strikes examined beyond the nearest one
 MIN_OPEN_INTEREST = 100
 MAX_SPREAD_FRACTION = 0.15   # (ask - bid) / mid must be at or below this

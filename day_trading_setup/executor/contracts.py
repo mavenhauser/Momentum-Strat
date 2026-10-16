@@ -75,7 +75,8 @@ def choose_strike(quotes: dict, entry: float, right: str, budget: float):
 
       1. nearest-the-money strike on the ladder buying >= TARGET_CONTRACTS, delta >= MIN_DELTA
       2. else the same buying >= MIN_CONTRACTS_TO_TRIM
-      3. else 1 contract of the nearest liquid strike (held through 2R)
+      3. else 1 contract of the nearest liquid strike, near the money first then
+         out along the ladder (held through 2R)
     """
     ladder = strike_ladder(quotes.keys(), entry, right, settings.STRIKES_TO_SCAN)
 
@@ -92,9 +93,10 @@ def choose_strike(quotes: dict, entry: float, right: str, budget: float):
         for k in ladder:
             if ok(k) and qty_at(k) >= need:
                 return k, qty_at(k), rule, quotes[k].get("delta")
-    for k in strikes_by_distance(quotes.keys(), entry, settings.STRIKES_TO_TRY):
+    near = strikes_by_distance(quotes.keys(), entry, settings.STRIKES_TO_TRY)
+    for k in near + [k for k in ladder if k not in near]:
         if liquid(quotes[k]):
-            return k, max(1, qty_at(k)), "1 contract (none cheap enough for 2 at delta 0.25+), held through 2R", quotes[k].get("delta")
+            return k, max(1, qty_at(k)), f"1 contract (none cheap enough for 2 at delta {settings.MIN_DELTA}+), held through 2R", quotes[k].get("delta")
     return None, 0, "no liquid strike near the entry price", None
 
 

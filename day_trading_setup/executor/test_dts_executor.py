@@ -73,25 +73,40 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(contracts.choose_strike(qs, 218.0, "P", 1000)[:2], (217.5, 6))
 
     def test_choose_steps_out_for_four(self):
-        # MSFT-like puts, entry 536: step out until 4 contracts, delta still >= 0.25
+        # MSFT-like puts, entry 536: step out until 4 contracts, delta still >= 0.15
         qs = {537.5: self.q(6.05, 7.00, -0.72), 535: self.q(4.70, 5.35, -0.62), 532.5: self.q(3.65, 3.95, -0.53),
               530: self.q(2.60, 2.85, -0.43), 527.5: self.q(2.20, 2.45, -0.33), 525: self.q(1.40, 1.55, -0.24)}
         k, qty, rule, d = contracts.choose_strike(qs, 536.0, "P", 1000)
         self.assertEqual((k, qty), (527.5, 4))
         self.assertTrue(rule.startswith("4+"))
 
-    def test_choose_two_when_four_needs_low_delta(self):
-        # only the 0.20-delta strike would buy 4: settle for 2 contracts closer in
+    def test_choose_further_otm_down_to_min_delta(self):
+        # weeklies: the 0.20-delta strike is allowed (floor 0.15) and buys 5
         qs = {100: self.q(4.90, 5.10, 0.55), 102.5: self.q(3.80, 4.00, 0.45), 105: self.q(2.85, 3.00, 0.34),
               107.5: self.q(1.90, 2.00, 0.20)}
+        k, qty, rule, d = contracts.choose_strike(qs, 100.2, "C", 1000)
+        self.assertEqual((k, qty), (107.5, 5))
+
+    def test_choose_two_when_four_needs_too_low_delta(self):
+        # only the 0.10-delta strike would buy 4: settle for 2 contracts closer in
+        qs = {100: self.q(4.90, 5.10, 0.55), 102.5: self.q(3.80, 4.00, 0.45), 105: self.q(2.85, 3.00, 0.34),
+              107.5: self.q(1.90, 2.00, 0.10)}
         k, qty, rule, d = contracts.choose_strike(qs, 100.2, "C", 1000)
         self.assertEqual((k, qty), (102.5, 2))
 
     def test_choose_single_contract(self):
-        qs = {500: self.q(11.00, 11.40, 0.52), 505: self.q(8.40, 8.80, 0.43), 510: self.q(6.10, 6.40, 0.33), 515: self.q(4.20, 4.45, 0.22)}
+        qs = {500: self.q(11.00, 11.40, 0.52), 505: self.q(8.40, 8.80, 0.43), 510: self.q(6.10, 6.40, 0.33), 515: self.q(5.80, 6.05, 0.12)}
         k, qty, rule, d = contracts.choose_strike(qs, 500.5, "C", 1000)
         self.assertEqual((k, qty), (500, 1))
         self.assertIn("held through 2R", rule)
+
+    def test_single_contract_searches_out_the_ladder(self):
+        # the near strikes are too wide to trade: take the first liquid one further out
+        wide = lambda d: self.q(5.00, 7.00, d)
+        qs = {500: wide(0.52), 505: wide(0.45), 510: wide(0.38), 495: wide(0.60),
+              515: wide(0.30), 520: self.q(9.00, 9.40, 0.22)}
+        k, qty, rule, d = contracts.choose_strike(qs, 500.5, "C", 1000)
+        self.assertEqual((k, qty), (520, 1))
 
     def test_sessions(self):
         self.assertEqual(contracts.sessions_held(date(2026, 10, 15), date(2026, 10, 15)), 1)   # Thu
