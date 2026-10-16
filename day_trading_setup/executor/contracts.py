@@ -30,13 +30,11 @@ def strikes_by_distance(strikes, price: float, limit: int):
 def liquid(quote) -> bool:
     if not quote:
         return False
-    bid, ask, oi, vol = quote.get("bid"), quote.get("ask"), quote.get("open_interest"), quote.get("volume")
+    bid, ask, oi = quote.get("bid"), quote.get("ask"), quote.get("open_interest")
     if bid is None or ask is None or bid <= 0 or ask <= 0 or ask < bid:
         return False
     mid = (bid + ask) / 2
     if (ask - bid) / mid > settings.MAX_SPREAD_FRACTION:
-        return False
-    if vol is None or not vol >= settings.MIN_OPTION_VOLUME:     # also rejects NaN
         return False
     return oi is None or oi >= settings.MIN_OPEN_INTEREST
 
@@ -95,7 +93,7 @@ def covers_spread(quote, move) -> bool:
 def choose_strike(quotes: dict, entry: float, right: str, budget: float, move: float = None, min_delta: float = None):
     """Pick the strike and quantity for one entry.
 
-    quotes: {strike: {"bid", "ask", "delta", "open_interest", "volume"}} for the ladder and the
+    quotes: {strike: {"bid", "ask", "delta", "open_interest"}} for the ladder and the
     nearest strikes. Returns (strike, qty, rule, delta) or (None, 0, reason, None).
 
       1. nearest-the-money strike on the ladder buying >= TARGET_CONTRACTS, delta >= MIN_DELTA
@@ -132,7 +130,7 @@ def choose_strike(quotes: dict, entry: float, right: str, budget: float, move: f
                 return k, max(1, qty_at(k)), f"1 contract (none cheap enough for 2 at delta {floor}+), held through 2R", quotes[k].get("delta")
     if any_liquid:
         return None, 0, f"2R target too small for the option spread (needs gain at target >= {settings.MIN_TARGET_TO_SPREAD:g}x spread)", None
-    return None, 0, f"no liquid strike at or out of the money (spread <= {settings.MAX_SPREAD_FRACTION:.0%}, OI >= {settings.MIN_OPEN_INTEREST}, volume >= {settings.MIN_OPTION_VOLUME})", None
+    return None, 0, "no liquid strike at or out of the money", None
 
 
 def sessions_held(entry_day: date, today: date) -> int:

@@ -64,7 +64,6 @@ MIN_DELTA = 0.15             # weeklies held 1-2 days: further OTM is fine, ride
 MIN_DELTA_0DTE = 0.15        # expiry day (normally Friday): explicit so a later weekday change doesn't touch it; 0.25 is hard to find out of the money on 0DTE
 STRIKES_TO_SCAN = 12          # out-of-the-money strikes examined beyond the nearest one
 MIN_OPEN_INTEREST = 100
-MIN_OPTION_VOLUME = 500     # contracts traded today in that strike (2026-10-16); unknown volume fails
 MAX_SPREAD_FRACTION = 0.15   # (ask - bid) / mid must be at or below this
 
 # Trade filters (2026-10-16, from the Oct 14-15 dry runs).
