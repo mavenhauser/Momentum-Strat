@@ -177,7 +177,7 @@ def build_day(day, mode="dry"):
     state = json.loads(path.read_text()) if path.exists() else {"positions": {}, "closed": [], "skipped": []}
     lines = _log_lines()
     rp = reprice.reprice_path("paper" if mode == "paper" else "dry")
-    repriced = json.loads(rp.read_text()) if rp.exists() else {}
+    repriced = json.loads(rp.read_text()) if rp.exists() and day.isoformat() >= settings.REPRICE_FROM else {}
     real_entries = lambda t: t.get("opened_at", "") >= "2026-10-14T09:30"   # earlier rows are setup tests
     closed = [t for t in state["closed"] if real_entries(t) and _ny(t["closed_at"]).date() == day]
     closed.sort(key=lambda t: t["opened_at"])
