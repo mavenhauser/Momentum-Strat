@@ -50,7 +50,10 @@ MIN_CONTRACTS = 1            # if 1% buys less than one contract, buy one anyway
 # even on Friday itself (0DTE), per the agreed rule. Strike: nearest to the
 # TradingView entry price; if that strike fails the liquidity check, the next
 # nearest is tried.
-STRIKES_TO_TRY = 4           # fallback: nearest strikes tried for a single contract
+# Never in the money (2026-10-16): the ladder starts at the at-the-money strike.
+# A strike in the money by no more than this % of the price still counts as at
+# the money (e.g. the 217.5 call with the stock at 217.70).
+ATM_TOLERANCE_PCT = 0.10
 # Strike ladder (2026-10-15): from the strike nearest the money, step out of the
 # money until a strike buys TARGET_CONTRACTS within the budget; failing that,
 # MIN_CONTRACTS_TO_TRIM (so half can be sold at 2R and half trailed); never

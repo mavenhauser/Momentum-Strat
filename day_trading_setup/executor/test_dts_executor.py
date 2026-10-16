@@ -85,7 +85,17 @@ class ContractTest(unittest.TestCase):
     def test_ladder(self):
         ks = [210, 212.5, 215, 217.5, 220, 222.5, 225]
         self.assertEqual(contracts.strike_ladder(ks, 218.1, "P", 3), [217.5, 215, 212.5, 210])
-        self.assertEqual(contracts.strike_ladder(ks, 218.1, "C", 3), [217.5, 220, 222.5, 225])
+        self.assertEqual(contracts.strike_ladder(ks, 218.1, "C", 3), [220, 222.5, 225])        # 217.5 call is ITM
+        self.assertEqual(contracts.strike_ladder(ks, 217.6, "C", 3), [217.5, 220, 222.5, 225])  # 0.05% ITM = at the money
+        self.assertEqual(contracts.strike_ladder(ks, 217.4, "P", 2), [217.5, 215, 212.5])       # 0.05% ITM put = at the money
+        self.assertEqual(contracts.strike_ladder(ks, 216.0, "P", 2), [215, 212.5, 210])         # 217.5 put is ITM
+
+    def test_never_in_the_money(self):
+        # only the ITM strike is cheap and liquid enough: nothing ITM is ever bought
+        qs = {215: self.q(3.00, 3.10, 0.70), 220: self.q(0.50, 0.70, 0.30), 222.5: self.q(0.20, 0.40, 0.18)}
+        k, qty, rule, d = contracts.choose_strike(qs, 218.1, "C", 1000)
+        self.assertNotEqual(k, 215)
+        self.assertIsNone(k)
 
     def test_choose_four_at_the_money(self):
         # NVDA-like puts, entry 218: the at-the-money strike already buys 6
@@ -117,7 +127,7 @@ class ContractTest(unittest.TestCase):
 
     def test_choose_single_contract(self):
         qs = {500: self.q(11.00, 11.40, 0.52), 505: self.q(8.40, 8.80, 0.43), 510: self.q(6.10, 6.40, 0.33), 515: self.q(5.80, 6.05, 0.12)}
-        k, qty, rule, d = contracts.choose_strike(qs, 500.5, "C", 1000)
+        k, qty, rule, d = contracts.choose_strike(qs, 500.3, "C", 1000)
         self.assertEqual((k, qty), (500, 1))
         self.assertIn("held through 2R", rule)
 

@@ -282,7 +282,6 @@ def choose_contract(broker, sig, today):
         return None, "no option expiries listed"
     opts = {float(o.strike_price): o for o in chain[expiry] if o.option_type == OptionType(right)}
     look = set(contracts.strike_ladder(opts.keys(), sig.price, right, settings.STRIKES_TO_SCAN))
-    look |= set(contracts.strikes_by_distance(opts.keys(), sig.price, settings.STRIKES_TO_TRY))
     snap = broker.snapshot([opts[k].streamer_symbol for k in look])
     quotes = {k: snap.get(opts[k].streamer_symbol) or {} for k in look}
     nlv, _ = broker.nlv()

@@ -61,15 +61,17 @@ def trim_quantity(open_qty: int) -> int:
 
 
 def strike_ladder(strikes, entry: float, right: str, n_otm: int):
-    """The strike nearest the TradingView entry price, then strikes further out of
-    the money (higher for calls, lower for puts), nearest first."""
-    strikes = sorted(set(strikes))
-    if not strikes:
-        return []
-    nearest = min(strikes, key=lambda k: (abs(k - entry), k))
-    otm = [k for k in strikes if (k > nearest if right == "C" else k < nearest)]
-    otm.sort(key=lambda k: abs(k - nearest))
-    return [nearest] + otm[:n_otm]
+    """At-the-money strike, then strikes further out of the money (higher for
+    calls, lower for puts), nearest first. Never in the money (2026-10-16): the
+    first rung is the nearest strike at or out of the money, where a strike that
+    is in the money by no more than ATM_TOLERANCE_PCT of the price counts as at
+    the money."""
+    tol = entry * settings.ATM_TOLERANCE_PCT / 100
+    if right == "C":
+        ok = sorted(k for k in set(strikes) if k >= entry - tol)
+    else:
+        ok = sorted((k for k in set(strikes) if k <= entry + tol), reverse=True)
+    return ok[:n_otm + 1]
 
 
 def stop_pct(entry: float, stop: float) -> float:
@@ -96,8 +98,9 @@ def choose_strike(quotes: dict, entry: float, right: str, budget: float, move: f
 
       1. nearest-the-money strike on the ladder buying >= TARGET_CONTRACTS, delta >= MIN_DELTA
       2. else the same buying >= MIN_CONTRACTS_TO_TRIM
-      3. else 1 contract of the nearest liquid strike, near the money first then
-         out along the ladder (held through 2R)
+      3. else 1 contract of the first liquid strike on the ladder (held through 2R)
+
+    Every candidate is on the ladder: at the money or out of the money, never in.
 
     move: the stock's move from entry to the 2R target. When given, every rule
     also requires the strike to pass covers_spread().
@@ -119,16 +122,15 @@ def choose_strike(quotes: dict, entry: float, right: str, budget: float, move: f
         for k in ladder:
             if ok(k) and qty_at(k) >= need:
                 return k, qty_at(k), rule, quotes[k].get("delta")
-    near = strikes_by_distance(quotes.keys(), entry, settings.STRIKES_TO_TRY)
     any_liquid = False
-    for k in near + [k for k in ladder if k not in near]:
+    for k in ladder:
         if liquid(quotes[k]):
             any_liquid = True
             if covers_spread(quotes[k], move):
                 return k, max(1, qty_at(k)), f"1 contract (none cheap enough for 2 at delta {floor}+), held through 2R", quotes[k].get("delta")
     if any_liquid:
         return None, 0, f"2R target too small for the option spread (needs gain at target >= {settings.MIN_TARGET_TO_SPREAD:g}x spread)", None
-    return None, 0, "no liquid strike near the entry price", None
+    return None, 0, "no liquid strike at or out of the money", None
 
 
 def sessions_held(entry_day: date, today: date) -> int:
