@@ -749,15 +749,18 @@
       <li><b>A "gain at target ≥ 2× spread" filter</b> would have skipped only the two JNJ trades (about +$1,760 better). The quick stop-outs (TSLA, CVX, AVGO) need a minimum stop distance instead.</li>
       <li><b>The 5-position cap</b> skipped 12 signals and filled with correlated short-tech trades. One more AMD entry was lost to an option-chain timeout.</li>
     </ul>
-    <h3 class="sub">Lessons, checked against the second session (2026-10-15)</h3>
+    <h3 class="sub">Lessons at true prices (Oct 14–16, 33 trades)</h3>
+    <p style="font-size: 14px; color: var(--ink-soft);">On Oct 16 it turned out the executor's option quotes were the 15-minute-delayed TastyTrade demo feed. Every fill was re-priced from 1-minute option history (realistic: true price ± half the spread). The figures below replace the earlier ones. Returns are per dollar of premium, so days with different sizes compare fairly.</p>
     <ol class="plain">
-      <li><b>The money is in the trailed half.</b> On Oct 14 the six trades whose stop was 0.3% of price or more (NVDA, DELL, MSFT, TSLA #2, PLTR, IBM) all reached 2R and trailed: +$14,468 realistic, 6 of 6. Selling half at 2R pays for the trade; the runner makes the day.</li>
-      <li><b>Tiny stops are noise.</b> Stops under about 0.2% of price lost on both days: CVX, JNJ ×2, TSLA #1 on Oct 14; C, MRK and AVGO (a 0.04% stop) on Oct 15. A minimum stop distance is the strongest filter candidate.</li>
-      <li><b>A TradingView winner can be an options loser.</b> JNJ's 2R target was $0.50 on the stock against a $0.40 option spread: −$1,755. The option's gain at the target should be at least 2× the spread.</li>
-      <li><b>Trade with the tape.</b> Oct 14 trended down and the shorts after 11:00 paid. Oct 15 turned up mid-session: longs and shorts alike stopped out, but at 1% size the nine entries cost only −$202. The UNH call carried overnight from Oct 14 made +$850, so the 2-session hold earned its keep.</li>
-      <li><b>Weeklies can go further out of the money.</b> From Oct 16 the strike ladder accepts down to 0.15 delta (was 0.25), so each trade's budget buys more contracts that gain more from a volatility spike. If no strike is cheap enough for 2, the single-contract fallback now searches out the ladder too, so thin names like JNJ and PM puts are less likely to be skipped.</li>
-      <li><b>Keep the Mac awake.</b> Most of the "TWS lag" was the laptop sleeping: idle sleep at 15:35 ET on Oct 14, lid closed at 14:38 ET on Oct 15 (UNH's exit and the sweep never ran), and asleep before the Oct 15 open.</li>
+      <li><b>The setup works when it reaches 2R.</b> 17 trades reached 2R: 16 made money, averaging +65% of premium. The 15 that stopped out first averaged −31%. The trailed half makes most of it (CRWD 232.5P +308%, MSFT 535P +294%, META +218% on Oct 16).</li>
+      <li><b>Tiny stops lose.</b> Stops under 0.20% of price: 8 trades, 25% winners, −8% average. At 0.20% or more: 25 trades, 60% winners, +37% average. The 0.20% filter stays.</li>
+      <li><b>The first hour is the weak spot, on every day.</b> Entries before 10:30 ET: 8 trades, 2 winners, −25% average. 10:30–12:00: +47%. From 12:00: +32%. Passing the stop filter and entering from 10:30 on: 18 trades, 72% winners, +60% average.</li>
+      <li><b>The JNJ "spread ate the win" lesson was the delayed quotes.</b> At true prices JNJ #2 made money. The 2× spread filter is kept as a sanity check, not as a proven edge.</li>
+      <li><b>Very cheap options are lottery tickets.</b> KO 94C at $0.05 (277 contracts, delta 0.21) lost 90%. One trade, but worth a minimum option price.</li>
+      <li><b>Trend days carry it.</b> Oct 14 (down day) and Oct 16 (tech selling off after 10:30) made the money; Oct 15 (reversal) was −$450 at true prices, mostly small stop-outs.</li>
+      <li><b>Infrastructure.</b> Keep the Mac awake (now automatic 09:10–16:10 ET) and get real-time option quotes before paper orders: the dry run can be re-priced after the fact, live orders cannot.</li>
     </ol>
+    <p style="font-size: 13px; color: var(--ink-soft);">Three days is a small sample, two of them strong trend days. Treat every number here as a hypothesis to keep testing.</p>
   </section>
 
   <section>
