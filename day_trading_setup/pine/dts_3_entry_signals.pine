@@ -59,6 +59,9 @@ txtSize   = input.string("Small", "Text size", options = ["Tiny", "Small", "Norm
 G_AL = "Alert messages"
 exitAlerts = input.bool(true, "alert() on the 2R target and on exits", group = G_AL, tooltip = "On: alerts also carry the 2R target hit and every exit (STOP / BE / TRAIL / EOD). Off: entries and (if enabled above) new A+ setups only. The chart labels are drawn either way.", display = display.none)
 holdSessions = input.int(2, "Max sessions held when 'Flat by 15:55' is off", minval = 1, group = G_RISK, tooltip = "Only used when 'Flat by 15:55 New York' is unchecked. 1 = close at 15:55 on the entry day, 2 = may be held overnight and is closed at 15:55 the next session (TIME exit), and so on. Stops, the 2R target and the trail still apply at any time.", display = display.none)
+// Added 2026-10-18 (inputs are positional, so new ones go last).
+runnerExit = input.string("Giveback", "Runner exit after the 2R target", options = ["Giveback", "EMA close"], group = G_RISK, tooltip = "Giveback (default): after 2R, exit the runner when price gives back this % of the best move since entry, on a bar close. Stands in for trailing the option's own price (the executor's option quotes are delayed). EMA close: the original trail, a close back through the 8/21 EMA.", display = display.none)
+givebackPct = input.float(40, "Giveback: % of the best move", minval = 10, maxval = 90, step = 5, group = G_RISK, display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744
@@ -178,6 +181,7 @@ var float entPx = na
 var float stpPx = na
 var float tgtPx = na
 var bool  tgtHit = false
+var float bestPx = na      // best price since entry (high for longs, low for shorts)
 var int   entBar = na
 var line  lnEnt = na
 var line  lnStp = na
@@ -216,6 +220,8 @@ bool   tgtNow  = false
 string exitTxt = ""
 float  exitPx  = na
 if pos != 0 and bar_index > entBar
+    bestPx := pos == 1 ? math.max(bestPx, high) : math.min(bestPx, low)
+    gbLevel = bestPx - (bestPx - entPx) * givebackPct / 100
     if pos == 1
         if low <= stpPx
             exitNow := true
@@ -225,7 +231,7 @@ if pos != 0 and bar_index > entBar
             if not tgtHit and high >= tgtPx
                 tgtHit := true
                 tgtNow := true
-            if tgtHit and close < trailEma
+            if tgtHit and (runnerExit == "Giveback" ? close < gbLevel : close < trailEma)
                 exitNow := true
                 exitPx  := close
                 exitTxt := "TRAIL"
@@ -238,7 +244,7 @@ if pos != 0 and bar_index > entBar
             if not tgtHit and low <= tgtPx
                 tgtHit := true
                 tgtNow := true
-            if tgtHit and close > trailEma
+            if tgtHit and (runnerExit == "Giveback" ? close > gbLevel : close > trailEma)
                 exitNow := true
                 exitPx  := close
                 exitTxt := "TRAIL"
@@ -369,6 +375,7 @@ if longSig or shortSig
     stpPx  := longSig ? lStop : sStop
     tgtPx  := longSig ? close + rr * lRisk : close - rr * sRisk
     tgtHit := false
+    bestPx := close
     entBar := bar_index
     tradesToday += 1
     heldSessions := 1

@@ -609,7 +609,7 @@
     <h3 class="sub">4. Manage the trade</h3>
     <ul class="plain">
       <li><code>2R ✓ stop → BE</code>: take a partial and move your stop to your entry.</li>
-      <li><code>TRAIL</code>: the rest exits on a close below the 8 EMA. <code>BE</code> if price comes back to your entry first.</li>
+      <li><code>TRAIL</code>: the rest exits when price gives back 40% of its best move since entry, on a 5-minute close (since v8.0; it stands in for trailing the option's own price). <code>BE</code> if price comes back to your entry first.</li>
       <li><code>STOP</code>: the low hit the stop before 2R.</li>
       <li><code>EOD</code>: flat by 15:55.</li>
     </ul>
@@ -694,7 +694,7 @@
       <table class="wide">
         <thead><tr><th>Alert</th><th>What the executor does</th></tr></thead>
         <tbody>
-          <tr><td class="k">LONG / SHORT</td><td>Buys a <b>call</b> / a <b>put</b>. Expiry: this week's (normally Friday, 0DTE on Friday itself); on expiry day, entries before 10:30 ET buy next week's instead. Strike: <b>never in the money</b>. Start at the at-the-money strike (one in the money by at most 0.10% of the price counts as at the money) and step out of the money until one buys <b>4 contracts</b> within the budget, never below <b>0.15 delta</b> (weeklies, so further out of the money is fine); failing that, the nearest that buys <b>2</b>; failing that, <b>1 contract</b>, held through 2R. Every strike must pass the liquidity check (two-sided quote, spread ≤ 15% of mid, open interest ≥ 100, at least 100 contracts traded today). Size by the setup grade on the entry alert (since 2026-10-16): premium ≈ <b>5%</b> of a $100k notional account for <b>A+ OUTSIDE</b>, <b>3.5%</b> for <b>A OUTSIDE</b>, <b>2.5%</b> for everything else (rounded down, at least 1 contract). Five open positions at most, so no more than 25% of the account in premium at once. Friday (0DTE) uses the same 0.15 delta floor.</td></tr>
+          <tr><td class="k">LONG / SHORT</td><td>Buys a <b>call</b> / a <b>put</b>. Expiry: this week's (normally Friday, 0DTE on Friday itself); on expiry day the same-day option is bought only 10:30–12:00 ET; earlier and afternoon entries buy next week's. Strike: <b>never in the money</b>. Start at the at-the-money strike (one in the money by at most 0.10% of the price counts as at the money) and step out of the money until one buys <b>4 contracts</b> within the budget, never below <b>0.15 delta</b> (weeklies, so further out of the money is fine); failing that, the nearest that buys <b>2</b>; failing that, <b>1 contract</b>, held through 2R. Every strike must pass the liquidity check (two-sided quote, mid price at least $0.50, spread ≤ 15% of mid, open interest ≥ 100, at least 100 contracts traded today). Size by the setup grade on the entry alert (since 2026-10-16): premium ≈ <b>5%</b> of a $100k notional account for <b>A+ OUTSIDE</b>, <b>3.5%</b> for <b>A OUTSIDE</b>, <b>2.5%</b> for everything else (rounded down, at least 1 contract). Five open positions at most, so no more than 25% of the account in premium at once. Friday (0DTE) uses the same 0.15 delta floor.</td></tr>
           <tr><td class="k">2R target hit</td><td>Sells <b>half</b>, rounded down. The alert fires on the first tick that touches the target (since v7.0), not at the bar close. A single contract is held and rides to the trail, break-even or stop.</td></tr>
           <tr><td class="k">EXIT</td><td>Sells the rest: STOP, BE, TRAIL, EOD or TIME.</td></tr>
           <tr><td class="k">A+ setup</td><td>Nothing; information only.</td></tr>
@@ -704,7 +704,7 @@
     <ul class="plain" style="margin-top: 0.9rem;">
       <li><b>Holding:</b> trades may be held overnight and are closed by a <code>TIME</code> exit at 15:55 the next session. On the chart the entry window is 09:35–15:30, so late entries become overnight swings.</li>
       <li><b>Orders:</b> limit at mid, priced off TastyTrade's live quote (IBKR's option data on this account is 15 minutes delayed). Anything unfilled after 30 seconds is retried once at the ask or bid. The real IBKR position is read before every sale.</li>
-      <li><b>Limits:</b> one position per ticker, at most 5 open, paper account only. A 15:56 sweep closes options expiring that day.</li>
+      <li><b>Limits:</b> one position per ticker, at most 10 open, paper account only. A 15:56 sweep closes options expiring that day.</li>
       <li><b>Telegram:</b> every action is sent with the key facts in bold (action, contract, <b>CALL</b> / <b>PUT</b>, price, P&amp;L) in separate paragraphs. A warning is sent if TWS stops accepting connections, checked every 5 minutes during market hours.</li>
       <li><b>Dry run by default:</b> real chain, quotes and sizing, simulated fills, no orders. Paper orders start only when <code>DTS_EXECUTE=1</code> is set.</li>
     </ul>
@@ -881,7 +881,7 @@
       <li><span class="badge open">Open</span><span><b>Paper-trade first.</b> Log the signals for a few weeks and compare them with what you would have taken by hand.</span></li>
       <li><span class="badge open">Decide</span><span><b>Paper orders.</b> The executor is still in dry run. Switch on only once TWS can stay connected all session.</span></li>
       <li><span class="badge done">Done</span><span><b>Trade filters (2026-10-16).</b> The executor skips an entry when TradingView's stop is less than 0.20% of the price from the entry, and when no strike's expected gain at the 2R target (|delta| × the move) is at least 2× its bid/ask spread. On the Oct 14–15 trades these would have skipped 9 trades worth −$2,482. They were chosen from only 24 trades, so they are a starting point, not a tested edge.</span></li>
-      <li><span class="badge open">Decide</span><span><b>Position cap.</b> Whether the 5-position cap should become per-direction or per-sector.</span></li>
+      <li><span class="badge done">Done</span><span><b>Position cap (2026-10-18).</b> Raised from 5 to 10: on Oct 16 all five signals the cap blocked reached 2R.</span></li>
       <li><span class="badge done">Done</span><span><b>Keep-awake (2026-10-16).</b> A launchd job keeps the Mac awake Mon–Fri 09:10–16:10 ET. It cannot override a closed lid or wake a sleeping Mac, so leave the lid open on power, and use <code>sudo pmset repeat wake</code> if needed.</span></li>
       <li><span class="badge unconfirmed">Unconfirmed</span><span><b>An unattended morning run of the daily list.</b> The first one, on 2026-10-12, failed: TradingView had been opened without its remote-control connection, so the job could not write the list. The list was applied after a restart, and the job now starts TradingView itself when it is closed. That auto-start has not yet been seen working unattended. The log is <code>~/.dts-screener/screener_list_cron.log</code>.</span></li>
       <li><span class="badge unconfirmed">Unconfirmed</span><span><b>Phone push.</b> The alerts fired on the Mac within minutes of going live (29 in the first hour). Whether the push reaches your phone has not been confirmed.</span></li>

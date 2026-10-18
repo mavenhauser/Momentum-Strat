@@ -15,15 +15,16 @@ def pick_expiry(expiries, today: date, now_hm=None):
     Falls back to the nearest expiry after today if the ticker has no weekly
     this week. Returns None if nothing is listed.
 
-    now_hm: (hour, minute) New York time. If this week's expiry is today and it is
-    before NO_0DTE_BEFORE, next week's expiry is used instead (2026-10-16): in the
-    first hour a same-day option's time value and opening volatility bleed out
-    faster than the move pays (MSFT 537.5P, Oct 16: 2R hit, option -37%)."""
+    now_hm: (hour, minute) New York time. If this week's expiry is today and the
+    time is outside ZERO_DTE_WINDOW (10:30-12:00), next week's expiry is used
+    instead: a same-day option bleeds fastest in the first hour and has little
+    left to run for in the afternoon."""
     friday = week_friday(today)
     this_week = sorted(d for d in expiries if today <= d <= friday)
     if this_week:
         pick = this_week[-1]
-        if pick == today and now_hm is not None and now_hm < settings.NO_0DTE_BEFORE:
+        start, end = settings.ZERO_DTE_WINDOW
+        if pick == today and now_hm is not None and not (start <= now_hm < end):
             nxt = week_friday(today + timedelta(days=7))
             next_week = sorted(d for d in expiries if friday < d <= nxt)
             if next_week:
@@ -45,6 +46,8 @@ def liquid(quote) -> bool:
     if bid is None or ask is None or bid <= 0 or ask <= 0 or ask < bid:
         return False
     mid = (bid + ask) / 2
+    if mid < settings.MIN_OPTION_PRICE:
+        return False
     if (ask - bid) / mid > settings.MAX_SPREAD_FRACTION:
         return False
     if vol is None or not vol >= settings.MIN_OPTION_VOLUME:     # also rejects NaN
@@ -143,7 +146,7 @@ def choose_strike(quotes: dict, entry: float, right: str, budget: float, move: f
                 return k, max(1, qty_at(k)), f"1 contract (none cheap enough for 2 at delta {floor}+), held through 2R", quotes[k].get("delta")
     if any_liquid:
         return None, 0, f"2R target too small for the option spread (needs gain at target >= {settings.MIN_TARGET_TO_SPREAD:g}x spread)", None
-    return None, 0, f"no liquid strike at or out of the money (spread <= {settings.MAX_SPREAD_FRACTION:.0%}, OI >= {settings.MIN_OPEN_INTEREST}, volume >= {settings.MIN_OPTION_VOLUME})", None
+    return None, 0, f"no liquid strike at or out of the money (price >= ${settings.MIN_OPTION_PRICE:.2f}, spread <= {settings.MAX_SPREAD_FRACTION:.0%}, OI >= {settings.MIN_OPEN_INTEREST}, volume >= {settings.MIN_OPTION_VOLUME})", None
 
 
 def sessions_held(entry_day: date, today: date) -> int:

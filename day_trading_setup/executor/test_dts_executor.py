@@ -35,7 +35,10 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 12)), date(2026, 10, 16))  # Monday
         self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16)), date(2026, 10, 16))  # Friday 0DTE
         self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16), (10, 0)), date(2026, 10, 23))   # Friday first hour: next week
-        self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16), (10, 30)), date(2026, 10, 16))  # from 10:30: 0DTE
+        self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16), (10, 30)), date(2026, 10, 16))  # 10:30-12:00: 0DTE
+        self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16), (11, 59)), date(2026, 10, 16))
+        self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16), (12, 0)), date(2026, 10, 23))   # Friday afternoon: next week
+        self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16), (14, 30)), date(2026, 10, 23))
         self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 12), (9, 40)), date(2026, 10, 16))   # Monday: unaffected
         self.assertEqual(contracts.pick_expiry([date(2026, 10, 16)], date(2026, 10, 16), (9, 40)), date(2026, 10, 16))  # no next week listed
 
@@ -58,6 +61,8 @@ class ContractTest(unittest.TestCase):
         self.assertFalse(contracts.liquid({"bid": 2.0, "ask": 2.1, "open_interest": 500, "volume": 24}))    # IBM 10-14
         self.assertFalse(contracts.liquid({"bid": 2.0, "ask": 2.1, "open_interest": 500, "volume": float("nan")}))
         self.assertFalse(contracts.liquid({"bid": 2.0, "ask": 2.1, "open_interest": 500}))                  # unknown
+        self.assertFalse(contracts.liquid({"bid": 0.04, "ask": 0.05, "open_interest": 5000, **v}))         # KO 10-16: under $0.50
+        self.assertTrue(contracts.liquid({"bid": 0.48, "ask": 0.53, "open_interest": 5000, **v}))
 
     def test_sizing(self):
         self.assertEqual(contracts.contracts_for(100_000, 2.50), 10)          # 2.5% default: $2,500 / $250

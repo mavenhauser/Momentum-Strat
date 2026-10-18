@@ -373,8 +373,11 @@ close: enter at or just after it. Nothing fires mid-candle.
   skipped if the stop would be wider than 2.5 ATR.
 - **Target** = 2R. When it's hit you'll see `2R ✓ stop → BE`: take a
   partial and move your stop to your entry.
-- **The rest** exits on a close below the 8 EMA (`TRAIL`), or at `BE` if
-  it comes back to your entry.
+- **The rest** exits when price gives back **40% of its best move** since
+  entry, on a 5-minute close (`TRAIL`, since DTS Entry v8.0, 2026-10-18; it
+  stands in for trailing the option's own price, which the executor can't
+  see in real time), or at `BE` if it comes back to your entry. The input
+  *Runner exit after the 2R target* switches back to the old 8 EMA close.
 - Flat by **15:55** (`EOD`). Max **3 entries per day**; the panel shows
   `flat (1/3 today)`.
 
@@ -413,7 +416,7 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
 
 | Alert | What the executor does |
 |---|---|
-| `DTS: LONG …` / `DTS: SHORT …` | Buys a call / a put. Expiry: this week's last listed expiry (normally Friday, 0DTE on Friday itself), except that on expiry day an entry **before 10:30 ET buys next week's expiry** (since 2026-10-16: first-hour time decay and opening volatility bleed a same-day option faster than the move pays). Strike: **never in the money** (since 2026-10-16). Start at the at-the-money strike (the nearest strike at or out of the money; one in the money by at most 0.10% of the price counts as at the money) and step out of the money until one buys **4 contracts** within the budget, never going below **0.15 delta** (weeklies held 1-2 days, so further out of the money is fine); if none does, the nearest strike that buys **2**; if none, **1 contract** of the first liquid strike on that same ladder, which is then held through 2R. Every strike must pass the liquidity check (two-sided quote, spread ≤ 15% of mid, open interest ≥ 100, and at least **100 contracts traded today** in that strike, since 2026-10-16). Size (since 2026-10-16) by the setup grade the entry alert carries (DTS Entry v6.0+): premium ≈ **5%** of a **$100k notional strategy account** for **A+ OUTSIDE** (all 4 confirmations and beyond the prior day and premarket range), **3.5%** for **A OUTSIDE**, **2.5%** for everything else and for alerts without a grade; rounded down to whole contracts, at least 1. With at most 5 open positions that caps premium out at 25% of the account. Not the paper account's own value. On expiry day (Friday 0DTE) the delta floor is `MIN_DELTA_0DTE` = 0.15. |
+| `DTS: LONG …` / `DTS: SHORT …` | Buys a call / a put. Expiry: this week's last listed expiry (normally Friday, 0DTE on Friday itself), except that on expiry day the same-day option is bought only **10:30–12:00 ET**; earlier and afternoon entries buy **next week's expiry** (2026-10-16 / 2026-10-18). Strike: **never in the money** (since 2026-10-16). Start at the at-the-money strike (the nearest strike at or out of the money; one in the money by at most 0.10% of the price counts as at the money) and step out of the money until one buys **4 contracts** within the budget, never going below **0.15 delta** (weeklies held 1-2 days, so further out of the money is fine); if none does, the nearest strike that buys **2**; if none, **1 contract** of the first liquid strike on that same ladder, which is then held through 2R. Every strike must pass the liquidity check (two-sided quote, **mid price at least $0.50** (since 2026-10-18), spread ≤ 15% of mid, open interest ≥ 100, and at least **100 contracts traded today** in that strike, since 2026-10-16). Size (since 2026-10-16) by the setup grade the entry alert carries (DTS Entry v6.0+): premium ≈ **5%** of a **$100k notional strategy account** for **A+ OUTSIDE** (all 4 confirmations and beyond the prior day and premarket range), **3.5%** for **A OUTSIDE**, **2.5%** for everything else and for alerts without a grade; rounded down to whole contracts, at least 1. With at most 5 open positions that caps premium out at 25% of the account. Not the paper account's own value. On expiry day (Friday 0DTE) the delta floor is `MIN_DELTA_0DTE` = 0.15. |
 | `DTS: … hit 2R target …` | Sells half the contracts, rounded down. Since DTS Entry v7.0 (2026-10-16) this alert fires on the first tick that touches the target, not at the 5-minute bar close. A single contract is held and rides to the trail, break-even or stop. |
 | `DTS: EXIT … (STOP / BE / TRAIL / EOD / TIME)` | Sells the rest. |
 | `DTS: A+ OUTSIDE …` | Nothing (information only). |
@@ -441,7 +444,7 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
 - **Orders:** limit at mid; anything unfilled after 30 s is cancelled and
   retried once at the ask (buy) or bid (sell). Before every sale the real
   IBKR position is read, and never more than that is sold.
-- **Limits:** one position per ticker (DTS allows one), at most 5 open,
+- **Limits:** one position per ticker (DTS allows one), at most **10** open (raised from 5 on 2026-10-18),
   entries only 09:30–16:00 ET on weekdays, duplicate alerts ignored.
 - **Safety sweep** (`--sweep`, every minute, acts from 15:56 ET): closes any
   option expiring that day and anything held 2 sessions whose `TIME` alert
