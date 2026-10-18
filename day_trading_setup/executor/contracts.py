@@ -1,6 +1,6 @@
 """Contract choice and sizing - pure functions, no broker calls."""
 import math
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from day_trading_setup.executor import settings
 
@@ -146,6 +146,15 @@ def choose_strike(quotes: dict, entry: float, right: str, budget: float, move: f
     if any_liquid:
         return None, 0, f"2R target too small for the option spread (needs gain at target >= {settings.MIN_TARGET_TO_SPREAD:g}x spread)", None
     return None, 0, f"no liquid strike at or out of the money (price >= ${settings.MIN_OPTION_PRICE:.2f}, spread <= {settings.MAX_SPREAD_FRACTION:.0%}, OI >= {settings.MIN_OPEN_INTEREST}, volume >= {settings.MIN_OPTION_VOLUME})", None
+
+
+def time_stop_due(pos, now) -> bool:
+    """True for a same-day (0DTE) position that has not reached 2R within
+    ZERO_DTE_TIME_STOP_MIN minutes of entry."""
+    opened = datetime.fromisoformat(pos["opened_at"])
+    if pos.get("trimmed") or date.fromisoformat(pos["expiry"]) != opened.date():
+        return False
+    return (now - opened).total_seconds() >= settings.ZERO_DTE_TIME_STOP_MIN * 60
 
 
 def sessions_held(entry_day: date, today: date) -> int:

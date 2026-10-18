@@ -173,6 +173,16 @@ class ContractTest(unittest.TestCase):
         self.assertIsNone(k)
         self.assertIn("too small for the option spread", rule)
 
+    def test_zero_dte_time_stop(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        ny = ZoneInfo("America/New_York")
+        pos = {"opened_at": datetime(2026, 10, 16, 13, 40, tzinfo=ny).isoformat(), "expiry": "2026-10-16", "trimmed": False}
+        self.assertFalse(contracts.time_stop_due(pos, datetime(2026, 10, 16, 15, 9, tzinfo=ny)))    # 89 min
+        self.assertTrue(contracts.time_stop_due(pos, datetime(2026, 10, 16, 15, 10, tzinfo=ny)))    # 90 min: TSLA would be out
+        self.assertFalse(contracts.time_stop_due({**pos, "trimmed": True}, datetime(2026, 10, 16, 15, 30, tzinfo=ny)))  # reached 2R
+        self.assertFalse(contracts.time_stop_due({**pos, "expiry": "2026-10-23"}, datetime(2026, 10, 16, 15, 30, tzinfo=ny)))  # next week's
+
     def test_sessions(self):
         self.assertEqual(contracts.sessions_held(date(2026, 10, 15), date(2026, 10, 15)), 1)   # Thu
         self.assertEqual(contracts.sessions_held(date(2026, 10, 16), date(2026, 10, 19)), 2)   # Fri -> Mon

@@ -424,9 +424,16 @@ def on_exit(broker, state, sig, t):
 
 
 def sweep(broker, state, t):
-    """Backup closes at 15:56 ET: anything expiring today, and anything past the
-    max hold if TradingView's TIME alert never arrived."""
-    if t.weekday() >= 5 or (t.hour, t.minute) < settings.SWEEP_AT or t.hour >= 16:
+    """Every minute in the session: the 0DTE time stop (no 2R within
+    ZERO_DTE_TIME_STOP_MIN minutes). At 15:56 ET, backup closes: anything expiring
+    today, and anything past the max hold if TradingView's TIME alert never arrived."""
+    if t.weekday() >= 5 or not ((9, 30) <= (t.hour, t.minute) < (16, 0)):
+        return
+    for pos in list(state["positions"].values()):
+        if contracts.time_stop_due(pos, t):
+            close_position(broker, state, pos, t,
+                           f"0DTE time stop: no 2R within {settings.ZERO_DTE_TIME_STOP_MIN} min", "time stop")
+    if (t.hour, t.minute) < settings.SWEEP_AT:
         return
     for pos in list(state["positions"].values()):
         exp = date.fromisoformat(pos["expiry"])
@@ -464,8 +471,10 @@ def main(argv=None):
 
         if a.sweep:
             check_tws_port(t)
-            due = [p for p in state["positions"].values()]
-            if not due or t.weekday() >= 5 or (t.hour, t.minute) < settings.SWEEP_AT or t.hour >= 16:
+            in_session = t.weekday() < 5 and (9, 30) <= (t.hour, t.minute) < (16, 0)
+            due = [p for p in state["positions"].values()
+                   if contracts.time_stop_due(p, t) or (t.hour, t.minute) >= settings.SWEEP_AT]
+            if not due or not in_session:      # connect to the brokers only when something is due
                 return 0
             broker = Broker()
             try:

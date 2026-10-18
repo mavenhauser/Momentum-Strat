@@ -65,6 +65,10 @@ MIN_DELTA = 0.15             # weeklies held 1-2 days: further OTM is fine, ride
 # York window: from the open until noon. Afternoon entries (little left to run for)
 # buy next week's expiry instead (user decision, 2026-10-18).
 ZERO_DTE_WINDOW = ((9, 30), (12, 0))
+# 0DTE time stop (2026-10-18): a same-day option that has not reached the 2R target
+# within this many minutes of entry is closed. Winners took a median 45 min to 2R;
+# a 0DTE that goes nowhere bleeds most of its value by the close (TSLA, Oct 16).
+ZERO_DTE_TIME_STOP_MIN = 90
 # Journal days from this date use fills re-priced from 1-minute history (reprice.py);
 # earlier days keep the executor's recorded figures (user decision, 2026-10-16).
 REPRICE_FROM = "2026-10-16"
