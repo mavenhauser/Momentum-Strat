@@ -34,13 +34,14 @@ class ContractTest(unittest.TestCase):
         exp = [date(2026, 10, 14), date(2026, 10, 16), date(2026, 10, 23), date(2026, 11, 20)]
         self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 12)), date(2026, 10, 16))  # Monday
         self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16)), date(2026, 10, 16))  # Friday 0DTE
-        self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16), (10, 0)), date(2026, 10, 23))   # Friday first hour: next week
-        self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16), (10, 30)), date(2026, 10, 16))  # 10:30-12:00: 0DTE
+        self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16), (9, 40)), date(2026, 10, 16))   # Friday morning: 0DTE
+        self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16), (10, 0)), date(2026, 10, 16))
+        self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16), (10, 30)), date(2026, 10, 16))
         self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16), (11, 59)), date(2026, 10, 16))
         self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16), (12, 0)), date(2026, 10, 23))   # Friday afternoon: next week
         self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 16), (14, 30)), date(2026, 10, 23))
         self.assertEqual(contracts.pick_expiry(exp, date(2026, 10, 12), (9, 40)), date(2026, 10, 16))   # Monday: unaffected
-        self.assertEqual(contracts.pick_expiry([date(2026, 10, 16)], date(2026, 10, 16), (9, 40)), date(2026, 10, 16))  # no next week listed
+        self.assertEqual(contracts.pick_expiry([date(2026, 10, 16)], date(2026, 10, 16), (13, 0)), date(2026, 10, 16))  # no next week listed
 
     def test_expiry_holiday_friday_and_fallback(self):
         exp = [date(2026, 11, 26), date(2026, 12, 4)]   # no Friday listing that week

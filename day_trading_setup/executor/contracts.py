@@ -16,9 +16,8 @@ def pick_expiry(expiries, today: date, now_hm=None):
     this week. Returns None if nothing is listed.
 
     now_hm: (hour, minute) New York time. If this week's expiry is today and the
-    time is outside ZERO_DTE_WINDOW (10:30-12:00), next week's expiry is used
-    instead: a same-day option bleeds fastest in the first hour and has little
-    left to run for in the afternoon."""
+    time is outside ZERO_DTE_WINDOW (open to 12:00), next week's expiry is used
+    instead: in the afternoon a same-day option has little left to run for."""
     friday = week_friday(today)
     this_week = sorted(d for d in expiries if today <= d <= friday)
     if this_week:

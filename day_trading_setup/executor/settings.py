@@ -62,9 +62,9 @@ TARGET_CONTRACTS = 4
 MIN_CONTRACTS_TO_TRIM = 2
 MIN_DELTA = 0.15             # weeklies held 1-2 days: further OTM is fine, rides the volatility spike (was 0.25 until 2026-10-16)
 # On expiry day (normally Friday) the same-day option is bought only inside this New
-# York window; earlier entries (first-hour decay, 2026-10-16) and afternoon entries
-# (little left to run for, 2026-10-18) buy next week's expiry instead.
-ZERO_DTE_WINDOW = ((10, 30), (12, 0))
+# York window: from the open until noon. Afternoon entries (little left to run for)
+# buy next week's expiry instead (user decision, 2026-10-18).
+ZERO_DTE_WINDOW = ((9, 30), (12, 0))
 # Journal days from this date use fills re-priced from 1-minute history (reprice.py);
 # earlier days keep the executor's recorded figures (user decision, 2026-10-16).
 REPRICE_FROM = "2026-10-16"
