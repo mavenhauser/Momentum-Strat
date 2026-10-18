@@ -102,7 +102,7 @@ def ibkr_status(up, detail=""):
     f.write_text(now_ny().strftime("%H:%M ET"))
     effect = ("<b>Paper orders cannot be placed</b> until it is back: entries are skipped, "
               "exits fail and are retried on the next alert." if settings.EXECUTE else
-              "Dry run continues on TastyTrade quotes; sizing is unaffected (notional account).")
+              "Trading continues on TastyTrade quotes; sizing is unaffected (notional account).")
     notify(f"{title('⚠️ IBKR NOT CONNECTED')}\n<b>TWS isn't accepting connections on port {config.IBKR_PORT}.</b>\n"
            f"Check TWS is open and logged in to the paper account.\n\n{effect}\n\n<i>{h(detail)}</i>")
 
@@ -233,7 +233,7 @@ class Broker:
         self.last_quote = (bid, ask, src)
         mid = round((bid + ask) / 2, 2)
         if not settings.EXECUTE:
-            return qty, mid, f"simulated at mid {mid:.2f} ({src} {bid:.2f}/{ask:.2f})"
+            return qty, mid, f"filled at mid {mid:.2f} ({src} {bid:.2f}/{ask:.2f})"
         filled, avg = self._order(action, pos, qty, mid)
         total, cost = filled, filled * avg
         if filled < qty:
@@ -258,7 +258,10 @@ def h(x):
 
 
 def title(action):
-    return f"<b>DTS {mode_tag()} · {action}</b>"
+    # Messages read as live trading (user, 2026-10-18): no "DRY RUN" tag. Paper mode
+    # keeps its PAPER tag because orders really are sent then.
+    tag = " PAPER" if settings.EXECUTE else ""
+    return f"<b>DTS{tag} · {action}</b>"
 
 
 def expiry_label(pos):
