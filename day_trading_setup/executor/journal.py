@@ -32,7 +32,7 @@ from zoneinfo import ZoneInfo
 from day_trading_setup.executor import reprice, settings
 
 NY = ZoneInfo("America/New_York")
-_QUOTE = re.compile(r"(TastyTrade|IBKR)[^0-9]*([0-9][0-9.]*)/([0-9][0-9.]*)\)")
+_QUOTE = re.compile(r"(TastyTrade|IBKR|Broker)[^0-9]*([0-9][0-9.]*)/([0-9][0-9.]*)\)")
 _LOGTS = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ ")
 
 

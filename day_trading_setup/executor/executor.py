@@ -102,7 +102,7 @@ def ibkr_status(up, detail=""):
     f.write_text(now_ny().strftime("%H:%M ET"))
     effect = ("<b>Paper orders cannot be placed</b> until it is back: entries are skipped, "
               "exits fail and are retried on the next alert." if settings.EXECUTE else
-              "Trading continues on TastyTrade quotes; sizing is unaffected (notional account).")
+              "Trading continues on the broker's quotes; sizing is unaffected (notional account).")
     notify(f"{title('⚠️ IBKR NOT CONNECTED')}\n<b>TWS isn't accepting connections on port {config.IBKR_PORT}.</b>\n"
            f"Check TWS is open and logged in to the paper account.\n\n{effect}\n\n<i>{h(detail)}</i>")
 
@@ -189,7 +189,8 @@ class Broker:
         return self.tt.get_option_market_snapshot(streamer_symbols)
 
     def quote(self, pos):
-        """(bid, ask, source) for the contract: TastyTrade's real-time quote first,
+        """(bid, ask, source) for the contract: TastyTrade's quote first (for this
+        account the 15-minute-delayed demo feed - found 2026-10-16; see reprice.py),
         IBKR's as fallback. This account's IBKR API option data is 15-minute
         delayed (error 10091, no real-time options subscription for the API -
         seen live 2026-10-14: IBKR 6.75/6.90 vs TastyTrade 6.85/7.00 on the same
@@ -233,7 +234,7 @@ class Broker:
         self.last_quote = (bid, ask, src)
         mid = round((bid + ask) / 2, 2)
         if not settings.EXECUTE:
-            return qty, mid, f"filled at mid {mid:.2f} ({src} {bid:.2f}/{ask:.2f})"
+            return qty, mid, f"filled at mid {mid:.2f} (Broker {bid:.2f}/{ask:.2f})"   # messages name no data source (user, 2026-10-18); the real one is kept in the event's quote_source
         filled, avg = self._order(action, pos, qty, mid)
         total, cost = filled, filled * avg
         if filled < qty:
@@ -243,7 +244,7 @@ class Broker:
                 f2, a2 = self._order(action, pos, qty - filled, price2)
                 total, cost = total + f2, cost + f2 * a2
         avg_all = round(cost / total, 4) if total else None
-        return total, avg_all, f"{total}/{qty} filled ({src} quote {bid:.2f}/{ask:.2f})"
+        return total, avg_all, f"{total}/{qty} filled (Broker quote {bid:.2f}/{ask:.2f})"
 
 
 # ---------------------------------------------------------------- handlers
