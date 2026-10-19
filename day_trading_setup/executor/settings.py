@@ -72,6 +72,9 @@ ZERO_DTE_TIME_STOP_MIN = 90
 # Journal days from this date use fills re-priced from 1-minute history (reprice.py);
 # earlier days keep the executor's recorded figures (user decision, 2026-10-16).
 REPRICE_FROM = "2026-10-16"
+# Closed trades from this time on get a RESULT message with the confirmed P&L
+# (CLOSED messages no longer carry a P&L - the live quotes are delayed).
+RESULTS_FROM = "2026-10-19T09:30"
 MIN_DELTA_0DTE = 0.15        # expiry day (normally Friday): explicit so a later weekday change doesn't touch it; 0.25 is hard to find out of the money on 0DTE
 STRIKES_TO_SCAN = 12          # out-of-the-money strikes examined beyond the nearest one
 MIN_OPEN_INTEREST = 100

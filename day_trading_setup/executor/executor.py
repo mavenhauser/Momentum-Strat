@@ -400,7 +400,7 @@ def on_target(broker, state, sig, t):
         notify(f"{title('2R TRIM NOT FILLED')}\n<b>{h(describe(pos))}</b>\nTradingView: {h(sig.ticker)} reached {sig.price}\n\n<i>{h(note)}</i>")
     if pos["open_qty"] <= 0:
         pnl = _close_record(state, pos, t, "2R (fully sold)")
-        notify(f"{title('CLOSED')}\n<b>{h(describe(pos))}</b>\nFully sold at 2R\n\nTrade P&amp;L: <b>{money(pnl)}</b>")
+        notify(f"{title('CLOSED')}\n<b>{h(describe(pos))}</b>\nFully sold at 2R\n\n<i>P&amp;L follows once prices are confirmed (about 15 min)</i>")
 
 
 def close_position(broker, state, pos, t, why, alert_raw):
@@ -413,8 +413,53 @@ def close_position(broker, state, pos, t, why, alert_raw):
            f"<b>{h(describe(pos))}</b>\n"
            f"Sold {filled} @ <b>{price}</b>\n"
            f"Reason: {h(why)}\n\n"
-           f"Trade P&amp;L: <b>{money(pnl)}</b>\n"
-           f"<i>{h(note)}</i>")
+           f"<i>P&amp;L follows once prices are confirmed (about 15 min)</i>")
+
+
+def _results_due(state, t):
+    from day_trading_setup.executor import reprice
+    return [p for p in state["closed"] if not p.get("result_sent") and p.get("closed_at", "") >= settings.RESULTS_FROM
+            and datetime.fromisoformat(p["closed_at"]) <= t - reprice.DELAY]
+
+
+def prefetch_results(t):
+    """Fetch 1-minute prices for trades due a RESULT message. Network, up to a
+    minute, so it runs before the lock: alerts are never held up by it."""
+    from day_trading_setup.executor import reprice
+    try:
+        if _results_due(load_state(), t):
+            reprice.run("paper" if settings.EXECUTE else "dry")
+    except Exception as e:
+        log.warning("reprice failed, results retried next minute: %s: %s", type(e).__name__, e)
+
+
+def confirm_results(state, t):
+    """Send each closed trade's P&L once its fills can be priced from 1-minute
+    option history (the live quotes are ~15 minutes delayed): the CLOSED message
+    carries no P&L; this RESULT message follows about 16 minutes after the exit
+    (user, 2026-10-19). Realistic P&L, as in the journal: true price, buys plus and
+    sells minus half the spread."""
+    from day_trading_setup.executor import journal, reprice
+    due = _results_due(state, t)
+    if not due:
+        return False
+    rp = reprice.reprice_path("paper" if settings.EXECUTE else "dry")
+    repriced = json.loads(rp.read_text()) if rp.exists() else {}
+    lines = journal._log_lines()
+    for p in due:
+        if not all(reprice.event_key(p, ev) in repriced for ev in p["events"]):
+            continue                          # prices not fetched yet: next minute
+        e = journal.trade_entry(p, datetime.fromisoformat(p["closed_at"]).astimezone(NY).date(), lines, repriced)
+        legs = [e["buy"]] + e["sells"]
+        px = lambda leg: leg.get("true") if leg.get("true") is not None else leg.get("price")
+        fills = f"Bought {e['buy']['qty']} @ <b>{px(e['buy']):.2f}</b> · " + ", ".join(
+            f"sold {s['qty']} @ <b>{px(s):.2f}</b> ({h(s['kind'])})" for s in e["sells"])
+        note = "; ".join(e["notes"]) if e["notes"] else "confirmed from 1-minute option prices, less half the spread each way"
+        notify(f"{title('RESULT')}\n<b>{h(describe(p))}</b>\n{fills}\n\n"
+               f"Trade P&amp;L: <b>{money(e['pnl_real'])}</b>\n<i>{h(note)}</i>")
+        p["result_sent"] = True
+        p["pnl_confirmed"] = e["pnl_real"]
+    return True
 
 
 def on_exit(broker, state, sig, t):
@@ -462,6 +507,8 @@ def main(argv=None):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     settings.STATE_DIR.mkdir(parents=True, exist_ok=True)
 
+    if a.sweep:
+        prefetch_results(datetime.fromisoformat(a.received).astimezone(NY) if a.received else now_ny())
     with open(settings.LOCK_FILE, "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)          # one alert at a time, in arrival order
         state = load_state()
@@ -472,6 +519,8 @@ def main(argv=None):
 
         if a.sweep:
             check_tws_port(t)
+            if confirm_results(state, t):
+                save_state(state)
             in_session = t.weekday() < 5 and (9, 30) <= (t.hour, t.minute) < (16, 0)
             due = [p for p in state["positions"].values()
                    if contracts.time_stop_due(p, t) or (t.hour, t.minute) >= settings.SWEEP_AT]
