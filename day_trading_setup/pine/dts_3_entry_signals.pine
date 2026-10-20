@@ -62,6 +62,9 @@ holdSessions = input.int(2, "Max sessions held when 'Flat by 15:55' is off", min
 // Added 2026-10-18 (inputs are positional, so new ones go last).
 runnerExit = input.string("Giveback", "Runner exit after the 2R target", options = ["Giveback", "EMA close"], group = G_RISK, tooltip = "Giveback (default): after 2R, exit the runner when price gives back this % of the best move since entry, on a bar close. Stands in for trailing the option's own price (the executor's option quotes are delayed). EMA close: the original trail, a close back through the 8/21 EMA.", display = display.none)
 givebackPct = input.float(40, "Giveback: % of the best move", minval = 10, maxval = 90, step = 5, group = G_RISK, display = display.none)
+// Added 2026-10-20.
+confirmEntry = input.bool(true, "Confirm entry: wait for a break of the trigger bar", group = G_RISK, tooltip = "On (default): after the trigger close, enter only when price breaks the trigger bar's high (longs) / low (shorts) within the next bars below; the entry alert fires the moment it breaks, at that price. Off: enter at the trigger bar's close, as before.", display = display.none)
+confirmBars = input.int(2, "Confirm within (bars)", minval = 1, maxval = 6, group = G_RISK, display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744
@@ -187,6 +190,12 @@ var line  lnEnt = na
 var line  lnStp = na
 var line  lnTgt = na
 var int   tradesToday = 0
+var int    pendDir = 0      // confirmation entry waiting: 1 long, -1 short
+var float  pendLvl = na     // trigger bar high (long) / low (short)
+var float  pendStp = na
+var int    pendBar = na
+var string pendName = ""
+var string pendGrade = ""
 
 // Long setup: armed by a breakout, then waiting for a retest, then the trigger.
 var bool   lArmed = false
@@ -205,6 +214,7 @@ var float  sSwing = na
 
 if chartNewDay
     tradesToday := 0
+    pendDir := 0
     if pos != 0
         heldSessions += 1
     lArmed := false
@@ -349,7 +359,7 @@ trendOkL = trendFilter == "Off" ? true : trendFilter == "8 > 21 only" ? e8 > e21
 trendOkS = trendFilter == "Off" ? true : trendFilter == "8 > 21 only" ? e8 < e21 : trend == -1
 vwapOkL  = not vwapFilter or close > vwapV
 vwapOkS  = not vwapFilter or close < vwapV
-canEnter = barstate.isconfirmed and pos == 0 and not exitNow and rth and inWindow and tradesToday < maxTrades
+canEnter = barstate.isconfirmed and pos == 0 and pendDir == 0 and not exitNow and rth and inWindow and tradesToday < maxTrades
 
 lStop = lSwing - stopBuf * atr
 lRisk = close - lStop
@@ -369,31 +379,67 @@ ptsL = (trend == 1 ? 1 : 0) + (close > vwapV ? 1 : 0) + (not na(orh) and orDone 
 ptsS = (trend == -1 ? 1 : 0) + (close < vwapV ? 1 : 0) + (not na(orl) and orDone and close < orl ? 1 : 0) + (not na(pwl) and close < pwl ? 1 : 0)
 f_grade(int pts) => pts >= 4 ? "A+" : pts == 3 ? "A" : pts == 2 ? "B" : "C"
 
+// --- Entry. With "Confirm entry" on, the trigger close only sets a pending entry
+// at the trigger bar's high (long) / low (short); the position opens when price
+// breaks that level within confirmBars bars - on the tick it breaks, so the alert
+// is sent intrabar at that price. Unconfirmed triggers lapse.
+int    goDir = 0
+float  goPx = na
+float  goStp = na
+string goName = ""
+string goGrade = ""
+if pendDir != 0 and pos == 0
+    if bar_index > pendBar + confirmBars or not rth
+        pendDir := 0
+    else if bar_index > pendBar and inWindow and (pendDir == 1 ? high >= pendLvl : low <= pendLvl)
+        goDir   := pendDir
+        goPx    := pendDir == 1 ? math.max(open, pendLvl) : math.min(open, pendLvl)
+        goStp   := pendStp
+        goName  := pendName
+        goGrade := pendGrade
+        pendDir := 0
 if longSig or shortSig
-    pos    := longSig ? 1 : -1
-    entPx  := close
-    stpPx  := longSig ? lStop : sStop
-    tgtPx  := longSig ? close + rr * lRisk : close - rr * sRisk
-    tgtHit := false
-    bestPx := close
-    entBar := bar_index
-    tradesToday += 1
-    heldSessions := 1
-    lnEnt := line.new(bar_index, entPx, bar_index + 1, entPx, color = color.new(color.white, 30), width = 1)
-    lnStp := line.new(bar_index, stpPx, bar_index + 1, stpPx, color = C_BEAR, style = line.style_dashed)
-    lnTgt := line.new(bar_index, tgtPx, bar_index + 1, tgtPx, color = C_BULL, style = line.style_dashed)
-    lvlName = longSig ? lName : sName
-    side = longSig ? "LONG" : "SHORT"
-    gradeTxt = longSig ? f_grade(ptsL) + (outLong ? " OUTSIDE" : " inside") : f_grade(ptsS) + (outShort ? " OUTSIDE" : " inside")
-    txt = side + " · " + lvlName + " retest\nEntry " + fmt(entPx) + "\nStop " + fmt(stpPx) + "\nTarget " + fmt(tgtPx)
-    label.new(bar_index, close, txt, yloc = longSig ? yloc.belowbar : yloc.abovebar, style = longSig ? label.style_label_up : label.style_label_down, color = longSig ? #00C853 : #D50000, textcolor = color.white, size = size.small)
-    alert("DTS: " + side + " " + syminfo.ticker + " @ " + fmt(entPx) + " | stop " + fmt(stpPx) + " | target " + fmt(tgtPx) + " (" + str.tostring(rr) + "R) | " + lvlName + " breakout + 8 EMA retest | grade " + gradeTxt, alert.freq_once_per_bar_close)
+    sigName  = longSig ? lName : sName
+    sigGrade = longSig ? f_grade(ptsL) + (outLong ? " OUTSIDE" : " inside") : f_grade(ptsS) + (outShort ? " OUTSIDE" : " inside")
+    sigStp   = longSig ? lStop : sStop
+    if confirmEntry
+        pendDir   := longSig ? 1 : -1
+        pendLvl   := longSig ? high : low
+        pendStp   := sigStp
+        pendBar   := bar_index
+        pendName  := sigName
+        pendGrade := sigGrade
+        label.new(bar_index, longSig ? high : low, "wait break " + fmt(pendLvl), yloc = longSig ? yloc.abovebar : yloc.belowbar, style = label.style_none, textcolor = longSig ? C_BULL : C_BEAR, size = size.tiny)
+    else
+        goDir   := longSig ? 1 : -1
+        goPx    := close
+        goStp   := sigStp
+        goName  := sigName
+        goGrade := sigGrade
     if longSig
         lRetest := false
         lSwing := na
     else
         sRetest := false
         sSwing := na
+
+if goDir != 0
+    pos    := goDir
+    entPx  := goPx
+    stpPx  := goStp
+    tgtPx  := goDir == 1 ? goPx + rr * (goPx - goStp) : goPx - rr * (goStp - goPx)
+    tgtHit := false
+    bestPx := goPx
+    entBar := bar_index
+    tradesToday += 1
+    heldSessions := 1
+    lnEnt := line.new(bar_index, entPx, bar_index + 1, entPx, color = color.new(color.white, 30), width = 1)
+    lnStp := line.new(bar_index, stpPx, bar_index + 1, stpPx, color = C_BEAR, style = line.style_dashed)
+    lnTgt := line.new(bar_index, tgtPx, bar_index + 1, tgtPx, color = C_BULL, style = line.style_dashed)
+    side = goDir == 1 ? "LONG" : "SHORT"
+    txt = side + " · " + goName + " retest\nEntry " + fmt(entPx) + "\nStop " + fmt(stpPx) + "\nTarget " + fmt(tgtPx)
+    label.new(bar_index, close, txt, yloc = goDir == 1 ? yloc.belowbar : yloc.abovebar, style = goDir == 1 ? label.style_label_up : label.style_label_down, color = goDir == 1 ? #00C853 : #D50000, textcolor = color.white, size = size.small)
+    alert("DTS: " + side + " " + syminfo.ticker + " @ " + fmt(entPx) + " | stop " + fmt(stpPx) + " | target " + fmt(tgtPx) + " (" + str.tostring(rr) + "R) | " + goName + " breakout + 8 EMA retest | grade " + goGrade, confirmEntry ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
 
 plotshape(retestNowL and pos == 0 and allowLong, "Retest (long) - get ready", shape.diamond, location.belowbar, color.new(C_BULL, 30), size = size.tiny, display = display.all - display.status_line)
 plotshape(retestNowS and pos == 0 and allowShort, "Retest (short) - get ready", shape.diamond, location.abovebar, color.new(C_BEAR, 30), size = size.tiny, display = display.all - display.status_line)
