@@ -124,15 +124,17 @@ async function chartPages() {
 }
 
 // Runs inside a "Day Trading Set Up" tab, using the page's own signed-in session. The
-// alert's script id, version and settings are read from the indicators on the chart, so
-// an alert always matches what the chart is running.
+// alert's script id and settings are read from the indicators on the chart. The version
+// is the latest SAVED one (2026-10-20): the chart's copy can stay pinned to an older
+// version after a save (v8.0 while v10.0 was saved), so the chart's settings are kept
+// and any input the newer version added takes its default from the script.
 function alertSyncExpression(params) {
   return `(async function(){
     var P = ${JSON.stringify(params)};
     var api = window.TradingViewApi;
     if (!api || typeof api.layoutName !== 'function' || api.layoutName() !== P.layout) return { skip: true };
     var chart = api.activeChart();
-    function series(name) {
+    async function series(name) {
       var s = chart.getAllStudies().filter(function(x){ return x.name === name; })[0];
       if (!s) throw new Error(name + ' is not on the ' + P.layout + ' chart');
       var st = chart.getStudyById(s.id); var src = st._study || st;
@@ -143,7 +145,18 @@ function alertSyncExpression(params) {
       });
       var offsets = {};
       (src.metaInfo().plots || []).forEach(function(p){ if (p.type !== 'alertcondition') offsets[p.id] = 0; });
-      return { type: 'study', study: 'Script@tv-scripting-101', offsets_by_plot: offsets, inputs: inputs, pine_id: pineId, pine_version: pineVersion };
+      var ser = { type: 'study', study: 'Script@tv-scripting-101', offsets_by_plot: offsets, inputs: inputs, pine_id: pineId, pine_version: pineVersion, chart_version: pineVersion };
+      var j = await fetch('https://pine-facade.tradingview.com/pine-facade/translate/' + encodeURIComponent(pineId) + '/last', { credentials: 'include' }).then(function(r){ return r.json(); });
+      var mi = j && j.result && j.result.metaInfo;
+      var latest = (j && j.result && j.result.version) || (mi && mi.pine && mi.pine.version);
+      if (!mi || !latest) throw new Error('could not read the latest version of ' + name);
+      if (parseFloat(latest) > parseFloat(pineVersion)) {
+        ser.pine_version = String(latest);
+        (mi.inputs || []).forEach(function(i){ if (/^in_\\d+$/.test(i.id) && !(i.id in inputs)) inputs[i.id] = i.defval; });
+        var off = {}; (mi.plots || []).forEach(function(p){ if (p.type !== 'alertcondition') off[p.id] = 0; });
+        if (Object.keys(off).length) ser.offsets_by_plot = off;
+      }
+      return ser;
     }
     function same(want, got) {
       if (!got || got.pine_id !== want.pine_id || got.pine_version !== want.pine_version) return false;
@@ -161,11 +174,12 @@ function alertSyncExpression(params) {
         email: false, sms_over_email: false, mobile_push: true, web_hook: P.webhook || null, name: name, expiration: null, active: true, ignore_warnings: true };
     }
     function notifiesAsWanted(a) { return !a.sound_file && a.popup === true && a.mobile_push === true && !a.email && (a.web_hook || null) === (P.webhook || null); }
-    var entry = series(P.entryStudy), screener = P.withScreener ? series(P.screenerStudy) : null;
+    var entry = await series(P.entryStudy), screener = P.withScreener ? await series(P.screenerStudy) : null;
     var listed = await fetch('https://pricealerts.tradingview.com/list_alerts', { credentials: 'include' }).then(function(r){ return r.json(); });
     if (listed.s !== 'ok') throw new Error('could not list alerts: ' + JSON.stringify(listed).slice(0, 200));
     var want = {}; P.tickers.forEach(function(t){ want[t.ticker] = t; });
-    var have = {}, drop = [], out = { kept: [], created: [], deleted: [], errors: [], entry_script_version: entry.pine_version };
+    var chartVersion = entry.chart_version; delete entry.chart_version; if (screener) delete screener.chart_version;
+    var have = {}, drop = [], out = { kept: [], created: [], deleted: [], errors: [], entry_script_version: entry.pine_version, chart_script_version: chartVersion, confirm_entry: entry.inputs.in_33, confirm_bars: entry.inputs.in_34 };
     (listed.r || []).forEach(function(a){
       if (typeof a.name !== 'string') return;
       var isScreener = a.name === P.screenerName, isEntry = a.name.indexOf(P.entryPrefix) === 0;

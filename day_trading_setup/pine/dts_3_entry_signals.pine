@@ -63,8 +63,8 @@ holdSessions = input.int(2, "Max sessions held when 'Flat by 15:55' is off", min
 runnerExit = input.string("Giveback", "Runner exit after the 2R target", options = ["Giveback", "EMA close"], group = G_RISK, tooltip = "Giveback (default): after 2R, exit the runner when price gives back this % of the best move since entry, on a bar close. Stands in for trailing the option's own price (the executor's option quotes are delayed). EMA close: the original trail, a close back through the 8/21 EMA.", display = display.none)
 givebackPct = input.float(40, "Giveback: % of the best move", minval = 10, maxval = 90, step = 5, group = G_RISK, display = display.none)
 // Added 2026-10-20.
-confirmEntry = input.bool(true, "Confirm entry: wait for a break of the trigger bar", group = G_RISK, tooltip = "On (default): after the trigger close, enter only when price breaks the trigger bar's high (longs) / low (shorts) within the next bars below; the entry alert fires the moment it breaks, at that price. Off: enter at the trigger bar's close, as before.", display = display.none)
-confirmBars = input.int(2, "Confirm within (bars)", minval = 1, maxval = 6, group = G_RISK, display = display.none)
+confirmEntry = input.bool(true, "Confirm entry: wait for a break of the trigger bar", group = G_RISK, tooltip = "On (default): after the trigger close, enter only when price breaks the trigger bar's high (longs) / low (shorts) within the next bars below (default 3 = 15 minutes); the entry alert fires the moment it breaks, at that price. Off: enter at the trigger bar's close, as before.", display = display.none)
+confirmBars = input.int(3, "Confirm within (bars)", minval = 1, maxval = 6, group = G_RISK, display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744
