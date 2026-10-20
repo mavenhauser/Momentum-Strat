@@ -53,6 +53,24 @@ const SCREENER_ALERT_SYMBOL = 'BATS:SPY';
 const WITH_SCREENER_ALERT = false;
 const WEBHOOK_BASE = 'https://sherill-sudoriparous-soothedly.ngrok-free.dev/dts/';
 const WEBHOOK_SECRET_FILE = `${process.env.HOME}/.dts-executor/secret`;
+// The executor's open positions (absolute path: the scheduled copy runs from ~/.dts-screener).
+const DTS_STATE_FILES = ['dts_positions_dry.json', 'dts_positions.json'].map(f => `${process.env.HOME}/Documents/Trading/Momentum Strat/state/${f}`);
+
+// Tickers the executor still holds. Their alerts are kept even when the ticker drops off
+// the day's list (2026-10-20: AMAT, held overnight, lost its alert in the rotation, so
+// TradingView could not send its stop / 2R / trail exits).
+function openPositionTickers() {
+  const out = new Set();
+  for (const f of DTS_STATE_FILES) {
+    try { Object.keys(JSON.parse(readFileSync(f, 'utf8')).positions || {}).forEach(t => out.add(t)); } catch {}
+  }
+  return [...out];
+}
+function withOpenPositions(alertTickers) {
+  const have = new Set(alertTickers.map(a => a.ticker));
+  const added = openPositionTickers().filter(t => !have.has(t));
+  return { list: [...alertTickers, ...added.map(t => ({ ticker: t, symbols: [`${FEED}:${t}`] }))], added };
+}
 
 const apply = process.argv.includes('--apply');
 const alertsPlan = process.argv.includes('--alerts-plan');
@@ -287,7 +305,9 @@ if (listArg) {
     const alertTickers = items.map(s => { const [ex, sym] = s.includes(':') ? s.split(':') : [null, s];
       return { ticker: sym, symbols: ex ? [`${FEED}:${sym}`, s] : [`${FEED}:${sym}`] }; });
     const out = { as_of_new_york: new Date().toLocaleString('sv-SE', { timeZone: 'America/New_York' }), list: items.join(', '), mode: 'kept list' };
-    if (alerts) out.alerts = await syncAlerts(alertTickers, alertsPlan);
+    const held = withOpenPositions(alertTickers);
+    if (held.added.length) out.kept_for_open_positions = held.added;
+    if (alerts) out.alerts = await syncAlerts(held.list, alertsPlan);
     clearTimeout(timer);
     done(out.alerts && out.alerts.errors.length ? 1 : 0, out);
   } catch (e) { done(1, { error: String(e && e.message || e) }); }
@@ -318,7 +338,9 @@ if (listArg) {
       ...fixed.map(t => ({ ticker: t, symbols: [`${FEED}:${t}`] })),
       ...picks.map(p => ({ ticker: p.name, symbols: [`${FEED}:${p.name}`, p.symbol] })),
     ];
-    out.alerts = await syncAlerts(alertTickers, alertsPlan || !apply);
+    const held = withOpenPositions(alertTickers);
+    if (held.added.length) out.kept_for_open_positions = held.added;
+    out.alerts = await syncAlerts(held.list, alertsPlan || !apply);
     if (out.alerts.errors.length) { clearTimeout(timer); done(1, { error: 'some alerts could not be synced', ...out }); }
   }
   clearTimeout(timer);
