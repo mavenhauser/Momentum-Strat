@@ -7,9 +7,11 @@ The executor's quotes are 15 minutes delayed (TastyTrade demo feed, found
 2026-10-16), so its recorded fills are stale. reprice.py looks up each fill's
 true price in 1-minute option history; when a fill has one:
 
-  pnl_mid   at the true prices
-  pnl_real  true price + half the spread on buys, - half on sells (spread width
-            from the quote logged at the fill) - the figure to judge results by
+  pnl_real  at market prices: the true 1-minute price at entry and exit, no spread
+            (the figure used everywhere since 2026-10-21; also in pnl_mid)
+  pnl_spread  true price + half the spread on buys, - half on sells (reference only)
+
+Each sale is booked on the day it happens (a 2R trim held overnight counts that day).
 
 The executor's own figures are kept as pnl_recorded_mid / pnl_recorded_real.
 A fill with no 1-minute price falls back to its recorded quote (noted).
@@ -159,7 +161,9 @@ def trade_entry(trade, day, lines, repriced=None):
     # Each sale's realized P&L, so a partial sale (the 2R trim) is booked on the day it
     # happens even when the rest is held overnight (2026-10-20, WMT).
     if per_sale:
-        legs_out = [dict(t=ts, qty=q, kind=s["kind"], pnl_real=pr, pnl_mid=pm) for (ts, q, pr, pm), s in zip(per_sale, sells)]
+        # pnl_real is at market prices (user, 2026-10-21): no spread deducted; the
+        # spread-adjusted figure is kept as pnl_spread.
+        legs_out = [dict(t=ts, qty=q, kind=s["kind"], pnl_real=pm, pnl_mid=pm, pnl_spread=pr) for (ts, q, pr, pm), s in zip(per_sale, sells)]
     else:
         legs_out = [dict(t=s["t"], qty=s["qty"], kind=s["kind"],
                          pnl_real=round(s["qty"] * (s["bid"] - buy["ask"]) * 100, 2) if buy and buy.get("ask") is not None and s.get("bid") is not None else None,
@@ -185,7 +189,10 @@ def trade_entry(trade, day, lines, repriced=None):
         "result": " + ".join(s["kind"] for s in sells) or None,
         "buy": buy, "sells": sells,
         "pnl_mid": (t_mid if t_mid is not None else trade.get("pnl_usd")) if closed else None,
-        "pnl_real": (t_real if t_real is not None else real) if closed else None,
+        # Market prices for entry and exit (user, 2026-10-21): the 1-minute traded price, no
+        # spread. Days before REPRICE_FROM have no 1-minute prices and keep their recorded figure.
+        "pnl_real": (t_mid if t_mid is not None else real) if closed else None,
+        "pnl_spread": t_real if closed else None,
         "pnl_recorded_mid": trade.get("pnl_usd") if closed else None, "pnl_recorded_real": real if closed else None,
         "repriced": t_mid is not None,
         "premium": round(buy["qty"] * buy["price"] * 100, 2) if buy and buy["price"] else None,

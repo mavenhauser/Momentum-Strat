@@ -454,7 +454,7 @@ def confirm_results(state, t):
         px = lambda leg: leg.get("true") if leg.get("true") is not None else leg.get("price")
         fills = f"Bought {e['buy']['qty']} @ <b>{px(e['buy']):.2f}</b> · " + ", ".join(
             f"sold {s['qty']} @ <b>{px(s):.2f}</b> ({h(s['kind'])})" for s in e["sells"])
-        note = "; ".join(e["notes"]) if e["notes"] else "confirmed from 1-minute option prices, less half the spread each way"
+        note = "; ".join(e["notes"]) if e["notes"] else "confirmed at market prices (1-minute option prices)"
         notify(f"{title('RESULT')}\n<b>{h(describe(p))}</b>\n{fills}\n\n"
                f"Trade P&amp;L: <b>{money(e['pnl_real'])}</b>\n<i>{h(note)}</i>")
         p["result_sent"] = True
