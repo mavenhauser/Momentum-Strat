@@ -115,7 +115,7 @@ def _sized_off(trade, lines, buy):
 def _true_pnl(trade, buy, sells, repriced):
     """(mid, real, fallbacks) at the 1-minute-history prices, or (None, None, 0)."""
     if not repriced or not buy:
-        return None, None, 0
+        return None, None, 0, []
     legs, fallbacks = [], 0
     for leg, ev in zip([buy] + sells, [e for e in trade["events"]]):
         r = repriced.get(reprice.event_key(trade, ev))
@@ -125,7 +125,7 @@ def _true_pnl(trade, buy, sells, repriced):
             fallbacks += 1
             true = leg["price"] if leg["price"] is not None else None
         if true is None:
-            return None, None, fallbacks
+            return None, None, fallbacks, []
         # A quote logged before the open (the delayed feed at 09:30-09:45 still shows the
         # pre-market book, e.g. 2.00/11.00 on TSLA 382.5C, 2026-10-20) is not a real
         # spread: anything over MAX_SPREAD_FRACTION of the price falls back to the
@@ -136,10 +136,12 @@ def _true_pnl(trade, buy, sells, repriced):
             spread = min(sane) if sane else 0.05 * true
         half = spread / 2
         sign = 1 if leg is buy else -1
-        legs.append((leg["qty"], true, true + sign * half, sign))
-    mid = sum(-s * q * p * 100 for q, p, _, s in legs)
-    real = sum(-s * q * r * 100 for q, _, r, s in legs)
-    return round(mid, 2), round(real, 2), fallbacks
+        legs.append((leg["qty"], true, true + sign * half, sign, leg["t"]))
+    mid = sum(-s * q * p * 100 for q, p, _, s, _ in legs)
+    real = sum(-s * q * r * 100 for q, _, r, s, _ in legs)
+    _, b_true, b_real, _, _ = legs[0]
+    per_sale = [(ts, q, round(q * (r - b_real) * 100, 2), round(q * (p - b_true) * 100, 2)) for q, p, r, _, ts in legs[1:]]
+    return round(mid, 2), round(real, 2), fallbacks, per_sale
 
 
 def trade_entry(trade, day, lines, repriced=None):
@@ -150,7 +152,16 @@ def trade_entry(trade, day, lines, repriced=None):
     real = None
     if buy and buy["ask"] is not None and all(s["bid"] is not None for s in sells):
         real = round((sum(s["qty"] * s["bid"] for s in sells) - buy["qty"] * buy["ask"]) * 100, 2)
-    t_mid, t_real, fb = _true_pnl(trade, buy, sells, repriced) if closed else (None, None, 0)
+    t_mid, t_real, fb, per_sale = _true_pnl(trade, buy, sells, repriced) if sells else (None, None, 0, [])
+    # Each sale's realized P&L, so a partial sale (the 2R trim) is booked on the day it
+    # happens even when the rest is held overnight (2026-10-20, WMT).
+    if per_sale:
+        legs_out = [dict(t=ts, qty=q, kind=s["kind"], pnl_real=pr, pnl_mid=pm) for (ts, q, pr, pm), s in zip(per_sale, sells)]
+    else:
+        legs_out = [dict(t=s["t"], qty=s["qty"], kind=s["kind"],
+                         pnl_real=round(s["qty"] * (s["bid"] - buy["ask"]) * 100, 2) if buy and buy.get("ask") is not None and s.get("bid") is not None else None,
+                         pnl_mid=round(s["qty"] * (s["price"] - buy["price"]) * 100, 2) if buy and buy.get("price") and s.get("price") else None)
+                    for s in sells]
     notes = []
     if t_mid is not None:
         for leg, ev in zip([buy] + sells, trade["events"]):
@@ -177,6 +188,7 @@ def trade_entry(trade, day, lines, repriced=None):
         "premium": round(buy["qty"] * buy["price"] * 100, 2) if buy and buy["price"] else None,
         "sized_off": src, "account": nlv, "notes": notes,
         "grade": trade.get("grade"), "size_fraction": trade.get("size_fraction"),
+        "legs": legs_out,
     }
 
 
@@ -187,9 +199,29 @@ def build_day(day, mode="dry"):
     rp = reprice.reprice_path("paper" if mode == "paper" else "dry")
     repriced = json.loads(rp.read_text()) if rp.exists() and day.isoformat() >= settings.REPRICE_FROM else {}
     real_entries = lambda t: t.get("opened_at", "") >= "2026-10-14T09:30"   # earlier rows are setup tests
-    closed = [t for t in state["closed"] if real_entries(t) and _ny(t["closed_at"]).date() == day]
-    closed.sort(key=lambda t: t["opened_at"])
-    trades = [trade_entry(t, day, lines, repriced) for t in closed]
+    # A trade appears on every day it sold something; each day's P&L counts only that
+    # day's sales (a 2R trim held overnight is booked on the trim day).
+    trades = []
+    for t in sorted([t for t in state["closed"] + list(state["positions"].values()) if real_entries(t)], key=lambda t: t["opened_at"]):
+        closed_today = bool(t.get("closed_at")) and _ny(t["closed_at"]).date() == day
+        e = trade_entry(t, day, lines, repriced)
+        today = [l for l in e["legs"] if _ny(l["t"]).date() == day]
+        if not closed_today and not today:
+            continue
+        if not closed_today or len(today) < len(e["legs"]):
+            e["pnl_trade_real"], e["pnl_trade_mid"] = e["pnl_real"], e["pnl_mid"]
+            e["pnl_real"] = round(sum(l["pnl_real"] or 0 for l in today), 2)
+            e["pnl_mid"] = round(sum(l["pnl_mid"] or 0 for l in today), 2)
+            e["sells"] = [s for s in e["sells"] if _ny(s["t"]).date() == day]
+            e["result"] = " + ".join(s["kind"] for s in e["sells"]) or e["result"]
+            sold = sum(l["qty"] for l in today)
+            if not closed_today:
+                e["partial"] = True
+                e["result"] = f"{e['result']} (partial: {t.get('open_qty', 0)} still open)"
+                e["notes"].append(f"{sold} of {t['qty']} sold today and booked today; the rest is still open")
+            else:
+                e["notes"].append(f"only today's {sold} contracts are booked today; earlier sales were booked on their own day")
+        trades.append(e)
     still_open = [trade_entry(t, day, lines, repriced) for t in state["positions"].values()
                   if real_entries(t) and _ny(t["opened_at"]).date() <= day]
 
