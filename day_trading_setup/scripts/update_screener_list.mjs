@@ -204,7 +204,12 @@ function alertSyncExpression(params) {
       if (!isScreener && !isEntry) return;                      // not ours: never touched
       var key = isScreener ? '#screener' : a.name.slice(P.entryPrefix.length);
       var got = a.condition && a.condition.series && a.condition.series[0];
-      var ok = a.active && !have[key] && notifiesAsWanted(a) && (isScreener ? (P.withScreener && same(screener, got)) : (!!want[key] && same(entry, got)));
+      // A ticker the executor holds keeps its existing alert, whatever its version, until the
+      // position closes: re-creating it replays history under the new rules and TradingView can
+      // lose track of the open trade (AMAT, 2026-10-20).
+      var pinned = !isScreener && (P.pinned || []).indexOf(key) >= 0;
+      var ok = a.active && !have[key] && notifiesAsWanted(a) && (isScreener ? (P.withScreener && same(screener, got)) : (!!want[key] && (pinned || same(entry, got))));
+      if (ok && pinned && !same(entry, got)) (out.pinned = out.pinned || []).push(a.name + ' (kept on v' + (got && got.pine_version) + ': position open)');
       if (ok) { have[key] = true; out.kept.push(a.name); } else drop.push(a);
     });
     var make = [];
@@ -241,6 +246,7 @@ async function syncAlerts(tickers, planOnly) {
   const expression = alertSyncExpression({
     layout: LAYOUT, entryStudy: ENTRY_STUDY, screenerStudy: STUDY, entryPrefix: ENTRY_PREFIX, screenerName: SCREENER_ALERT,
     screenerSymbol: SCREENER_ALERT_SYMBOL, withScreener: WITH_SCREENER_ALERT, webhook: webhookUrl(), planOnly, tickers,
+    pinned: openPositionTickers(),
   });
   for (const t of pages) {
     let c;

@@ -65,6 +65,8 @@ givebackPct = input.float(40, "Giveback: % of the best move", minval = 10, maxva
 // Added 2026-10-20.
 confirmEntry = input.bool(true, "Confirm entry: wait for a break of the trigger bar", group = G_RISK, tooltip = "On (default): after the trigger close, enter only when price breaks the trigger bar's high (longs) / low (shorts) within the next bars below (default 3 = 15 minutes); the entry alert fires the moment it breaks, at that price. Off: enter at the trigger bar's close, as before.", display = display.none)
 confirmBars = input.int(3, "Confirm within (bars)", minval = 1, maxval = 6, group = G_RISK, display = display.none)
+// Added 2026-10-21.
+minStopNoise = input.float(2.0, "Min stop: x the typical 5-min bar (0 = off)", minval = 0, step = 0.25, group = G_RISK, tooltip = "The stop is at least this many times the stock's typical bar (median high-low of the last 390 bars, about 5 sessions on 5-minute), so ordinary noise can't take it out. Stops tighter than ~1.5x won 32% of the time on Oct 14-20; widening them to 2x lifted the replay from +23.6R to +35.7R.", display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744
@@ -361,9 +363,12 @@ vwapOkL  = not vwapFilter or close > vwapV
 vwapOkS  = not vwapFilter or close < vwapV
 canEnter = barstate.isconfirmed and pos == 0 and pendDir == 0 and not exitNow and rth and inWindow and tradesToday < maxTrades
 
-lStop = lSwing - stopBuf * atr
+// Stop: beyond the retest swing, but never closer than minStopNoise typical bars.
+noiseBar = ta.percentile_nearest_rank(high - low, 390, 50)
+minStop  = minStopNoise > 0 and not na(noiseBar) ? minStopNoise * noiseBar : 0.0
+lStop = math.min(lSwing - stopBuf * atr, close - minStop)
 lRisk = close - lStop
-sStop = sSwing + stopBuf * atr
+sStop = math.max(sSwing + stopBuf * atr, close + minStop)
 sRisk = sStop - close
 
 longSig = canEnter and allowLong and lArmed and lRetest and close > e8 and close > open and close > lLvl and close - e8 <= maxExt * atr and trendOkL and vwapOkL and lRisk > 0 and lRisk <= maxRiskAtr * atr
