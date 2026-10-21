@@ -126,11 +126,14 @@ def _true_pnl(trade, buy, sells, repriced):
             true = leg["price"] if leg["price"] is not None else None
         if true is None:
             return None, None, fallbacks, []
-        # A quote logged before the open (the delayed feed at 09:30-09:45 still shows the
-        # pre-market book, e.g. 2.00/11.00 on TSLA 382.5C, 2026-10-20) is not a real
-        # spread: anything over MAX_SPREAD_FRACTION of the price falls back to the
-        # trade's other legs' spreads, else 5% of the price.
-        if spread is None or spread > settings.MAX_SPREAD_FRACTION * true:
+        # In the first ~15 minutes the delayed feed still shows the pre-market book (TSLA
+        # 382.5C at 09:35 on 2026-10-20: 2.00/11.00), which is not a real spread. Only a
+        # fill in that window with a spread over MAX_SPREAD_FRACTION of the price falls
+        # back to the trade's other legs' spreads (else 5% of the price); wide spreads
+        # later in the day are real (a $0.05 option trading 0.03/0.06) and are kept.
+        lt = _ny(leg["t"])
+        early = (9, 30) <= (lt.hour, lt.minute) < (9, 46)
+        if spread is None or (early and spread > settings.MAX_SPREAD_FRACTION * true):
             sane = [l["ask"] - l["bid"] for l in [buy] + sells if l.get("bid") is not None and l.get("ask") is not None
                     and l.get("price") and (l["ask"] - l["bid"]) <= settings.MAX_SPREAD_FRACTION * l["price"]]
             spread = min(sane) if sane else 0.05 * true
