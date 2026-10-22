@@ -20,6 +20,7 @@ _ENTRY = re.compile(rf"^DTS: (LONG|SHORT) {_TICK} @ {_NUM} \| stop {_NUM} \| tar
 _TARGET = re.compile(rf"^DTS: {_TICK} hit {_NUM}R target @ {_NUM} - take partial, stop to break-even {_NUM}")
 _EXIT = re.compile(rf"^DTS: EXIT (LONG|SHORT) {_TICK} \((STOP|BE|TRAIL|EOD|TIME)\) @ {_NUM}")
 _GRADE = re.compile(r"\| grade (A\+|A|B|C) (OUTSIDE|inside)\s*$")   # since DTS Entry v6.0 (2026-10-16)
+_CHOP = re.compile(r"\| choppy \(QQQ crosses (\d+)\)")   # since DTS Entry v13.0 (2026-10-22): half size
 _APLUS = re.compile(rf"^DTS: A\+ OUTSIDE (LONG|SHORT) {_TICK} @ {_NUM}")
 
 
@@ -39,6 +40,7 @@ class Signal:
     level: Optional[str] = None    # ORH / PMH / PDH / PWH / ORL / ...
     reason: Optional[str] = None   # exit reason
     grade: Optional[str] = None    # entry's setup grade: "A+ OUTSIDE", "A inside", ... (None before v6.0)
+    chop: Optional[int] = None     # QQQ VWAP crosses when the market was flagged choppy (None = not choppy)
     raw: str = field(default="", repr=False)
 
 
@@ -48,7 +50,8 @@ def parse(message: str) -> Signal:
     if m:
         return Signal("ENTRY", ticker=m.group(2), side=m.group(1), price=_f(m.group(3)), stop=_f(m.group(4)),
                       target=_f(m.group(5)), r_multiple=_f(m.group(6)), level=m.group(7),
-                      grade=(lambda g: f"{g.group(1)} {g.group(2)}" if g else None)(_GRADE.search(text)), raw=text)
+                      grade=(lambda g: f"{g.group(1)} {g.group(2)}" if g else None)(_GRADE.search(text)),
+                      chop=(lambda c: int(c.group(1)) if c else None)(_CHOP.search(text)), raw=text)
     m = _TARGET.match(text)
     if m:
         return Signal("TARGET", ticker=m.group(1), r_multiple=_f(m.group(2)), price=_f(m.group(3)),

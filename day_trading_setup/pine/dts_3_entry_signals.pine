@@ -70,6 +70,7 @@ minStopNoise = input.float(2.0, "Min stop: x the typical 5-min bar (0 = off)", m
 // Added 2026-10-22.
 stopWiden = input.float(1.5, "Stop distance multiplier (after the min stop)", minval = 1, step = 0.25, group = G_RISK, tooltip = "The stop is placed this many times further from the entry than the swing / min-stop rule gives; the 2R target is measured from it. The 'skip if wider than x ATR' check still uses the unwidened stop. Oct 14-21 replay (with the QQQ chop gate): 1.5x lifted trend days from +39R to +58.5R.", display = display.none)
 chopCrosses = input.int(8, "QQQ chop gate: no entries after this many QQQ VWAP crosses (0 = off)", minval = 0, group = G_RISK, tooltip = "Counts how often QQQ's 1-minute close has crossed its session VWAP today. Above this, the index is chopping and new entries (and pending confirmations) are held back. Trend days Oct 14/16 never passed 5; choppy days reached 9-13.", display = display.none)
+chopMode = input.string("Half size", "When QQQ is choppy", options = ["Half size", "Skip"], group = G_RISK, tooltip = "Half size (default, 2026-10-22): entries are still sent, tagged 'choppy (QQQ crosses N)', and the executor buys half its normal size. Skip: no entries while QQQ is choppy.", display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744
@@ -376,7 +377,8 @@ f_vwapCrosses() =>
     n
 qqqCross = request.security(ticker.new("NASDAQ", "QQQ", session.regular), "1", f_vwapCrosses())
 chopOn = chopCrosses > 0 and not na(qqqCross) and qqqCross > chopCrosses
-canEnter = barstate.isconfirmed and pos == 0 and pendDir == 0 and not exitNow and rth and inWindow and tradesToday < maxTrades and not chopOn
+chopSkip = chopOn and chopMode == "Skip"
+canEnter = barstate.isconfirmed and pos == 0 and pendDir == 0 and not exitNow and rth and inWindow and tradesToday < maxTrades and not chopSkip
 
 // Stop: beyond the retest swing, but never closer than minStopNoise typical bars.
 noiseBar = ta.percentile_nearest_rank(high - low, 390, 50)
@@ -415,7 +417,7 @@ string goGrade = ""
 if pendDir != 0 and pos == 0
     if bar_index > pendBar + confirmBars or not rth
         pendDir := 0
-    else if bar_index > pendBar and inWindow and not chopOn and (pendDir == 1 ? high >= pendLvl : low <= pendLvl)
+    else if bar_index > pendBar and inWindow and not chopSkip and (pendDir == 1 ? high >= pendLvl : low <= pendLvl)
         goDir   := pendDir
         goPx    := pendDir == 1 ? math.max(open, pendLvl) : math.min(open, pendLvl)
         goStp   := pendStp
@@ -463,7 +465,7 @@ if goDir != 0
     side = goDir == 1 ? "LONG" : "SHORT"
     txt = side + " · " + goName + " retest\nEntry " + fmt(entPx) + "\nStop " + fmt(stpPx) + "\nTarget " + fmt(tgtPx)
     label.new(bar_index, close, txt, yloc = goDir == 1 ? yloc.belowbar : yloc.abovebar, style = goDir == 1 ? label.style_label_up : label.style_label_down, color = goDir == 1 ? #00C853 : #D50000, textcolor = color.white, size = size.small)
-    alert("DTS: " + side + " " + syminfo.ticker + " @ " + fmt(entPx) + " | stop " + fmt(stpPx) + " | target " + fmt(tgtPx) + " (" + str.tostring(rr) + "R) | " + goName + " breakout + 8 EMA retest | grade " + goGrade, confirmEntry ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
+    alert("DTS: " + side + " " + syminfo.ticker + " @ " + fmt(entPx) + " | stop " + fmt(stpPx) + " | target " + fmt(tgtPx) + " (" + str.tostring(rr) + "R) | " + goName + " breakout + 8 EMA retest" + (chopOn ? " | choppy (QQQ crosses " + str.tostring(qqqCross) + ")" : "") + " | grade " + goGrade, confirmEntry ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
 
 plotshape(retestNowL and pos == 0 and allowLong, "Retest (long) - get ready", shape.diamond, location.belowbar, color.new(C_BULL, 30), size = size.tiny, display = display.all - display.status_line)
 plotshape(retestNowS and pos == 0 and allowShort, "Retest (short) - get ready", shape.diamond, location.abovebar, color.new(C_BEAR, 30), size = size.tiny, display = display.all - display.status_line)

@@ -44,6 +44,9 @@ SIZE_BY_GRADE = {
     "A OUTSIDE": 0.035,    # 3 of 4, outside
 }
 SIZE_DEFAULT = 0.025       # everything else, and alerts without a grade
+# Choppy market (2026-10-22): when DTS Entry tags an entry "choppy (QQQ crosses N)" -
+# QQQ has crossed its VWAP more than 8 times that day - the size is multiplied by this.
+CHOP_SIZE_FACTOR = 0.5
 MIN_CONTRACTS = 1            # if 1% buys less than one contract, buy one anyway
 
 # Contract selection. Expiry: this week's last listed expiry (normally Friday),

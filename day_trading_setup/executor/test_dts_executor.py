@@ -85,6 +85,12 @@ class ContractTest(unittest.TestCase):
         s = signals.parse(base + " | grade B inside")
         self.assertEqual((s.kind, s.grade, s.target), ("ENTRY", "B inside", 178.68))
 
+    def test_parse_chop(self):
+        base = "DTS: SHORT ORCL @ 129.21 | stop 129.97 | target 127.69 (2R) | ORL breakout + 8 EMA retest"
+        s = signals.parse(base + " | choppy (QQQ crosses 9) | grade A inside")
+        self.assertEqual((s.kind, s.chop, s.grade), ("ENTRY", 9, "A inside"))
+        self.assertIsNone(signals.parse(base + " | grade A inside").chop)
+
     def test_min_delta_override(self):
         # 0DTE floor passed explicitly: a 0.12-delta strike only qualifies if the floor is lowered
         qs = {100: self.q(4.90, 5.10, 0.55), 102.5: self.q(3.80, 4.00, 0.45), 107.5: self.q(1.90, 2.00, 0.12)}

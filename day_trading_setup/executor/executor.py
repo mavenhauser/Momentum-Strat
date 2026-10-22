@@ -291,7 +291,7 @@ def choose_contract(broker, sig, t):
     quotes = {k: snap.get(opts[k].streamer_symbol) or {} for k in look}
     nlv, _ = broker.nlv()
     move = abs(sig.target - sig.price) if sig.target else None
-    frac = contracts.size_fraction(sig.grade)
+    frac = contracts.size_fraction(sig.grade) * (settings.CHOP_SIZE_FACTOR if sig.chop is not None else 1.0)
     floor = settings.MIN_DELTA_0DTE if expiry == today else settings.MIN_DELTA
     k, qty, rule, delta = contracts.choose_strike(quotes, sig.price, right, nlv * frac, move, floor)
     if k is None:
@@ -299,7 +299,7 @@ def choose_contract(broker, sig, t):
     return {"ticker": sig.ticker, "right": right, "expiry": expiry.isoformat(),
             "expiry_ib": expiry.strftime("%Y%m%d"), "strike": k, "streamer": opts[k].streamer_symbol,
             "qty_plan": qty, "delta": delta, "sizing_rule": rule,
-            "grade": sig.grade, "size_fraction": frac}, None
+            "grade": sig.grade, "size_fraction": frac, "chop": sig.chop}, None
 
 
 def skip(state, sig, t, reason):
@@ -354,7 +354,8 @@ def on_entry(broker, state, sig, t):
            f"Expiry {expiry_label(pos)} · price <b>{avg:.2f}</b>\n\n"
            f"TradingView {signal_line(sig)} @ {sig.price}\n"
            f"Stop {sig.stop} · Target {sig.target} · {h(sig.level)} breakout\n\n"
-           f"Grade <b>{h(sig.grade or 'none (pre-v6 alert)')}</b> → size <b>{pos.get('size_fraction', 0):.1%}</b>\n"
+           f"Grade <b>{h(sig.grade or 'none (pre-v6 alert)')}</b> → size <b>{pos.get('size_fraction', 0):.1%}</b>"
+           + (f" (half: choppy market, QQQ crossed VWAP {sig.chop}×)" if sig.chop is not None else "") + "\n"
            f"Premium <b>${filled * avg * 100:,.0f}</b> = {filled * avg * 100 / nlv:.1%} of ${nlv:,.0f} ({h(nlv_src)})\n"
            f"Strike chosen: delta {abs(pos['delta']) if pos.get('delta') is not None else float('nan'):.2f} · {h(pos.get('sizing_rule', ''))}\n"
            f"<i>{h(note)}</i>")
