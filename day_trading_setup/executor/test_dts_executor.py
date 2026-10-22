@@ -183,6 +183,15 @@ class ContractTest(unittest.TestCase):
         self.assertFalse(contracts.time_stop_due({**pos, "trimmed": True}, datetime(2026, 10, 16, 15, 30, tzinfo=ny)))  # reached 2R
         self.assertFalse(contracts.time_stop_due({**pos, "expiry": "2026-10-23"}, datetime(2026, 10, 16, 15, 30, tzinfo=ny)))  # next week's
 
+    def test_loss_streak(self):
+        d = "2026-10-21"
+        c = lambda hm, why, trimmed=False: {"closed_at": f"{d}T{hm}:00-04:00", "close_reason": why, "trimmed": trimmed}
+        stops = [c("10:25", "TradingView STOP @ 1"), c("10:35", "TradingView STOP @ 2"), c("10:55", "TradingView STOP @ 3")]
+        self.assertEqual(contracts.loss_streak(stops, date(2026, 10, 21)), 3)
+        self.assertEqual(contracts.loss_streak(stops + [c("11:30", "TradingView TRAIL @ 4", True)], date(2026, 10, 21)), 0)   # a winner resets
+        self.assertEqual(contracts.loss_streak(stops[:2] + [c("10:40", "TradingView BE @ 5", True)] + stops[2:3], date(2026, 10, 21)), 1)
+        self.assertEqual(contracts.loss_streak(stops, date(2026, 10, 22)), 0)                                               # new day
+
     def test_sessions(self):
         self.assertEqual(contracts.sessions_held(date(2026, 10, 15), date(2026, 10, 15)), 1)   # Thu
         self.assertEqual(contracts.sessions_held(date(2026, 10, 16), date(2026, 10, 19)), 2)   # Fri -> Mon

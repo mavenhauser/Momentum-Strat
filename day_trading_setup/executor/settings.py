@@ -97,6 +97,12 @@ MIN_TARGET_TO_SPREAD = 2.0
 TRIM_FRACTION = 0.5
 
 # Hard limits.
+# Losing-streak brake (2026-10-22): after this many stop-outs in a row in one day, new
+# entries are skipped for the rest of the day - except setups graded in
+# BRAKE_OVERRIDE_GRADES (the strongest conviction, full 5% size). A trade that reached
+# 2R, or exited at break-even / trail / time, resets the streak.
+LOSS_BRAKE = 3
+BRAKE_OVERRIDE_GRADES = {"A+ OUTSIDE"}
 MAX_OPEN_POSITIONS = 10      # raised from 5 (2026-10-18): on Oct 16 all 5 signals the cap blocked reached 2R; 10 would have taken them all
 MAX_HOLD_SESSIONS = 2        # mirrors "Max sessions held" on DTS Entry (backup only)
 

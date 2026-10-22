@@ -67,6 +67,9 @@ confirmEntry = input.bool(true, "Confirm entry: wait for a break of the trigger 
 confirmBars = input.int(3, "Confirm within (bars)", minval = 1, maxval = 6, group = G_RISK, display = display.none)
 // Added 2026-10-21.
 minStopNoise = input.float(2.0, "Min stop: x the typical 5-min bar (0 = off)", minval = 0, step = 0.25, group = G_RISK, tooltip = "The stop is at least this many times the stock's typical bar (median high-low of the last 390 bars, about 5 sessions on 5-minute), so ordinary noise can't take it out. Stops tighter than ~1.5x won 32% of the time on Oct 14-20; widening them to 2x lifted the replay from +23.6R to +35.7R.", display = display.none)
+// Added 2026-10-22.
+stopWiden = input.float(1.5, "Stop distance multiplier (after the min stop)", minval = 1, step = 0.25, group = G_RISK, tooltip = "The stop is placed this many times further from the entry than the swing / min-stop rule gives; the 2R target is measured from it. The 'skip if wider than x ATR' check still uses the unwidened stop. Oct 14-21 replay (with the QQQ chop gate): 1.5x lifted trend days from +39R to +58.5R.", display = display.none)
+chopCrosses = input.int(8, "QQQ chop gate: no entries after this many QQQ VWAP crosses (0 = off)", minval = 0, group = G_RISK, tooltip = "Counts how often QQQ's 1-minute close has crossed its session VWAP today. Above this, the index is chopping and new entries (and pending confirmations) are held back. Trend days Oct 14/16 never passed 5; choppy days reached 9-13.", display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744
@@ -361,18 +364,34 @@ trendOkL = trendFilter == "Off" ? true : trendFilter == "8 > 21 only" ? e8 > e21
 trendOkS = trendFilter == "Off" ? true : trendFilter == "8 > 21 only" ? e8 < e21 : trend == -1
 vwapOkL  = not vwapFilter or close > vwapV
 vwapOkS  = not vwapFilter or close < vwapV
-canEnter = barstate.isconfirmed and pos == 0 and pendDir == 0 and not exitNow and rth and inWindow and tradesToday < maxTrades
+// QQQ chop gate: QQQ's 1-minute close crossing its session VWAP, counted from the open.
+f_vwapCrosses() =>
+    vw = ta.vwap(hlc3)
+    above = close > vw
+    var int n = 0
+    if ta.change(time("D")) != 0
+        n := 0
+    else if above != above[1]
+        n += 1
+    n
+qqqCross = request.security(ticker.new("NASDAQ", "QQQ", session.regular), "1", f_vwapCrosses())
+chopOn = chopCrosses > 0 and not na(qqqCross) and qqqCross > chopCrosses
+canEnter = barstate.isconfirmed and pos == 0 and pendDir == 0 and not exitNow and rth and inWindow and tradesToday < maxTrades and not chopOn
 
 // Stop: beyond the retest swing, but never closer than minStopNoise typical bars.
 noiseBar = ta.percentile_nearest_rank(high - low, 390, 50)
 minStop  = minStopNoise > 0 and not na(noiseBar) ? minStopNoise * noiseBar : 0.0
-lStop = math.min(lSwing - stopBuf * atr, close - minStop)
-lRisk = close - lStop
-sStop = math.max(sSwing + stopBuf * atr, close + minStop)
-sRisk = sStop - close
+lStopB = math.min(lSwing - stopBuf * atr, close - minStop)      // swing / min-stop rule
+lRiskB = close - lStopB
+lStop  = close - stopWiden * lRiskB                              // widened (stopWiden)
+lRisk  = close - lStop
+sStopB = math.max(sSwing + stopBuf * atr, close + minStop)
+sRiskB = sStopB - close
+sStop  = close + stopWiden * sRiskB
+sRisk  = sStop - close
 
-longSig = canEnter and allowLong and lArmed and lRetest and close > e8 and close > open and close > lLvl and close - e8 <= maxExt * atr and trendOkL and vwapOkL and lRisk > 0 and lRisk <= maxRiskAtr * atr
-shortSig = canEnter and not longSig and allowShort and sArmed and sRetest and close < e8 and close < open and close < sLvl and e8 - close <= maxExt * atr and trendOkS and vwapOkS and sRisk > 0 and sRisk <= maxRiskAtr * atr
+longSig = canEnter and allowLong and lArmed and lRetest and close > e8 and close > open and close > lLvl and close - e8 <= maxExt * atr and trendOkL and vwapOkL and lRiskB > 0 and lRiskB <= maxRiskAtr * atr
+shortSig = canEnter and not longSig and allowShort and sArmed and sRetest and close < e8 and close < open and close < sLvl and e8 - close <= maxExt * atr and trendOkS and vwapOkS and sRiskB > 0 and sRiskB <= maxRiskAtr * atr
 
 // --- Setup grade (also drives the A+ banner below). OUTSIDE LONG: price above
 // both PDH and PMH (outside yesterday's range and the premarket range). Grade =
@@ -396,7 +415,7 @@ string goGrade = ""
 if pendDir != 0 and pos == 0
     if bar_index > pendBar + confirmBars or not rth
         pendDir := 0
-    else if bar_index > pendBar and inWindow and (pendDir == 1 ? high >= pendLvl : low <= pendLvl)
+    else if bar_index > pendBar and inWindow and not chopOn and (pendDir == 1 ? high >= pendLvl : low <= pendLvl)
         goDir   := pendDir
         goPx    := pendDir == 1 ? math.max(open, pendLvl) : math.min(open, pendLvl)
         goStp   := pendStp

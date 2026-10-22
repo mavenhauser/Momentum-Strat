@@ -317,6 +317,14 @@ def on_entry(broker, state, sig, t):
         why = f"stop too tight: {contracts.stop_pct(sig.price, sig.stop):.2f}% of price (min {settings.MIN_STOP_PCT:g}%)"
         skip(state, sig, t, why)
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\nStop {sig.stop} · Target {sig.target}\n\n<b>{h(why)}</b>")
+    streak = contracts.loss_streak(state["closed"], t.date())
+    if streak >= settings.LOSS_BRAKE:
+        if sig.grade in settings.BRAKE_OVERRIDE_GRADES:
+            log.info("loss brake (%d in a row) overridden by a %s setup: %s", streak, sig.grade, sig.raw)
+        else:
+            why = f"loss brake: {streak} stop-outs in a row today (only {', '.join(sorted(settings.BRAKE_OVERRIDE_GRADES))} setups taken)"
+            skip(state, sig, t, why)
+            return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\nGrade {h(sig.grade or 'none')}\n\n<b>{h(why)}</b>")
     if len(state["positions"]) >= settings.MAX_OPEN_POSITIONS:
         skip(state, sig, t, f"position limit ({settings.MAX_OPEN_POSITIONS} open)")
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\nAlready at the limit of {settings.MAX_OPEN_POSITIONS} open positions")

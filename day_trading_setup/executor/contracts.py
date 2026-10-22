@@ -148,6 +148,17 @@ def choose_strike(quotes: dict, entry: float, right: str, budget: float, move: f
     return None, 0, f"no liquid strike at or out of the money (price >= ${settings.MIN_OPTION_PRICE:.2f}, spread <= {settings.MAX_SPREAD_FRACTION:.0%}, OI >= {settings.MIN_OPEN_INTEREST}, volume >= {settings.MIN_OPTION_VOLUME})", None
 
 
+def loss_streak(closed, day) -> int:
+    """Stop-outs in a row at the end of `day`'s closed trades (in closing order). A loss is
+    a trade that never reached 2R and closed on a stop or a time stop; anything else resets."""
+    streak = 0
+    for t in sorted((t for t in closed if (t.get("closed_at") or "")[:10] == day.isoformat()), key=lambda t: t["closed_at"]):
+        why = t.get("close_reason") or ""
+        lost = not t.get("trimmed") and ("STOP" in why or "time stop" in why)
+        streak = streak + 1 if lost else 0
+    return streak
+
+
 def time_stop_due(pos, now) -> bool:
     """True for a same-day (0DTE) position that has not reached 2R within
     ZERO_DTE_TIME_STOP_MIN minutes of entry."""
