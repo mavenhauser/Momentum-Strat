@@ -173,7 +173,7 @@
   <section class="changes" id="changes" aria-label="Rule changes" hidden></section>
   <div class="status" id="status">Loading journal…</div>
 
-  <footer>Updated by Claude after each trading day from the executor's records (day_trading_setup/executor/journal.py). Dry-run days are simulated fills; no orders were sent.</footer>
+  <footer>Updated by Claude after each trading day from the executor's records (day_trading_setup/executor/journal.py). P&amp;L is at market prices.</footer>
 </div>
 
 <script>
@@ -261,7 +261,7 @@
       let body = "";
       if (d && !out) {
         const v = pnl(d.summary); cls.push("has", v > 0 ? "win" : v < 0 ? "lose" : "even"); if (iso === S.selected) cls.push("sel");
-        const chips = `<span class="chips"><span class="chip ${d.mode === "PAPER" ? "paper" : "dry"}">${d.mode === "PAPER" ? "Paper" : "Dry"}</span>${d.summary?.open ? `<span class="chip open">${d.summary.open} open</span>` : ""}</span>`;
+        const chips = `<span class="chips">${d.summary?.open ? `<span class="chip open">${d.summary.open} open</span>` : ""}</span>`;
         body = `${chips}<span class="pnl ${tone(v)}">${amt(v)}</span><span class="meta">${d.summary?.trades || 0} trades · ${d.summary?.wins || 0}W ${d.summary?.losses || 0}L</span>`;
       }
       const tag = d && !out ? "button" : "div";
@@ -296,7 +296,7 @@
     const skips = (d.skipped || []).map((k) => `<span class="skip"><span class="t">${esc(String(k.t).slice(11, 16))}</span><b>${esc(k.side)} ${esc(k.ticker)}</b> · ${esc(k.reason)}</span>`).join("");
     const errs = (d.errors || []).map((e) => `<div class="err"><span class="mono">${esc(String(e.t).slice(11, 16))}</span> ${esc(e.text)}</div>`).join("");
     el.innerHTML = `
-      <div class="detail-head"><h2>${esc(long)}</h2><span class="chip ${d.mode === "PAPER" ? "paper" : "dry"}">${esc(d.mode)}</span>${d.account ? `<span class="small" style="color:var(--ink-soft);font-size:13px">account $${Math.round(d.account).toLocaleString("en-US")}</span>` : ""}</div>
+      <div class="detail-head"><h2>${esc(long)}</h2>${d.account ? `<span class="small" style="color:var(--ink-soft);font-size:13px">account $${Math.round(d.account).toLocaleString("en-US")}</span>` : ""}</div>
       <div class="tiles">
         <div class="tile"><span class="label">Net P&amp;L</span><span class="v ${tone(v)}">${money(v)}</span><span class="sub">market prices</span></div>
         <div class="tile"><span class="label">Trades</span><span class="v">${esc(s.trades ?? 0)}</span><span class="sub">${esc(s.wins ?? 0)} won · ${esc(s.losses ?? 0)} lost</span></div>
