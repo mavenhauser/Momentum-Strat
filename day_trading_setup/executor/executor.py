@@ -29,6 +29,7 @@ import logging
 import os
 import socket
 import sys
+import time
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
@@ -478,6 +479,41 @@ def on_exit(broker, state, sig, t):
     close_position(broker, state, pos, t, f"TradingView {sig.reason} @ {sig.price}", sig.raw)
 
 
+ALERT_ATTEMPTS = 3
+ALERT_RETRY_PAUSE = 5          # seconds between attempts
+PENDING_GIVE_UP = 60           # sweep retries (about an hour) before telling the user
+
+
+def retry_pending(state, t):
+    """Retry exits / 2R sales that failed: called every minute by the sweep job.
+    Returns True if anything changed."""
+    pending = state.get("pending") or []
+    if not pending:
+        return False
+    keep = []
+    for item in pending:
+        sig = signals.parse(item["raw"])
+        if sig.ticker not in state["positions"]:
+            log.info("pending %s dropped: no open position any more", item["raw"])
+            continue
+        broker = Broker()
+        try:
+            broker.connect()
+            {"TARGET": on_target, "EXIT": on_exit}[sig.kind](broker, state, sig, t)
+            log.info("pending %s handled on retry %d", item["raw"], item["tries"] + 1)
+        except Exception as e:
+            item["tries"] += 1
+            log.warning("pending %s still failing (%s: %s)", item["raw"], type(e).__name__, e)
+            if item["tries"] == PENDING_GIVE_UP:
+                notify(f"{title('⚠️ EXIT STILL FAILING')}\n<code>{h(item['raw'][:120])}</code>\n\n"
+                       f"Tried {item['tries']} times since {h(item['t'][11:16])} ET - check the position by hand.")
+            keep.append(item)
+        finally:
+            broker.close()
+    state["pending"] = keep
+    return True
+
+
 def sweep(broker, state, t):
     """Every minute in the session: the 0DTE time stop (no 2R within
     ZERO_DTE_TIME_STOP_MIN minutes). At 15:56 ET: anything expiring today; anything past
@@ -531,6 +567,8 @@ def main(argv=None):
 
         if a.sweep:
             check_tws_port(t)
+            if retry_pending(state, t):
+                save_state(state)
             if confirm_results(state, t):
                 save_state(state)
             in_session = t.weekday() < 5 and (9, 30) <= (t.hour, t.minute) < (16, 0)
@@ -561,17 +599,33 @@ def main(argv=None):
             save_state(state)
             return 0
 
-        broker = Broker()
-        try:
-            broker.connect()
-            {"ENTRY": on_entry, "TARGET": on_target, "EXIT": on_exit}[sig.kind](broker, state, sig, t)
-        except Exception as e:
-            log.exception("failed handling %s", sig.raw)
-            notify(f"{title('ERROR')}\nAlert: <code>{h(sig.raw[:120])}</code>\n\n<b>{type(e).__name__}</b> {h(e)}".rstrip())
+        # Retry a failed alert (2026-10-22: a CRWD trail exit was lost to one ReadTimeout and
+        # the runner stayed open a day). Each attempt reconnects. An exit / 2R sale that still
+        # fails is queued, and the every-minute sweep keeps retrying it.
+        err = None
+        for attempt in range(ALERT_ATTEMPTS):
+            broker = Broker()
+            try:
+                broker.connect()
+                {"ENTRY": on_entry, "TARGET": on_target, "EXIT": on_exit}[sig.kind](broker, state, sig, t)
+                err = None
+                break
+            except Exception as e:
+                err = e
+                log.exception("failed handling %s (attempt %d of %d)", sig.raw, attempt + 1, ALERT_ATTEMPTS)
+            finally:
+                broker.close()
+                save_state(state)
+            time.sleep(ALERT_RETRY_PAUSE)
+        if err is not None:
+            queued = sig.kind in ("TARGET", "EXIT") and sig.ticker in state["positions"]
+            if queued:
+                state.setdefault("pending", []).append({"raw": sig.raw, "t": t.isoformat(), "tries": ALERT_ATTEMPTS})
+                save_state(state)
+            notify(f"{title('ERROR')}\nAlert: <code>{h(sig.raw[:120])}</code>\n\n<b>{type(err).__name__}</b> {h(err)}"
+                   + ("\n\n<i>Failed after %d tries; retrying every minute until it goes through.</i>" % ALERT_ATTEMPTS if queued
+                      else "\n\n<i>Failed after %d tries.</i>" % ALERT_ATTEMPTS))
             return 1
-        finally:
-            broker.close()
-            save_state(state)
     return 0
 
 
