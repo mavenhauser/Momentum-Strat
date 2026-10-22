@@ -159,6 +159,12 @@ def loss_streak(closed, day) -> int:
     return streak
 
 
+def close_before_overnight(pos) -> bool:
+    """True if the 15:56 sweep should sell this position rather than hold it overnight:
+    it has not reached 2R (runners past 2R, stop at break-even, are held)."""
+    return settings.HOLD_OVERNIGHT_ONLY_PAST_2R and not pos.get("trimmed")
+
+
 def time_stop_due(pos, now) -> bool:
     """True for a same-day (0DTE) position that has not reached 2R within
     ZERO_DTE_TIME_STOP_MIN minutes of entry."""

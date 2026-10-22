@@ -480,8 +480,9 @@ def on_exit(broker, state, sig, t):
 
 def sweep(broker, state, t):
     """Every minute in the session: the 0DTE time stop (no 2R within
-    ZERO_DTE_TIME_STOP_MIN minutes). At 15:56 ET, backup closes: anything expiring
-    today, and anything past the max hold if TradingView's TIME alert never arrived."""
+    ZERO_DTE_TIME_STOP_MIN minutes). At 15:56 ET: anything expiring today; anything past
+    the max hold if TradingView's TIME alert never arrived; and anything that has not
+    reached 2R (only runners past 2R are held overnight)."""
     if t.weekday() >= 5 or not ((9, 30) <= (t.hour, t.minute) < (16, 0)):
         return
     for pos in list(state["positions"].values()):
@@ -497,6 +498,8 @@ def sweep(broker, state, t):
             close_position(broker, state, pos, t, "expiry day, closed by the 15:56 sweep", "sweep")
         elif held >= settings.MAX_HOLD_SESSIONS:
             close_position(broker, state, pos, t, f"held {held} sessions, closed by the 15:56 sweep", "sweep")
+        elif contracts.close_before_overnight(pos):
+            close_position(broker, state, pos, t, "no overnight hold before 2R: closed by the 15:56 sweep", "sweep")
 
 
 # ---------------------------------------------------------------- main

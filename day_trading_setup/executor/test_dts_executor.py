@@ -198,6 +198,10 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(contracts.loss_streak(stops[:2] + [c("10:40", "TradingView BE @ 5", True)] + stops[2:3], date(2026, 10, 21)), 1)
         self.assertEqual(contracts.loss_streak(stops, date(2026, 10, 22)), 0)                                               # new day
 
+    def test_close_before_overnight(self):
+        self.assertTrue(contracts.close_before_overnight({"trimmed": False}))      # not yet 2R: sold at 15:56
+        self.assertFalse(contracts.close_before_overnight({"trimmed": True}))      # runner past 2R: held
+
     def test_sessions(self):
         self.assertEqual(contracts.sessions_held(date(2026, 10, 15), date(2026, 10, 15)), 1)   # Thu
         self.assertEqual(contracts.sessions_held(date(2026, 10, 16), date(2026, 10, 19)), 2)   # Fri -> Mon

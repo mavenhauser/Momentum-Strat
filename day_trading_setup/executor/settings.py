@@ -108,6 +108,11 @@ LOSS_BRAKE = 3
 BRAKE_OVERRIDE_GRADES = {"A+ OUTSIDE"}
 MAX_OPEN_POSITIONS = 10      # raised from 5 (2026-10-18): on Oct 16 all 5 signals the cap blocked reached 2R; 10 would have taken them all
 MAX_HOLD_SESSIONS = 2        # mirrors "Max sessions held" on DTS Entry (backup only)
+# Overnight rule (2026-10-22, the user's idea): at the 15:56 sweep, a position that has not
+# reached 2R is sold; only runners past 2R (stop at break-even) are held overnight. On
+# Oct 14-21 the not-yet-2R overnight holds lost -$2,112 held vs +$1,896 sold at the close
+# (TSLA / MRVL / AMD gapped through their stops on Oct 22).
+HOLD_OVERNIGHT_ONLY_PAST_2R = True
 
 # Time rules (New York). Entries only inside the regular session; the safety
 # sweep runs after TradingView's own 15:55 alerts have had time to arrive.
