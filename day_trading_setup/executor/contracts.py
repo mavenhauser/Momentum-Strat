@@ -159,10 +159,18 @@ def loss_streak(closed, day) -> int:
     return streak
 
 
+def weekend_swing(pos) -> bool:
+    """True for a Friday entry from FRIDAY_SWING_FROM (next week's expiry): a swing trade,
+    held over the weekend even before 2R."""
+    opened = datetime.fromisoformat(pos["opened_at"])
+    return opened.weekday() == 4 and (opened.hour, opened.minute) >= settings.FRIDAY_SWING_FROM
+
+
 def close_before_overnight(pos) -> bool:
     """True if the 15:56 sweep should sell this position rather than hold it overnight:
-    it has not reached 2R (runners past 2R, stop at break-even, are held)."""
-    return settings.HOLD_OVERNIGHT_ONLY_PAST_2R and not pos.get("trimmed")
+    it has not reached 2R (runners past 2R, stop at break-even, are held) and is not a
+    Friday-afternoon swing."""
+    return settings.HOLD_OVERNIGHT_ONLY_PAST_2R and not pos.get("trimmed") and not weekend_swing(pos)
 
 
 def time_stop_due(pos, now) -> bool:

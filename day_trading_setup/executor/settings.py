@@ -113,6 +113,13 @@ MAX_HOLD_SESSIONS = 2        # mirrors "Max sessions held" on DTS Entry (backup 
 # Oct 14-21 the not-yet-2R overnight holds lost -$2,112 held vs +$1,896 sold at the close
 # (TSLA / MRVL / AMD gapped through their stops on Oct 22).
 HOLD_OVERNIGHT_ONLY_PAST_2R = True
+# Friday rules (2026-10-24, user decision). No new entries from FRIDAY_ENTRY_END: with
+# under 3 hours to the 15:56 sweep, 1 in 10 entries after 13:00 reached 2R the same day
+# and all 3 Friday entries after 13:00 lost (Oct 14-23, -$3,705 at market prices).
+# Friday entries from FRIDAY_SWING_FROM buy next week's expiry and are swing trades:
+# held over the weekend even before 2R (the max hold still closes them at Monday's sweep).
+FRIDAY_ENTRY_END = (13, 0)
+FRIDAY_SWING_FROM = (12, 0)
 
 # Time rules (New York). Entries only inside the regular session; the safety
 # sweep runs after TradingView's own 15:55 alerts have had time to arrive.

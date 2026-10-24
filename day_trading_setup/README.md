@@ -436,6 +436,7 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
     winner that lost $1,755 in options for this reason.
 
 - **Overnight (since 2026-10-22):** at the 15:56 sweep the executor sells any position that has **not reached 2R**; only runners past 2R (stop at break-even) are held overnight. On Oct 14-21 the not-yet-2R overnight holds lost −$2,112 against +$1,896 if sold at the close.
+- **Fridays (since 2026-10-24):** no new entries from **13:00 ET** (1 in 10 entries after 13:00 reached 2R the same day; all 3 Friday entries after 13:00 lost, −$3,705 on Oct 14-23). Friday entries from **12:00** buy next week's expiry and are **swing trades**: held over the weekend even before 2R, closed by the stop, the trail or the max hold at Monday's 15:56 sweep.
 - **Holding:** DTS Entry runs with *Flat by 15:55* off and *Max sessions
   held* = 2, so a trade can be held overnight and is closed by a `TIME`
   exit at 15:55 the next session.

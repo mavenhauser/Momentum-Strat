@@ -314,6 +314,10 @@ def on_entry(broker, state, sig, t):
         return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nOutside the regular session")
     if sig.ticker in state["positions"]:
         return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nAlready holding <b>{h(describe(state['positions'][sig.ticker]))}</b>")
+    if t.weekday() == 4 and hm >= settings.FRIDAY_ENTRY_END:
+        why = f"no new entries on Friday from {settings.FRIDAY_ENTRY_END[0]}:{settings.FRIDAY_ENTRY_END[1]:02d}"
+        skip(state, sig, t, why)
+        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
     if sig.stop is not None and contracts.stop_pct(sig.price, sig.stop) < settings.MIN_STOP_PCT:
         why = f"stop too tight: {contracts.stop_pct(sig.price, sig.stop):.2f}% of price (min {settings.MIN_STOP_PCT:g}%)"
         skip(state, sig, t, why)
@@ -359,7 +363,8 @@ def on_entry(broker, state, sig, t):
            + (f" (half: choppy market, QQQ crossed VWAP {sig.chop}×)" if sig.chop is not None else "") + "\n"
            f"Premium <b>${filled * avg * 100:,.0f}</b> = {filled * avg * 100 / nlv:.1%} of ${nlv:,.0f} ({h(nlv_src)})\n"
            f"Strike chosen: delta {abs(pos['delta']) if pos.get('delta') is not None else float('nan'):.2f} · {h(pos.get('sizing_rule', ''))}\n"
-           f"<i>{h(note)}</i>")
+           + ("Friday swing: held over the weekend, even before 2R\n" if contracts.weekend_swing(pos) else "")
+           + f"<i>{h(note)}</i>")
 
 
 def _sell(broker, state, pos, qty, t, why, alert_raw):
