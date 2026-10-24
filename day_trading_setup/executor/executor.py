@@ -292,11 +292,14 @@ def choose_contract(broker, sig, t):
     quotes = {k: snap.get(opts[k].streamer_symbol) or {} for k in look}
     nlv, _ = broker.nlv()
     move = abs(sig.target - sig.price) if sig.target else None
-    frac = contracts.size_fraction(sig.grade) * (settings.CHOP_SIZE_FACTOR if sig.chop is not None else 1.0)
+    base = settings.FRIDAY_SWING_SIZE if contracts.swing_entry(t) else contracts.size_fraction(sig.grade)
+    frac = base * (settings.CHOP_SIZE_FACTOR if sig.chop is not None else 1.0)
     floor = settings.MIN_DELTA_0DTE if expiry == today else settings.MIN_DELTA
     k, qty, rule, delta = contracts.choose_strike(quotes, sig.price, right, nlv * frac, move, floor)
     if k is None:
         return None, f"{rule} ({right}, {expiry})"
+    if contracts.swing_entry(t) and (quotes[k].get("ask") or 0) * 100 > nlv * frac:
+        return None, f"Friday swing: 1 contract costs ${quotes[k]['ask'] * 100:,.0f}, over the {frac:.2%} budget (${nlv * frac:,.0f})"
     return {"ticker": sig.ticker, "right": right, "expiry": expiry.isoformat(),
             "expiry_ib": expiry.strftime("%Y%m%d"), "strike": k, "streamer": opts[k].streamer_symbol,
             "qty_plan": qty, "delta": delta, "sizing_rule": rule,
@@ -318,6 +321,16 @@ def on_entry(broker, state, sig, t):
         why = f"no new entries on Friday from {settings.FRIDAY_ENTRY_END[0]}:{settings.FRIDAY_ENTRY_END[1]:02d}"
         skip(state, sig, t, why)
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
+    if contracts.swing_entry(t):
+        swings = sum(contracts.weekend_swing(p) for p in state["positions"].values())
+        why = None
+        if sig.grade not in settings.FRIDAY_SWING_GRADES:
+            why = f"Friday swing: only {' / '.join(sorted(settings.FRIDAY_SWING_GRADES))} setups (this one: {sig.grade or 'no grade'})"
+        elif swings >= settings.FRIDAY_SWING_MAX:
+            why = f"Friday swing: {swings} already open (max {settings.FRIDAY_SWING_MAX})"
+        if why:
+            skip(state, sig, t, why)
+            return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
     if sig.stop is not None and contracts.stop_pct(sig.price, sig.stop) < settings.MIN_STOP_PCT:
         why = f"stop too tight: {contracts.stop_pct(sig.price, sig.stop):.2f}% of price (min {settings.MIN_STOP_PCT:g}%)"
         skip(state, sig, t, why)
@@ -363,7 +376,7 @@ def on_entry(broker, state, sig, t):
            + (f" (half: choppy market, QQQ crossed VWAP {sig.chop}×)" if sig.chop is not None else "") + "\n"
            f"Premium <b>${filled * avg * 100:,.0f}</b> = {filled * avg * 100 / nlv:.1%} of ${nlv:,.0f} ({h(nlv_src)})\n"
            f"Strike chosen: delta {abs(pos['delta']) if pos.get('delta') is not None else float('nan'):.2f} · {h(pos.get('sizing_rule', ''))}\n"
-           + ("Friday swing: held over the weekend, even before 2R\n" if contracts.weekend_swing(pos) else "")
+           + ("Friday swing: smaller size, held over the weekend even before 2R\n" if contracts.weekend_swing(pos) else "")
            + f"<i>{h(note)}</i>")
 
 

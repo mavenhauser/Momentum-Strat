@@ -159,11 +159,15 @@ def loss_streak(closed, day) -> int:
     return streak
 
 
+def swing_entry(t) -> bool:
+    """True for an entry at `t` that would be a Friday swing (FRIDAY_SWING_FROM onwards,
+    next week's expiry)."""
+    return t.weekday() == 4 and (t.hour, t.minute) >= settings.FRIDAY_SWING_FROM
+
+
 def weekend_swing(pos) -> bool:
-    """True for a Friday entry from FRIDAY_SWING_FROM (next week's expiry): a swing trade,
-    held over the weekend even before 2R."""
-    opened = datetime.fromisoformat(pos["opened_at"])
-    return opened.weekday() == 4 and (opened.hour, opened.minute) >= settings.FRIDAY_SWING_FROM
+    """True for a position opened as a Friday swing: held over the weekend even before 2R."""
+    return swing_entry(datetime.fromisoformat(pos["opened_at"]))
 
 
 def close_before_overnight(pos) -> bool:

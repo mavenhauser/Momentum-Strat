@@ -120,6 +120,12 @@ HOLD_OVERNIGHT_ONLY_PAST_2R = True
 # held over the weekend even before 2R (the max hold still closes them at Monday's sweep).
 FRIDAY_ENTRY_END = (13, 0)
 FRIDAY_SWING_FROM = (12, 0)
+# Friday swings are tighter (2026-10-24, user decision): only the strongest setups,
+# small whatever the grade, and few of them. OUTSIDE setups made +$309 per $1k of
+# premium on Oct 14-23 vs +$115 inside; grade B lost (-$2,088).
+FRIDAY_SWING_GRADES = {"A+ OUTSIDE", "A OUTSIDE"}
+FRIDAY_SWING_SIZE = 0.0125   # premium as a fraction of the account, any grade (halved again when choppy); skipped if 1 contract costs more
+FRIDAY_SWING_MAX = 2         # swing positions open at once
 
 # Time rules (New York). Entries only inside the regular session; the safety
 # sweep runs after TradingView's own 15:55 alerts have had time to arrive.

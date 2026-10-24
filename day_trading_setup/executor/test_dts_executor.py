@@ -216,6 +216,22 @@ class ContractTest(unittest.TestCase):
         self.assertIn("no new entries on Friday from 13:00", sent[0])
         self.assertEqual(state["skipped"][0]["ticker"], "TSLA")
 
+    def test_friday_swing_filters(self):
+        from day_trading_setup.executor import executor
+        fri = datetime(2026, 10, 23, 12, 36, tzinfo=executor.NY)
+        sent = []
+        with mock.patch.object(executor, "notify", sent.append):
+            state = {"positions": {}, "closed": []}
+            sig = signals.parse("DTS: LONG MU @ 887.82 | stop 878.54 | target 906.38 (2R) | PMH breakout | grade A inside")
+            executor.on_entry(None, state, sig, fri)
+            self.assertIn("only A OUTSIDE / A+ OUTSIDE", sent[-1])
+            state["positions"] = {x: {"opened_at": "2026-10-23T12:10:00-04:00"} for x in ("AAA", "BBB")}
+            sig = signals.parse("DTS: LONG MU @ 887.82 | stop 878.54 | target 906.38 (2R) | PMH breakout | grade A+ OUTSIDE")
+            executor.on_entry(None, state, sig, fri)
+            self.assertIn("2 already open (max 2)", sent[-1])
+        self.assertTrue(contracts.swing_entry(fri))
+        self.assertFalse(contracts.swing_entry(datetime(2026, 10, 23, 11, 59, tzinfo=executor.NY)))
+
     def test_sessions(self):
         self.assertEqual(contracts.sessions_held(date(2026, 10, 15), date(2026, 10, 15)), 1)   # Thu
         self.assertEqual(contracts.sessions_held(date(2026, 10, 16), date(2026, 10, 19)), 2)   # Fri -> Mon
