@@ -236,6 +236,29 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(contracts.sessions_held(date(2026, 10, 15), date(2026, 10, 15)), 1)   # Thu
         self.assertEqual(contracts.sessions_held(date(2026, 10, 16), date(2026, 10, 19)), 2)   # Fri -> Mon
 
+    def test_trim_result(self):
+        import json, tempfile
+        from pathlib import Path
+        from day_trading_setup.executor import executor, reprice
+        buy_t, trim_t = "2026-10-26T10:40:00-04:00", "2026-10-26T11:10:00-04:00"
+        pos = {"ticker": "TSLA", "right": "C", "strike": 400.0, "expiry": "2026-10-30", "side": "LONG",
+               "qty": 4, "open_qty": 2, "avg_cost": 5.70, "trimmed": True, "opened_at": buy_t, "level": "ORH",
+               "tv_entry": 394.27, "tv_stop": 386.31, "tv_target": 410.2,
+               "events": [{"t": buy_t, "action": "BUY 4 @ 5.7", "qty": 4, "price": 5.70, "bid": 5.6, "ask": 5.8},
+                          {"t": trim_t, "action": "SELL 2 @ 8.1 (2R trim)", "qty": 2, "price": 8.10, "bid": 8.0, "ask": 8.2}]}
+        state = {"positions": {"TSLA": pos}, "closed": []}
+        rp = Path(tempfile.mkdtemp()) / "rp.json"
+        rp.write_text(json.dumps({f"TSLA|{buy_t}": {"true": 5.50, "how": "1m open 10:40", "spread": 0.2}, f"TSLA|{trim_t}": {"true": 8.50, "how": "1m open 11:10", "spread": 0.2}}))
+        sent = []
+        with mock.patch.object(executor, "notify", sent.append), mock.patch.object(reprice, "reprice_path", lambda m: rp):
+            self.assertFalse(executor.confirm_results(state, datetime(2026, 10, 26, 11, 20, tzinfo=executor.NY)))   # not 16 min yet
+            self.assertTrue(executor.confirm_results(state, datetime(2026, 10, 26, 11, 27, tzinfo=executor.NY)))
+            executor.confirm_results(state, datetime(2026, 10, 26, 11, 40, tzinfo=executor.NY))                    # sent once
+        self.assertEqual(len(sent), 1)
+        self.assertIn("+$600", sent[0])            # 2 x (8.50 - 5.50) x 100
+        self.assertIn("2 still open", sent[0])
+        self.assertEqual(pos["events"][1]["pnl_confirmed"], 600)
+
 
 if __name__ == "__main__":
     unittest.main()

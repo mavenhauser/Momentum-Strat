@@ -450,12 +450,25 @@ def _results_due(state, t):
             and datetime.fromisoformat(p["closed_at"]) <= t - reprice.DELAY]
 
 
+def _trims_due(state, t):
+    """(position, 2R-sale event) pairs due a 2R RESULT message: the sale's prices can be
+    confirmed and the trade's own RESULT is not about to cover it."""
+    from day_trading_setup.executor import reprice
+    cutoff = t - reprice.DELAY
+    held = list(state["positions"].values()) + [
+        p for p in state["closed"] if not p.get("result_sent") and datetime.fromisoformat(p["closed_at"]) > cutoff]
+    return [(p, ev) for p in held for ev in p["events"]
+            if "(2R trim)" in ev["action"] and not ev.get("result_sent")
+            and ev["t"] >= settings.TRIM_RESULTS_FROM and datetime.fromisoformat(ev["t"]) <= cutoff]
+
+
 def prefetch_results(t):
     """Fetch 1-minute prices for trades due a RESULT message. Network, up to a
     minute, so it runs before the lock: alerts are never held up by it."""
     from day_trading_setup.executor import reprice
     try:
-        if _results_due(load_state(), t):
+        state = load_state()
+        if _results_due(state, t) or _trims_due(state, t):
             reprice.run("paper" if settings.EXECUTE else "dry")
     except Exception as e:
         log.warning("reprice failed, results retried next minute: %s: %s", type(e).__name__, e)
@@ -468,18 +481,33 @@ def confirm_results(state, t):
     (user, 2026-10-19). Realistic P&L, as in the journal: true price, buys plus and
     sells minus half the spread."""
     from day_trading_setup.executor import journal, reprice
-    due = _results_due(state, t)
-    if not due:
+    due, trims = _results_due(state, t), _trims_due(state, t)
+    if not due and not trims:
         return False
     rp = reprice.reprice_path("paper" if settings.EXECUTE else "dry")
     repriced = json.loads(rp.read_text()) if rp.exists() else {}
     lines = journal._log_lines()
+    px = lambda leg: leg.get("true") if leg.get("true") is not None else leg.get("price")
+    for p, ev in trims:
+        if not (reprice.event_key(p, p["events"][0]) in repriced and reprice.event_key(p, ev) in repriced):
+            continue                          # prices not fetched yet: next minute
+        e = journal.trade_entry(p, datetime.fromisoformat(ev["t"]).astimezone(NY).date(), lines, repriced)
+        sale = next((s for s in e["sells"] if s["t"] == ev["t"]), None)
+        if sale is None:
+            continue
+        pnl = round(sale["qty"] * (px(sale) - px(e["buy"])) * 100)
+        left = p.get("open_qty", 0) if p in state["positions"].values() else 0
+        notify(f"{title('2R RESULT')}\n<b>{h(describe(p))}</b>\n"
+               f"Bought {e['buy']['qty']} @ <b>{px(e['buy']):.2f}</b> · sold {sale['qty']} @ <b>{px(sale):.2f}</b> (2R)\n\n"
+               f"2R sale P&amp;L: <b>{money(pnl)}</b>"
+               + (f" · {left} still open" if left else "") +
+               "\n<i>confirmed at market prices (1-minute option prices)</i>")
+        ev["result_sent"] = True
+        ev["pnl_confirmed"] = pnl
     for p in due:
         if not all(reprice.event_key(p, ev) in repriced for ev in p["events"]):
             continue                          # prices not fetched yet: next minute
         e = journal.trade_entry(p, datetime.fromisoformat(p["closed_at"]).astimezone(NY).date(), lines, repriced)
-        legs = [e["buy"]] + e["sells"]
-        px = lambda leg: leg.get("true") if leg.get("true") is not None else leg.get("price")
         fills = f"Bought {e['buy']['qty']} @ <b>{px(e['buy']):.2f}</b> · " + ", ".join(
             f"sold {s['qty']} @ <b>{px(s):.2f}</b> ({h(s['kind'])})" for s in e["sells"])
         note = "; ".join(e["notes"]) if e["notes"] else "confirmed at market prices (1-minute option prices)"
