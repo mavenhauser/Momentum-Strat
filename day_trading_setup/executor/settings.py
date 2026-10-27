@@ -116,6 +116,12 @@ MAX_HOLD_SESSIONS = 2        # mirrors "Max sessions held" on DTS Entry (backup 
 # Oct 14-21 the not-yet-2R overnight holds lost -$2,112 held vs +$1,896 sold at the close
 # (TSLA / MRVL / AMD gapped through their stops on Oct 22).
 HOLD_OVERNIGHT_ONLY_PAST_2R = True
+# Strong-close exception (rule C, 2026-10-26, user decision): a not-yet-2R position is held
+# overnight when DTS Entry's 15:55 STRONG CLOSE alert says the stock is closing strong in
+# the trade's direction (beyond its daily 8 EMA, outer third of the day's range, better than
+# at 15:00). Oct 14-23: 4 such holds, +14.2R vs +1.9R selling all (+6.1R without UNH's
+# earnings gap). Every overnight gap-through-stop (TSLA / AMD / MRVL, Oct 22) failed it.
+STRONG_CLOSE_HOLD = True
 # Friday rules (2026-10-24, user decision). No new entries from FRIDAY_ENTRY_END: with
 # under 3 hours to the 15:56 sweep, 1 in 10 entries after 13:00 reached 2R the same day
 # and all 3 Friday entries after 13:00 lost (Oct 14-23, -$3,705 at market prices).

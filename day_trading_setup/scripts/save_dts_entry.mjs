@@ -31,6 +31,12 @@ async function ev(target, expression) {
 
 async function pickTab() {
   const tabs = (await CDP.List({ port: 9222 })).filter((t) => t.type === 'page' && t.url.includes('tradingview.com/chart/'));
+  // Prefer a tab whose Pine editor is already open on DTS Entry (the editor may not open in a
+  // tab TradingView isn't showing).
+  for (const t of tabs) {
+    const open = await ev(t.id, `[].slice.call(document.querySelectorAll('h2')).map(function(e){return (e.textContent||'').trim()}).join('|') === ${JSON.stringify(WANT)}`).catch(() => false);
+    if (open) return t;
+  }
   for (const t of tabs) {
     const has = await ev(t.id, `document.body.innerText.indexOf('DTS Entry') !== -1`).catch(() => false);
     if (has) return t;

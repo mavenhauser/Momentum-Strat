@@ -177,6 +177,13 @@ def close_before_overnight(pos) -> bool:
     return settings.HOLD_OVERNIGHT_ONLY_PAST_2R and not pos.get("trimmed") and not weekend_swing(pos)
 
 
+def strong_close_holds(pos, strong, now) -> bool:
+    """True if today's STRONG CLOSE alert for this ticker (`strong`: {"side", "t"} or None)
+    matches the position's direction: the 15:56 sweep holds it overnight (rule C)."""
+    return bool(settings.STRONG_CLOSE_HOLD and strong and strong.get("side") == pos.get("side")
+                and strong.get("t", "")[:10] == now.date().isoformat())
+
+
 def time_stop_due(pos, now) -> bool:
     """True for a same-day (0DTE) position that has not reached 2R within
     ZERO_DTE_TIME_STOP_MIN minutes of entry."""

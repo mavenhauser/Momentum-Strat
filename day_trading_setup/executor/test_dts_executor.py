@@ -232,6 +232,34 @@ class ContractTest(unittest.TestCase):
         self.assertTrue(contracts.swing_entry(fri))
         self.assertFalse(contracts.swing_entry(datetime(2026, 10, 23, 11, 59, tzinfo=executor.NY)))
 
+    def test_strong_close(self):
+        sig = signals.parse("DTS: STRONG CLOSE SHORT GOOGL @ 316.90 | daily 8 EMA 320.10 | range 6% | 15:00 317.80")
+        self.assertEqual((sig.kind, sig.ticker, sig.side, sig.price), ("STRONG", "GOOGL", "SHORT", 316.90))
+        now = datetime(2026, 10, 26, 15, 56)
+        strong = {"side": "SHORT", "t": "2026-10-26T15:55:02-04:00"}
+        self.assertTrue(contracts.strong_close_holds({"side": "SHORT"}, strong, now))
+        self.assertFalse(contracts.strong_close_holds({"side": "LONG"}, strong, now))       # wrong direction
+        self.assertFalse(contracts.strong_close_holds({"side": "SHORT"}, strong, datetime(2026, 10, 27, 15, 56)))  # stale
+        self.assertFalse(contracts.strong_close_holds({"side": "SHORT"}, None, now))
+
+    def test_sweep_holds_strong_close(self):
+        from day_trading_setup.executor import executor
+        pos = {"ticker": "GOOGL", "side": "SHORT", "right": "P", "strike": 305.0, "expiry": "2026-10-30", "qty": 4,
+               "open_qty": 4, "trimmed": False, "opened_at": "2026-10-26T12:01:00-04:00", "events": []}
+        state = {"positions": {"GOOGL": dict(pos, events=[])}, "closed": [],
+                 "strong_close": {"GOOGL": {"side": "SHORT", "t": "2026-10-26T15:55:02-04:00", "raw": "DTS: STRONG CLOSE SHORT GOOGL @ 316.90"}}}
+        closed, sent = [], []
+        with mock.patch.object(executor, "close_position", lambda b, st, p, t, why, raw: closed.append(p["ticker"])), \
+             mock.patch.object(executor, "notify", sent.append):
+            for m in (56, 57):
+                executor.sweep(None, state, datetime(2026, 10, 26, 15, m, tzinfo=executor.NY))
+            self.assertEqual(closed, [])
+            self.assertEqual(len(sent), 1)
+            self.assertIn("HELD OVERNIGHT", sent[0])
+            state["positions"]["MU"] = dict(pos, ticker="MU", side="LONG", events=[])        # no strong close: sold
+            executor.sweep(None, state, datetime(2026, 10, 26, 15, 58, tzinfo=executor.NY))
+        self.assertEqual(closed, ["MU"])
+
     def test_sessions(self):
         self.assertEqual(contracts.sessions_held(date(2026, 10, 15), date(2026, 10, 15)), 1)   # Thu
         self.assertEqual(contracts.sessions_held(date(2026, 10, 16), date(2026, 10, 19)), 2)   # Fri -> Mon

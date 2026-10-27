@@ -8,6 +8,7 @@ day_trading_setup/pine/dts_3_entry_signals.pine:
   DTS: NVDA hit 2R target @ 178.68 - take partial, stop to break-even 177.16
   DTS: EXIT LONG NVDA (STOP) @ 176.40          (STOP / BE / TRAIL / EOD / TIME)
   DTS: A+ OUTSIDE LONG NVDA @ 177.20 - watch for the 8 EMA retest entry
+  DTS: STRONG CLOSE LONG NVDA @ 179.10 | daily 8 EMA 175.20 | range 88% | 15:00 178.40   (v14.0)
 """
 import re
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ _EXIT = re.compile(rf"^DTS: EXIT (LONG|SHORT) {_TICK} \((STOP|BE|TRAIL|EOD|TIME)
 _GRADE = re.compile(r"\| grade (A\+|A|B|C) (OUTSIDE|inside)\s*$")   # since DTS Entry v6.0 (2026-10-16)
 _CHOP = re.compile(r"\| choppy \(QQQ crosses (\d+)\)")   # since DTS Entry v13.0 (2026-10-22): half size
 _APLUS = re.compile(rf"^DTS: A\+ OUTSIDE (LONG|SHORT) {_TICK} @ {_NUM}")
+_STRONG = re.compile(rf"^DTS: STRONG CLOSE (LONG|SHORT) {_TICK} @ {_NUM}")   # since v14.0 (2026-10-26)
 
 
 def _f(x):
@@ -30,7 +32,7 @@ def _f(x):
 
 @dataclass
 class Signal:
-    kind: str                      # ENTRY / TARGET / EXIT / APLUS / IGNORED
+    kind: str                      # ENTRY / TARGET / EXIT / APLUS / STRONG / IGNORED
     ticker: Optional[str] = None
     side: Optional[str] = None     # LONG / SHORT
     price: Optional[float] = None  # entry, target or exit price on TradingView
@@ -62,4 +64,7 @@ def parse(message: str) -> Signal:
     m = _APLUS.match(text)
     if m:
         return Signal("APLUS", ticker=m.group(2), side=m.group(1), price=_f(m.group(3)), raw=text)
+    m = _STRONG.match(text)
+    if m:
+        return Signal("STRONG", ticker=m.group(2), side=m.group(1), price=_f(m.group(3)), raw=text)
     return Signal("IGNORED", raw=text)

@@ -581,7 +581,15 @@ def sweep(broker, state, t):
         elif held >= settings.MAX_HOLD_SESSIONS:
             close_position(broker, state, pos, t, f"held {held} sessions, closed by the 15:56 sweep", "sweep")
         elif contracts.close_before_overnight(pos):
-            close_position(broker, state, pos, t, "no overnight hold before 2R: closed by the 15:56 sweep", "sweep")
+            strong = (state.get("strong_close") or {}).get(pos["ticker"])
+            if not contracts.strong_close_holds(pos, strong, t):
+                close_position(broker, state, pos, t, "no overnight hold before 2R: closed by the 15:56 sweep", "sweep")
+            elif pos.get("held_strong") != t.date().isoformat():
+                pos["held_strong"] = t.date().isoformat()
+                pos["events"].append({"t": t.isoformat(), "alert": strong["raw"], "action": "HOLD overnight (strong close)"})
+                notify(f"{title('HELD OVERNIGHT')}\n<b>{pos['open_qty']} × {h(describe(pos))}</b>\n"
+                       f"Not yet 2R, but closing strong: held overnight (stop and trail as usual)\n\n"
+                       f"<i>{h(strong['raw'][len('DTS: '):])}</i>")
 
 
 # ---------------------------------------------------------------- main
@@ -634,6 +642,11 @@ def main(argv=None):
         sig = signals.parse(a.message or "")
         if sig.kind in ("IGNORED", "APLUS"):
             log.info("%s alert, no action: %s", sig.kind, sig.raw)
+            return 0
+        if sig.kind == "STRONG":                   # read by the 15:56 sweep (rule C)
+            state.setdefault("strong_close", {})[sig.ticker] = {"side": sig.side, "t": t.isoformat(), "raw": sig.raw}
+            log.info("strong close recorded: %s", sig.raw)
+            save_state(state)
             return 0
         key = hashlib.sha1(f"{sig.raw}|{t.strftime('%Y-%m-%d %H')}:{t.minute // 5}".encode()).hexdigest()
         if key in state["processed"]:
