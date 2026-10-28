@@ -505,7 +505,7 @@ def confirm_results(state, t):
         ev["result_sent"] = True
         ev["pnl_confirmed"] = pnl
     for p in due:
-        if not all(reprice.event_key(p, ev) in repriced for ev in p["events"]):
+        if not all(reprice.event_key(p, ev) in repriced for ev in reprice.fills(p)):
             continue                          # prices not fetched yet: next minute
         e = journal.trade_entry(p, datetime.fromisoformat(p["closed_at"]).astimezone(NY).date(), lines, repriced)
         fills = f"Bought {e['buy']['qty']} @ <b>{px(e['buy']):.2f}</b> · " + ", ".join(

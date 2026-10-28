@@ -260,6 +260,16 @@ class ContractTest(unittest.TestCase):
             executor.sweep(None, state, datetime(2026, 10, 26, 15, 58, tzinfo=executor.NY))
         self.assertEqual(closed, ["MU"])
 
+    def test_journal_skips_hold_notes(self):
+        from day_trading_setup.executor import journal
+        t = {"ticker": "MRVL", "right": "C", "strike": 242.5, "expiry": "2026-10-30", "side": "LONG", "qty": 4,
+             "opened_at": "2026-10-27T11:43:00-04:00", "tv_entry": 242.34, "tv_stop": 238.39, "tv_target": 250.24, "level": "ORH",
+             "events": [{"t": "2026-10-27T11:43:00-04:00", "action": "BUY 4 @ 7.88", "qty": 4, "price": 7.88, "bid": 7.8, "ask": 7.96},
+                        {"t": "2026-10-27T15:56:40-04:00", "action": "HOLD overnight (strong close)"},
+                        {"t": "2026-10-28T10:05:00-04:00", "action": "SELL 4 @ 9.10 (TradingView TRAIL @ 246.1)", "qty": 4, "price": 9.10, "bid": 9.0, "ask": 9.2}]}
+        buy, sells = journal._events(t, [])
+        self.assertEqual((buy["qty"], len(sells), sells[0]["price"]), (4, 1, 9.10))
+
     def test_sessions(self):
         self.assertEqual(contracts.sessions_held(date(2026, 10, 15), date(2026, 10, 15)), 1)   # Thu
         self.assertEqual(contracts.sessions_held(date(2026, 10, 16), date(2026, 10, 19)), 2)   # Fri -> Mon

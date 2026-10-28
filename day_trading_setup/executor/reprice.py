@@ -41,6 +41,12 @@ def streamer_symbol(trade):
     return f".{trade['ticker']}{exp}{trade['right']}{trade['strike']:g}"
 
 
+def fills(trade):
+    """The trade's BUY / SELL events (HOLD notes, e.g. a single contract held at 2R or a
+    strong-close overnight hold, carry no fill)."""
+    return [ev for ev in trade["events"] if ev["action"].startswith(("BUY", "SELL"))]
+
+
 def event_key(trade, ev):
     return f"{trade['ticker']}|{ev['t']}"
 
@@ -96,7 +102,7 @@ def run(mode="dry", since="2026-10-14T09:30"):
     done = json.loads(path.read_text()) if path.exists() else {}
     now = datetime.now(NY)
     trades = [t for t in state["closed"] + list(state["positions"].values()) if t.get("opened_at", "") >= since]
-    todo = [(t, ev) for t in trades for ev in t["events"]
+    todo = [(t, ev) for t in trades for ev in fills(t)
             if event_key(t, ev) not in done and datetime.fromisoformat(ev["t"]) <= now - DELAY]
     if not todo:
         return done, 0

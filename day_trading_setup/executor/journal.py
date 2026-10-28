@@ -84,7 +84,7 @@ def _exit_kind(ev):
 def _events(trade, lines):
     """(buy, sells) with qty, price, bid, ask filled in."""
     buy, sells = None, []
-    for ev in trade["events"]:
+    for ev in reprice.fills(trade):
         qty = ev.get("qty") or int(ev["action"].split()[1])
         price = ev.get("price")
         if price is None:
@@ -120,7 +120,7 @@ def _true_pnl(trade, buy, sells, repriced):
     if not repriced or not buy:
         return None, None, 0, []
     legs, fallbacks = [], 0
-    for leg, ev in zip([buy] + sells, [e for e in trade["events"]]):
+    for leg, ev in zip([buy] + sells, reprice.fills(trade)):
         r = repriced.get(reprice.event_key(trade, ev))
         spread = (leg["ask"] - leg["bid"]) if leg.get("bid") is not None and leg.get("ask") is not None else None
         true = r["true"] if r and r["true"] is not None else None
@@ -173,7 +173,7 @@ def trade_entry(trade, day, lines, repriced=None):
                     for s in sells]
     notes = []
     if t_mid is not None:
-        for leg, ev in zip([buy] + sells, trade["events"]):
+        for leg, ev in zip([buy] + sells, reprice.fills(trade)):
             r = (repriced or {}).get(reprice.event_key(trade, ev))
             leg["true"] = r["true"] if r else None
             leg["true_how"] = r["how"] if r else None
