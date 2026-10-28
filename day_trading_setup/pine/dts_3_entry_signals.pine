@@ -1,0 +1,551 @@
+//@version=6
+// Day Trading Setup 3/3 - Entry Signals (EMA + level retest).
+//
+// The entry engine: break of a key level (ORH / PMH / PDH) -> pullback that
+// retests the 8 EMA or the broken level -> candle CLOSES back above the
+// 8 EMA, right next to it -> LONG label with the exact entry / stop / target
+// and an alert. Shorts mirror it (ORL / PML / PDL, close back below 8 EMA).
+// A checklist panel shows where the setup stands so you never hesitate.
+//
+// Draws no EMA / VWAP / pivot lines (use TradingView's built-ins); it computes
+// them internally for the rules, so keep the lengths equal to your chart's.
+//
+// Part of day_trading_setup/ (see ../README.md).
+indicator("DTS Entry", shorttitle = "DTS Entry", overlay = true, max_labels_count = 500, max_lines_count = 500)
+
+NY = "America/New_York"
+
+G_EMA = "EMAs (match your chart's built-in EMAs)"
+fastLen = input.int(8, "EMA fast", minval = 1, group = G_EMA, inline = "ema", display = display.none)
+midLen  = input.int(21, "mid", minval = 1, group = G_EMA, inline = "ema", display = display.none)
+slowLen = input.int(50, "slow", minval = 1, group = G_EMA, inline = "ema", display = display.none)
+
+G_ENT = "Entry rules"
+direction   = input.string("Both", "Direction", options = ["Both", "Long only", "Short only"], group = G_ENT, display = display.none)
+orMin       = input.int(5, "Opening range (minutes)", options = [1, 2, 5, 10, 15, 30], group = G_ENT, display = display.none)
+useOR       = input.bool(true, "Arm on opening-range break (ORH / ORL)", group = G_ENT, display = display.none)
+usePM       = input.bool(true, "Arm on premarket break (PMH / PML)", group = G_ENT, display = display.none)
+usePD       = input.bool(true, "Arm on prior-day break (PDH / PDL)", group = G_ENT, display = display.none)
+usePW       = input.bool(true, "Arm on prior-week break (PWH / PWL)", group = G_ENT, display = display.none)
+trendFilter = input.string("Clean trend", "Trend filter at entry", options = ["Clean trend", "8 > 21 only", "Off"], group = G_ENT, tooltip = "Clean trend = 8 > 21 > 50 (reverse for shorts) with enough spread and slope - same definition as DTS 2.", display = display.none)
+minSpread   = input.float(0.10, "Clean trend: min 8/21 spread (x ATR)", minval = 0, step = 0.05, group = G_ENT, display = display.none)
+minSlope    = input.float(0.05, "Clean trend: min 21 EMA slope over 3 bars (x ATR)", minval = 0, step = 0.01, group = G_ENT, display = display.none)
+vwapFilter  = input.bool(true, "Longs only above VWAP, shorts only below", group = G_ENT, display = display.none)
+tolAtr      = input.float(0.15, "Retest tolerance (x ATR)", minval = 0, step = 0.05, group = G_ENT, tooltip = "How close the pullback must come to the 8 EMA or the broken level to count as a retest.", display = display.none)
+maxExt      = input.float(0.75, "Max close distance from 8 EMA (x ATR)", minval = 0, step = 0.05, group = G_ENT, tooltip = "The trigger candle must close RIGHT above (below) the 8 EMA - no chasing extended candles.", display = display.none)
+failAtr     = input.float(0.25, "Breakout fails if close back through level by (x ATR)", minval = 0, step = 0.05, group = G_ENT, display = display.none)
+entrySess   = input.session("0935-1200", "Entry window (New York time)", group = G_ENT, display = display.none)
+maxTrades   = input.int(3, "Max entries per day", minval = 1, group = G_ENT, display = display.none)
+
+G_RISK = "Stop / target"
+stopBuf    = input.float(0.05, "Stop buffer beyond retest swing (x ATR)", minval = 0, step = 0.05, group = G_RISK, display = display.none)
+maxRiskAtr = input.float(2.5, "Skip entry if stop is wider than (x ATR)", minval = 0.25, step = 0.25, group = G_RISK, display = display.none)
+rr         = input.float(2.0, "Target (R multiple)", minval = 0.5, step = 0.5, group = G_RISK, tooltip = "At the target the stop moves to break-even; the rest exits on a close through the trail EMA.", display = display.none)
+trailSrc   = input.string("8 EMA", "After target, exit on close through", options = ["8 EMA", "21 EMA"], group = G_RISK, display = display.none)
+eodExit    = input.bool(true, "Flat by 15:55 New York", group = G_RISK, display = display.none)
+
+G_BAN = "A+ setup banner"
+showBanner = input.bool(true, "Show setup banner", group = G_BAN, tooltip = "OUTSIDE LONG = price above PDH and PMH (OUTSIDE SHORT = below PDL and PML). Grade adds one point each for: clean trend, right side of VWAP, beyond the opening range, beyond the prior-week level. 4 = A+, 3 = A, 2 = B, else C.", display = display.none)
+banPos     = input.string("Top center", "Banner position", options = ["Top left", "Top center", "Top right", "Bottom center"], group = G_BAN, display = display.none)
+banAlert   = input.bool(true, "alert() when an A+ OUTSIDE setup appears", group = G_BAN, display = display.none)
+
+G_UI = "Panel"
+showPanel = input.bool(true, "Setup checklist panel", group = G_UI, display = display.none)
+panelPos  = input.string("Bottom right", "Position", options = ["Top left", "Top right", "Bottom left", "Bottom right"], group = G_UI, display = display.none)
+txtSize   = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal"], group = G_UI, display = display.none)
+
+// Declared last on purpose: input ids are positional, so new inputs go at the end to keep
+// saved chart settings and alerts lined up.
+G_AL = "Alert messages"
+exitAlerts = input.bool(true, "alert() on the 2R target and on exits", group = G_AL, tooltip = "On: alerts also carry the 2R target hit and every exit (STOP / BE / TRAIL / EOD). Off: entries and (if enabled above) new A+ setups only. The chart labels are drawn either way.", display = display.none)
+holdSessions = input.int(2, "Max sessions held when 'Flat by 15:55' is off", minval = 1, group = G_RISK, tooltip = "Only used when 'Flat by 15:55 New York' is unchecked. 1 = close at 15:55 on the entry day, 2 = may be held overnight and is closed at 15:55 the next session (TIME exit), and so on. Stops, the 2R target and the trail still apply at any time.", display = display.none)
+// Added 2026-10-18 (inputs are positional, so new ones go last).
+runnerExit = input.string("Giveback", "Runner exit after the 2R target", options = ["Giveback", "EMA close"], group = G_RISK, tooltip = "Giveback (default): after 2R, exit the runner when price gives back this % of the best move since entry, on a bar close. Stands in for trailing the option's own price (the executor's option quotes are delayed). EMA close: the original trail, a close back through the 8/21 EMA.", display = display.none)
+givebackPct = input.float(40, "Giveback: % of the best move", minval = 10, maxval = 90, step = 5, group = G_RISK, display = display.none)
+// Added 2026-10-20.
+confirmEntry = input.bool(true, "Confirm entry: wait for a break of the trigger bar", group = G_RISK, tooltip = "On (default): after the trigger close, enter only when price breaks the trigger bar's high (longs) / low (shorts) within the next bars below (default 3 = 15 minutes); the entry alert fires the moment it breaks, at that price. Off: enter at the trigger bar's close, as before.", display = display.none)
+confirmBars = input.int(3, "Confirm within (bars)", minval = 1, maxval = 6, group = G_RISK, display = display.none)
+// Added 2026-10-21.
+minStopNoise = input.float(2.0, "Min stop: x the typical 5-min bar (0 = off)", minval = 0, step = 0.25, group = G_RISK, tooltip = "The stop is at least this many times the stock's typical bar (median high-low of the last 390 bars, about 5 sessions on 5-minute), so ordinary noise can't take it out. Stops tighter than ~1.5x won 32% of the time on Oct 14-20; widening them to 2x lifted the replay from +23.6R to +35.7R.", display = display.none)
+// Added 2026-10-22.
+stopWiden = input.float(1.5, "Stop distance multiplier (after the min stop)", minval = 1, step = 0.25, group = G_RISK, tooltip = "The stop is placed this many times further from the entry than the swing / min-stop rule gives; the 2R target is measured from it. The 'skip if wider than x ATR' check still uses the unwidened stop. Oct 14-21 replay (with the QQQ chop gate): 1.5x lifted trend days from +39R to +58.5R.", display = display.none)
+chopCrosses = input.int(8, "QQQ chop gate: no entries after this many QQQ VWAP crosses (0 = off)", minval = 0, group = G_RISK, tooltip = "Counts how often QQQ's 1-minute close has crossed its session VWAP today. Above this, the index is chopping and new entries (and pending confirmations) are held back. Trend days Oct 14/16 never passed 5; choppy days reached 9-13.", display = display.none)
+chopMode = input.string("Half size", "When QQQ is choppy", options = ["Half size", "Skip"], group = G_RISK, tooltip = "Half size (default, 2026-10-22): entries are still sent, tagged 'choppy (QQQ crosses N)', and the executor buys half its normal size. Skip: no entries while QQQ is choppy.", display = display.none)
+
+C_BULL = #00E676
+C_BEAR = #FF1744
+C_OR   = #FFEB3B
+C_WARN = #FFC107
+C_DIM  = #787B86
+C_ORG  = #FF9800
+
+f_pos(string s) =>
+    switch s
+        "Top left"    => position.top_left
+        "Top center"  => position.top_center
+        "Bottom center" => position.bottom_center
+        "Top right"   => position.top_right
+        "Bottom left" => position.bottom_left
+        => position.bottom_right
+
+f_size(string s) =>
+    switch s
+        "Tiny"   => size.tiny
+        "Normal" => size.normal
+        => size.small
+
+fmt(float x) => na(x) ? "–" : str.tostring(x, format.mintick)
+
+// Same level logic as DTS 1 / DTS 2 (extended-hours data, prior REGULAR session).
+f_levels() =>
+    var float pdh  = na
+    var float pdl  = na
+    var float rthH = na
+    var float rthL = na
+    var float pmh  = na
+    var float pml  = na
+    newDay = nz(ta.change(dayofmonth)) != 0
+    if newDay
+        if not na(rthH)
+            pdh := rthH
+            pdl := rthL
+        rthH := na
+        rthL := na
+        pmh  := na
+        pml  := na
+    if session.ispremarket
+        pmh := na(pmh) ? high : math.max(pmh, high)
+        pml := na(pml) ? low : math.min(pml, low)
+    if session.ismarket
+        rthH := na(rthH) ? high : math.max(rthH, high)
+        rthL := na(rthL) ? low : math.min(rthL, low)
+    [pdh, pdl, pmh, pml]
+
+[pdh, pdl, pmh, pml] = request.security(ticker.modify(syminfo.tickerid, session.extended), timeframe.period, f_levels())
+// Prior completed week (non-repainting: [1] with lookahead on).
+[pwh, pwl] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+
+chartNewDay = nz(ta.change(dayofmonth)) != 0
+rth = session.ismarket
+
+var float orh = na
+var float orl = na
+var int orStart = na
+if chartNewDay
+    orh := na
+    orl := na
+    orStart := na
+rthOpen = rth and (not session.ismarket[1] or chartNewDay)
+if rthOpen
+    orStart := time
+    orh := high
+    orl := low
+else if rth and not na(orStart) and time < orStart + orMin * 60000
+    orh := math.max(orh, high)
+    orl := math.min(orl, low)
+orDone = not na(orStart) and time_close >= orStart + orMin * 60000
+
+e8    = ta.ema(close, fastLen)
+e21   = ta.ema(close, midLen)
+e50   = ta.ema(close, slowLen)
+atr   = ta.atr(14)
+vwapV = ta.vwap(hlc3)
+
+bullStack = e8 > e21 and e21 > e50
+bearStack = e8 < e21 and e21 < e50
+spreadOk  = math.abs(e8 - e21) >= minSpread * atr
+slope21   = e21 - e21[3]
+trend = bullStack and spreadOk and slope21 >= minSlope * atr ? 1 : bearStack and spreadOk and slope21 <= -minSlope * atr ? -1 : 0
+
+// Crossings computed every bar (Pine v6 'and' is lazy, so never inside a condition).
+xuOR = ta.crossover(close, orh)
+xdOR = ta.crossunder(close, orl)
+xuPM = ta.crossover(close, pmh)
+xdPM = ta.crossunder(close, pml)
+xuPD = ta.crossover(close, pdh)
+xdPD = ta.crossunder(close, pdl)
+xuPW = ta.crossover(close, pwh)
+xdPW = ta.crossunder(close, pwl)
+brkORH = rth and orDone and xuOR
+brkORL = rth and orDone and xdOR
+brkPMH = rth and xuPM
+brkPML = rth and xdPM
+brkPDH = rth and xuPD
+brkPDL = rth and xdPD
+brkPWH = rth and xuPW
+brkPWL = rth and xdPW
+
+// ---------------------------------------------------------------- Trade state
+allowLong  = direction != "Short only"
+allowShort = direction != "Long only"
+inWindow   = not na(time(timeframe.period, entrySess, NY))
+trailEma   = trailSrc == "8 EMA" ? e8 : e21
+eodTs      = timestamp(NY, year(time, NY), month(time, NY), dayofmonth(time, NY), 15, 55)
+isEod      = eodExit and rth and time_close >= eodTs
+var int heldSessions = 0   // regular sessions the open trade has been held, counting the entry day
+isTimeUp   = not eodExit and rth and time_close >= eodTs and heldSessions >= holdSessions
+
+var int   pos = 0          // 1 long, -1 short, 0 flat
+var float entPx = na
+var float stpPx = na
+var float tgtPx = na
+var bool  tgtHit = false
+var float bestPx = na      // best price since entry (high for longs, low for shorts)
+var int   entBar = na
+var line  lnEnt = na
+var line  lnStp = na
+var line  lnTgt = na
+var int   tradesToday = 0
+var int    pendDir = 0      // confirmation entry waiting: 1 long, -1 short
+var float  pendLvl = na     // trigger bar high (long) / low (short)
+var float  pendStp = na
+var int    pendBar = na
+var string pendName = ""
+var string pendGrade = ""
+
+// Long setup: armed by a breakout, then waiting for a retest, then the trigger.
+var bool   lArmed = false
+var float  lLvl = na
+var string lName = ""
+var int    lArmBar = na
+var bool   lRetest = false
+var float  lSwing = na
+// Short setup (mirror).
+var bool   sArmed = false
+var float  sLvl = na
+var string sName = ""
+var int    sArmBar = na
+var bool   sRetest = false
+var float  sSwing = na
+
+if chartNewDay
+    tradesToday := 0
+    pendDir := 0
+    if pos != 0
+        heldSessions += 1
+    lArmed := false
+    lRetest := false
+    lSwing := na
+    sArmed := false
+    sRetest := false
+    sSwing := na
+
+// --- Manage the open trade first.
+bool   exitNow = false
+bool   tgtNow  = false
+string exitTxt = ""
+float  exitPx  = na
+if pos != 0 and bar_index > entBar
+    bestPx := pos == 1 ? math.max(bestPx, high) : math.min(bestPx, low)
+    gbLevel = bestPx - (bestPx - entPx) * givebackPct / 100
+    if pos == 1
+        if low <= stpPx
+            exitNow := true
+            exitPx  := stpPx
+            exitTxt := tgtHit ? "BE" : "STOP"
+        else
+            if not tgtHit and high >= tgtPx
+                tgtHit := true
+                tgtNow := true
+            if tgtHit and (runnerExit == "Giveback" ? close < gbLevel : close < trailEma)
+                exitNow := true
+                exitPx  := close
+                exitTxt := "TRAIL"
+    else
+        if high >= stpPx
+            exitNow := true
+            exitPx  := stpPx
+            exitTxt := tgtHit ? "BE" : "STOP"
+        else
+            if not tgtHit and low <= tgtPx
+                tgtHit := true
+                tgtNow := true
+            if tgtHit and (runnerExit == "Giveback" ? close > gbLevel : close > trailEma)
+                exitNow := true
+                exitPx  := close
+                exitTxt := "TRAIL"
+    if not exitNow and isEod
+        exitNow := true
+        exitPx  := close
+        exitTxt := "EOD"
+    else if not exitNow and isTimeUp
+        exitNow := true
+        exitPx  := close
+        exitTxt := "TIME"
+    line.set_x2(lnEnt, bar_index)
+    line.set_x2(lnStp, bar_index)
+    line.set_x2(lnTgt, bar_index)
+    if tgtNow
+        label.new(bar_index, pos == 1 ? high : low, str.tostring(rr) + "R ✓  stop → BE", style = pos == 1 ? label.style_label_down : label.style_label_up, color = color.new(C_BULL, 20), textcolor = color.black, size = size.tiny)
+        if not exitNow
+            stpPx := entPx
+            lnStp := line.new(bar_index, entPx, bar_index, entPx, color = C_BEAR, style = line.style_dashed)
+    if exitNow
+        isWin = pos == 1 ? exitPx > entPx : exitPx < entPx
+        label.new(bar_index, pos == 1 ? high : low, exitTxt + " " + fmt(exitPx), style = pos == 1 ? label.style_label_down : label.style_label_up, color = isWin ? color.new(C_BULL, 20) : color.new(C_DIM, 20), textcolor = color.black, size = size.tiny)
+        if exitAlerts
+            alert("DTS: EXIT " + (pos == 1 ? "LONG " : "SHORT ") + syminfo.ticker + " (" + exitTxt + ") @ " + fmt(exitPx), alert.freq_once_per_bar_close)
+        pos := 0
+    else if tgtNow and exitAlerts
+        // On the first tick that touches the target (2026-10-16), not at the bar close:
+        // by the close price had often bounced back and the option gain was gone.
+        alert("DTS: " + syminfo.ticker + " hit " + str.tostring(rr) + "R target @ " + fmt(tgtPx) + " - take partial, stop to break-even " + fmt(entPx), alert.freq_once_per_bar)
+
+// --- Arm on a key-level breakout (highest level broken wins for longs, lowest for shorts).
+float  upLvl = na
+string upName = ""
+if useOR and brkORH
+    upLvl := orh
+    upName := "ORH"
+if usePM and brkPMH and (na(upLvl) or pmh > upLvl)
+    upLvl := pmh
+    upName := "PMH"
+if usePD and brkPDH and (na(upLvl) or pdh > upLvl)
+    upLvl := pdh
+    upName := "PDH"
+if usePW and brkPWH and (na(upLvl) or pwh > upLvl)
+    upLvl := pwh
+    upName := "PWH"
+if allowLong and not na(upLvl) and close > e8 and e8 > e21
+    lArmed  := true
+    lLvl    := upLvl
+    lName   := upName
+    lArmBar := bar_index
+    lRetest := false
+    lSwing  := na
+
+float  dnLvl = na
+string dnName = ""
+if useOR and brkORL
+    dnLvl := orl
+    dnName := "ORL"
+if usePM and brkPML and (na(dnLvl) or pml < dnLvl)
+    dnLvl := pml
+    dnName := "PML"
+if usePD and brkPDL and (na(dnLvl) or pdl < dnLvl)
+    dnLvl := pdl
+    dnName := "PDL"
+if usePW and brkPWL and (na(dnLvl) or pwl < dnLvl)
+    dnLvl := pwl
+    dnName := "PWL"
+if allowShort and not na(dnLvl) and close < e8 and e8 < e21
+    sArmed  := true
+    sLvl    := dnLvl
+    sName   := dnName
+    sArmBar := bar_index
+    sRetest := false
+    sSwing  := na
+
+// --- Failed breakout / trend break disarms.
+if lArmed and (close < e21 or close < lLvl - failAtr * atr)
+    lArmed := false
+    lRetest := false
+    lSwing := na
+if sArmed and (close > e21 or close > sLvl + failAtr * atr)
+    sArmed := false
+    sRetest := false
+    sSwing := na
+
+// --- Retest: pullback tags the 8 EMA or the broken level.
+bool retestNowL = false
+bool retestNowS = false
+if lArmed and bar_index > lArmBar and (low <= e8 + tolAtr * atr or low <= lLvl + tolAtr * atr)
+    retestNowL := not lRetest
+    lRetest := true
+if lArmed and lRetest
+    lSwing := na(lSwing) ? low : math.min(lSwing, low)
+if sArmed and bar_index > sArmBar and (high >= e8 - tolAtr * atr or high >= sLvl - tolAtr * atr)
+    retestNowS := not sRetest
+    sRetest := true
+if sArmed and sRetest
+    sSwing := na(sSwing) ? high : math.max(sSwing, high)
+
+// --- Trigger: candle CLOSES back above (below) the 8 EMA, right next to it.
+trendOkL = trendFilter == "Off" ? true : trendFilter == "8 > 21 only" ? e8 > e21 : trend == 1
+trendOkS = trendFilter == "Off" ? true : trendFilter == "8 > 21 only" ? e8 < e21 : trend == -1
+vwapOkL  = not vwapFilter or close > vwapV
+vwapOkS  = not vwapFilter or close < vwapV
+// QQQ chop gate: QQQ's 1-minute close crossing its session VWAP, counted from the open.
+f_vwapCrosses() =>
+    vw = ta.vwap(hlc3)
+    above = close > vw
+    var int n = 0
+    if ta.change(time("D")) != 0
+        n := 0
+    else if above != above[1]
+        n += 1
+    n
+qqqCross = request.security(ticker.new("NASDAQ", "QQQ", session.regular), "1", f_vwapCrosses())
+chopOn = chopCrosses > 0 and not na(qqqCross) and qqqCross > chopCrosses
+chopSkip = chopOn and chopMode == "Skip"
+canEnter = barstate.isconfirmed and pos == 0 and pendDir == 0 and not exitNow and rth and inWindow and tradesToday < maxTrades and not chopSkip
+
+// Stop: beyond the retest swing, but never closer than minStopNoise typical bars.
+noiseBar = ta.percentile_nearest_rank(high - low, 390, 50)
+minStop  = minStopNoise > 0 and not na(noiseBar) ? minStopNoise * noiseBar : 0.0
+lStopB = math.min(lSwing - stopBuf * atr, close - minStop)      // swing / min-stop rule
+lRiskB = close - lStopB
+lStop  = close - stopWiden * lRiskB                              // widened (stopWiden)
+lRisk  = close - lStop
+sStopB = math.max(sSwing + stopBuf * atr, close + minStop)
+sRiskB = sStopB - close
+sStop  = close + stopWiden * sRiskB
+sRisk  = sStop - close
+
+longSig = canEnter and allowLong and lArmed and lRetest and close > e8 and close > open and close > lLvl and close - e8 <= maxExt * atr and trendOkL and vwapOkL and lRiskB > 0 and lRiskB <= maxRiskAtr * atr
+shortSig = canEnter and not longSig and allowShort and sArmed and sRetest and close < e8 and close < open and close < sLvl and e8 - close <= maxExt * atr and trendOkS and vwapOkS and sRiskB > 0 and sRiskB <= maxRiskAtr * atr
+
+// --- Setup grade (also drives the A+ banner below). OUTSIDE LONG: price above
+// both PDH and PMH (outside yesterday's range and the premarket range). Grade =
+// how many of the 4 confirmations line up: clean trend, VWAP side, beyond the
+// opening range, beyond the prior-week level. 4 = A+, 3 = A, 2 = B, else C.
+outLong  = not na(pdh) and close > pdh and (na(pmh) or close > pmh)
+outShort = not na(pdl) and close < pdl and (na(pml) or close < pml)
+ptsL = (trend == 1 ? 1 : 0) + (close > vwapV ? 1 : 0) + (not na(orh) and orDone and close > orh ? 1 : 0) + (not na(pwh) and close > pwh ? 1 : 0)
+ptsS = (trend == -1 ? 1 : 0) + (close < vwapV ? 1 : 0) + (not na(orl) and orDone and close < orl ? 1 : 0) + (not na(pwl) and close < pwl ? 1 : 0)
+f_grade(int pts) => pts >= 4 ? "A+" : pts == 3 ? "A" : pts == 2 ? "B" : "C"
+
+// --- Entry. With "Confirm entry" on, the trigger close only sets a pending entry
+// at the trigger bar's high (long) / low (short); the position opens when price
+// breaks that level within confirmBars bars - on the tick it breaks, so the alert
+// is sent intrabar at that price. Unconfirmed triggers lapse.
+int    goDir = 0
+float  goPx = na
+float  goStp = na
+string goName = ""
+string goGrade = ""
+if pendDir != 0 and pos == 0
+    if bar_index > pendBar + confirmBars or not rth
+        pendDir := 0
+    else if bar_index > pendBar and inWindow and not chopSkip and (pendDir == 1 ? high >= pendLvl : low <= pendLvl)
+        goDir   := pendDir
+        goPx    := pendDir == 1 ? math.max(open, pendLvl) : math.min(open, pendLvl)
+        goStp   := pendStp
+        goName  := pendName
+        goGrade := pendGrade
+        pendDir := 0
+if longSig or shortSig
+    sigName  = longSig ? lName : sName
+    sigGrade = longSig ? f_grade(ptsL) + (outLong ? " OUTSIDE" : " inside") : f_grade(ptsS) + (outShort ? " OUTSIDE" : " inside")
+    sigStp   = longSig ? lStop : sStop
+    if confirmEntry
+        pendDir   := longSig ? 1 : -1
+        pendLvl   := longSig ? high : low
+        pendStp   := sigStp
+        pendBar   := bar_index
+        pendName  := sigName
+        pendGrade := sigGrade
+        label.new(bar_index, longSig ? high : low, "wait break " + fmt(pendLvl), yloc = longSig ? yloc.abovebar : yloc.belowbar, style = label.style_none, textcolor = longSig ? C_BULL : C_BEAR, size = size.tiny)
+    else
+        goDir   := longSig ? 1 : -1
+        goPx    := close
+        goStp   := sigStp
+        goName  := sigName
+        goGrade := sigGrade
+    if longSig
+        lRetest := false
+        lSwing := na
+    else
+        sRetest := false
+        sSwing := na
+
+if goDir != 0
+    pos    := goDir
+    entPx  := goPx
+    stpPx  := goStp
+    tgtPx  := goDir == 1 ? goPx + rr * (goPx - goStp) : goPx - rr * (goStp - goPx)
+    tgtHit := false
+    bestPx := goPx
+    entBar := bar_index
+    tradesToday += 1
+    heldSessions := 1
+    lnEnt := line.new(bar_index, entPx, bar_index + 1, entPx, color = color.new(color.white, 30), width = 1)
+    lnStp := line.new(bar_index, stpPx, bar_index + 1, stpPx, color = C_BEAR, style = line.style_dashed)
+    lnTgt := line.new(bar_index, tgtPx, bar_index + 1, tgtPx, color = C_BULL, style = line.style_dashed)
+    side = goDir == 1 ? "LONG" : "SHORT"
+    txt = side + " · " + goName + " retest\nEntry " + fmt(entPx) + "\nStop " + fmt(stpPx) + "\nTarget " + fmt(tgtPx)
+    label.new(bar_index, close, txt, yloc = goDir == 1 ? yloc.belowbar : yloc.abovebar, style = goDir == 1 ? label.style_label_up : label.style_label_down, color = goDir == 1 ? #00C853 : #D50000, textcolor = color.white, size = size.small)
+    alert("DTS: " + side + " " + syminfo.ticker + " @ " + fmt(entPx) + " | stop " + fmt(stpPx) + " | target " + fmt(tgtPx) + " (" + str.tostring(rr) + "R) | " + goName + " breakout + 8 EMA retest" + (chopOn ? " | choppy (QQQ crosses " + str.tostring(qqqCross) + ")" : "") + " | grade " + goGrade, confirmEntry ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
+
+plotshape(retestNowL and pos == 0 and allowLong, "Retest (long) - get ready", shape.diamond, location.belowbar, color.new(C_BULL, 30), size = size.tiny, display = display.all - display.status_line)
+plotshape(retestNowS and pos == 0 and allowShort, "Retest (short) - get ready", shape.diamond, location.abovebar, color.new(C_BEAR, 30), size = size.tiny, display = display.all - display.status_line)
+
+alertcondition(longSig, "Long entry", "DTS LONG {{ticker}} @ {{close}} - 8 EMA retest confirmed")
+alertcondition(shortSig, "Short entry", "DTS SHORT {{ticker}} @ {{close}} - 8 EMA retest confirmed")
+alertcondition((retestNowL and allowLong or retestNowS and allowShort) and pos == 0, "Retest - get ready", "DTS {{ticker}}: breakout retesting 8 EMA / level - get ready")
+
+// ---------------------------------------------------------------- Checklist panel
+var table panel = table.new(f_pos(panelPos), 2, 7, bgcolor = color.new(#000000, 15), border_color = color.new(#2A2E39, 0), border_width = 1, frame_color = color.new(#2A2E39, 0), frame_width = 1)
+if showPanel and barstate.islast
+    ts = f_size(txtSize)
+    lStat = pos == 1 ? "IN LONG" : not allowLong ? "off" : not lArmed ? "wait for ORH/PMH/PDH/PWH break" : not lRetest ? "armed " + lName + " " + fmt(lLvl) + " → wait retest" : "retest ✓ → wait close > 8 EMA"
+    sStat = pos == -1 ? "IN SHORT" : not allowShort ? "off" : not sArmed ? "wait for ORL/PML/PDL/PWL break" : not sRetest ? "armed " + sName + " " + fmt(sLvl) + " → wait retest" : "retest ✓ → wait close < 8 EMA"
+    trTxt = trend == 1 ? "CLEAN UPTREND" : trend == -1 ? "CLEAN DOWNTREND" : "CHOP - stand aside"
+    tradeTxt = pos != 0 ? "E " + fmt(entPx) + "  S " + fmt(stpPx) + "  T " + fmt(tgtPx) : "flat (" + str.tostring(tradesToday) + "/" + str.tostring(maxTrades) + " today)"
+    table.cell(panel, 0, 0, "Day Trading Setup", text_color = color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 1, 0, syminfo.ticker + (inWindow ? "  · window open" : "  · outside window"), text_color = inWindow ? C_BULL : C_DIM, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 0, 1, "Trend", text_color = color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 1, 1, trTxt, text_color = color.black, bgcolor = trend == 1 ? C_BULL : trend == -1 ? C_BEAR : C_WARN, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 0, 2, "VWAP", text_color = color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 1, 2, close > vwapV ? "above " + fmt(vwapV) : "below " + fmt(vwapV), text_color = close > vwapV ? C_BULL : C_BEAR, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 0, 3, "Opening range", text_color = color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 1, 3, na(orh) ? "–" : (orDone ? "" : "forming ") + fmt(orl) + " – " + fmt(orh), text_color = C_OR, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 0, 4, "Long", text_color = color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 1, 4, lStat, text_color = lRetest or pos == 1 ? C_BULL : color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 0, 5, "Short", text_color = color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 1, 5, sStat, text_color = sRetest or pos == -1 ? C_BEAR : color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 0, 6, "Trade", text_color = color.white, text_size = ts, text_halign = text.align_left)
+    table.cell(panel, 1, 6, tradeTxt, text_color = color.white, text_size = ts, text_halign = text.align_left)
+
+// ---------------------------------------------------------------- A+ setup banner
+// (OUTSIDE / grade computed above the entry block, so the entry alert can carry it)
+aPlusL = rth and outLong and ptsL >= 4
+aPlusS = rth and outShort and ptsS >= 4
+aPlusNew = (aPlusL and not aPlusL[1]) or (aPlusS and not aPlusS[1])
+if banAlert and aPlusNew and barstate.isconfirmed
+    alert("DTS: A+ OUTSIDE " + (aPlusL ? "LONG " : "SHORT ") + syminfo.ticker + " @ " + fmt(close) + " - watch for the 8 EMA retest entry", alert.freq_once_per_bar_close)
+alertcondition(aPlusL or aPlusS, "A+ outside setup", "DTS {{ticker}}: A+ OUTSIDE setup @ {{close}}")
+
+// ---------------------------------------------------------------- Strong close (v14.0, 2026-10-26)
+// The executor's 15:56 sweep sells any position that hasn't reached 2R, unless the stock is
+// closing strong in the trade's direction (rule C): beyond its daily 8 EMA, in the outer third
+// of the day's range and better than at 15:00. At the 15:50 bar's close (15:55 New York) this
+// alert says which direction, if any, is closing strong; the executor holds a matching
+// position overnight. Oct 14-23: the 4 such holds made +14.2R vs +1.9R selling everything.
+var float rthHi = na
+var float rthLo = na
+var float px1500 = na
+if rthOpen
+    rthHi := high
+    rthLo := low
+    px1500 := na
+else if rth
+    rthHi := math.max(rthHi, high)
+    rthLo := math.min(rthLo, low)
+nyHM = hour(time, NY) * 100 + minute(time, NY)
+if rth and nyHM == 1500
+    px1500 := open
+e8dPrev = request.security(syminfo.tickerid, "D", ta.ema(close, 8)[1], lookahead = barmerge.lookahead_on)
+e8d = e8dPrev + 2.0 / 9.0 * (close - e8dPrev)       // today's daily 8 EMA with the live price
+rngPos = rthHi > rthLo ? (close - rthLo) / (rthHi - rthLo) : 0.5
+strongL = close > e8d and rngPos >= 2.0 / 3.0 and not na(px1500) and close > px1500
+strongS = close < e8d and rngPos <= 1.0 / 3.0 and not na(px1500) and close < px1500
+if exitAlerts and rth and nyHM == 1550 and barstate.isconfirmed and (strongL or strongS)
+    alert("DTS: STRONG CLOSE " + (strongL ? "LONG " : "SHORT ") + syminfo.ticker + " @ " + fmt(close) + " | daily 8 EMA " + fmt(e8d) + " | range " + str.tostring(math.round(rngPos * 100)) + "% | 15:00 " + fmt(px1500), alert.freq_once_per_bar_close)
+
+var table banner = table.new(f_pos(banPos), 1, 2, bgcolor = color.new(#000000, 100), frame_color = color.new(#2A2E39, 0), frame_width = 1)
+if showBanner and barstate.islast
+    // Session clock (New York): phase + % of the regular session elapsed.
+    t = math.min(timenow, time_close)
+    m = hour(t, NY) * 60 + minute(t, NY)
+    pct = math.max(0.0, math.min(100.0, (m - 570) / 390.0 * 100))
+    phase = m < 570 ? "PREMARKET" : m < 600 ? "OPENING RANGE" : m < 690 ? "PRIME TIME" : m < 840 ? "MIDDAY - CAUTION" : m < 900 ? "AFTERNOON" : m < 960 ? "POWER HOUR" : "CLOSED"
+    phCol = m < 570 or m >= 960 ? C_DIM : m < 600 ? C_ORG : m < 690 ? C_BULL : m < 840 ? C_ORG : m < 900 ? C_WARN : C_BULL
+    n = math.round(pct / 10)
+    sessBar = str.repeat("▰", n) + str.repeat("▱", 10 - n)
+    grade = outLong ? f_grade(ptsL) : outShort ? f_grade(ptsS) : ""
+    head = outLong ? grade + " OUTSIDE LONG" : outShort ? grade + " OUTSIDE SHORT" : "INSIDE RANGE - NO EDGE"
+    isTop = grade == "A+" or grade == "A"
+    bg = outLong and isTop ? color.new(#00C853, 0) : outShort and isTop ? color.new(#D50000, 0) : outLong or outShort ? color.new(C_WARN, 0) : color.new(#434651, 0)
+    table.cell(banner, 0, 0, head, text_color = color.white, bgcolor = bg, text_size = size.large, width = 22)
+    table.cell(banner, 0, 1, sessBar + "  " + phase + "  " + str.tostring(math.round(pct)) + "%", text_color = phCol, bgcolor = color.new(#131722, 0), text_size = size.small, width = 22)
