@@ -317,6 +317,10 @@ def on_entry(broker, state, sig, t):
         return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nOutside the regular session")
     if sig.ticker in state["positions"]:
         return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nAlready holding <b>{h(describe(state['positions'][sig.ticker]))}</b>")
+    if hm >= settings.ENTRY_CUTOFF:
+        why = f"no new entries from {settings.ENTRY_CUTOFF[0]}:{settings.ENTRY_CUTOFF[1]:02d} (lunch cutoff)"
+        skip(state, sig, t, why)
+        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
     if t.weekday() == 4 and hm >= settings.FRIDAY_ENTRY_END:
         why = f"no new entries on Friday from {settings.FRIDAY_ENTRY_END[0]}:{settings.FRIDAY_ENTRY_END[1]:02d}"
         skip(state, sig, t, why)

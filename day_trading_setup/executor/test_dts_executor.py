@@ -206,10 +206,20 @@ class ContractTest(unittest.TestCase):
         self.assertTrue(contracts.close_before_overnight({"trimmed": False, "opened_at": "2026-10-23T11:30:00-04:00"}))   # Friday morning 0DTE
         self.assertFalse(contracts.close_before_overnight({"trimmed": False, "opened_at": "2026-10-23T12:36:00-04:00"}))  # Friday swing: held
 
-    def test_friday_entry_cutoff(self):
+    def test_lunch_cutoff(self):
         from day_trading_setup.executor import executor
         sent = []
         with mock.patch.object(executor, "notify", sent.append):
+            state = {"positions": {}, "closed": []}
+            sig = signals.parse("DTS: LONG AAPL @ 347.52 | stop 346.16 | target 350.24 (2R) | PDH breakout | grade A OUTSIDE")
+            executor.on_entry(None, state, sig, datetime(2026, 10, 27, 12, 0, tzinfo=executor.NY))
+        self.assertIn("no new entries from 12:00 (lunch cutoff)", sent[0])
+        self.assertEqual(state["skipped"][0]["ticker"], "AAPL")
+
+    def test_friday_entry_cutoff(self):
+        from day_trading_setup.executor import executor
+        sent = []
+        with mock.patch.object(executor, "notify", sent.append), mock.patch.object(settings, "ENTRY_CUTOFF", (16, 0)):
             state = {"positions": {}, "closed": []}
             sig = signals.parse("DTS: SHORT TSLA @ 371.26 | stop 374.52 | target 364.74 (2R) | PML breakout")
             executor.on_entry(None, state, sig, datetime(2026, 10, 23, 13, 10, tzinfo=executor.NY))
@@ -220,7 +230,7 @@ class ContractTest(unittest.TestCase):
         from day_trading_setup.executor import executor
         fri = datetime(2026, 10, 23, 12, 36, tzinfo=executor.NY)
         sent = []
-        with mock.patch.object(executor, "notify", sent.append):
+        with mock.patch.object(executor, "notify", sent.append), mock.patch.object(settings, "ENTRY_CUTOFF", (16, 0)):
             state = {"positions": {}, "closed": []}
             sig = signals.parse("DTS: LONG MU @ 887.82 | stop 878.54 | target 906.38 (2R) | PMH breakout | grade A inside")
             executor.on_entry(None, state, sig, fri)
