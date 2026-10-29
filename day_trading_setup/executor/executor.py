@@ -317,8 +317,9 @@ def on_entry(broker, state, sig, t):
         return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nOutside the regular session")
     if sig.ticker in state["positions"]:
         return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nAlready holding <b>{h(describe(state['positions'][sig.ticker]))}</b>")
-    if hm >= settings.ENTRY_CUTOFF:
-        why = f"no new entries from {settings.ENTRY_CUTOFF[0]}:{settings.ENTRY_CUTOFF[1]:02d} (lunch cutoff)"
+    if contracts.late_entry(t) and sig.grade not in settings.LATE_ENTRY_GRADES:
+        why = (f"from {settings.ENTRY_CUTOFF[0]}:{settings.ENTRY_CUTOFF[1]:02d} only "
+               f"{' / '.join(sorted(settings.LATE_ENTRY_GRADES))} setups (this one: {sig.grade or 'no grade'})")
         skip(state, sig, t, why)
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
     if t.weekday() == 4 and hm >= settings.FRIDAY_ENTRY_END:
@@ -381,6 +382,7 @@ def on_entry(broker, state, sig, t):
            f"Premium <b>${filled * avg * 100:,.0f}</b> = {filled * avg * 100 / nlv:.1%} of ${nlv:,.0f} ({h(nlv_src)})\n"
            f"Strike chosen: delta {abs(pos['delta']) if pos.get('delta') is not None else float('nan'):.2f} · {h(pos.get('sizing_rule', ''))}\n"
            + ("Friday swing: smaller size, held over the weekend even before 2R\n" if contracts.weekend_swing(pos) else "")
+           + ("Late high-conviction entry: held overnight even before 2R\n" if contracts.late_entry(t) else "")
            + f"<i>{h(note)}</i>")
 
 

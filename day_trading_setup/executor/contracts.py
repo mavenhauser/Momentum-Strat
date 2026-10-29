@@ -170,11 +170,19 @@ def weekend_swing(pos) -> bool:
     return swing_entry(datetime.fromisoformat(pos["opened_at"]))
 
 
+def late_entry(t) -> bool:
+    """True for an entry at `t` from ENTRY_CUTOFF on (Monday-Thursday; Fridays stop at
+    FRIDAY_ENTRY_END): only LATE_ENTRY_GRADES setups, held overnight even before 2R."""
+    return t.weekday() < 4 and (t.hour, t.minute) >= settings.ENTRY_CUTOFF
+
+
 def close_before_overnight(pos) -> bool:
     """True if the 15:56 sweep should sell this position rather than hold it overnight:
-    it has not reached 2R (runners past 2R, stop at break-even, are held) and is not a
-    Friday-afternoon swing."""
-    return settings.HOLD_OVERNIGHT_ONLY_PAST_2R and not pos.get("trimmed") and not weekend_swing(pos)
+    it has not reached 2R (runners past 2R, stop at break-even, are held) and is neither
+    a Friday-afternoon swing nor a high-conviction late entry."""
+    opened = datetime.fromisoformat(pos["opened_at"])
+    return (settings.HOLD_OVERNIGHT_ONLY_PAST_2R and not pos.get("trimmed")
+            and not weekend_swing(pos) and not late_entry(opened))
 
 
 def strong_close_holds(pos, strong, now) -> bool:

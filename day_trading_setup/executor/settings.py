@@ -127,7 +127,7 @@ STRONG_CLOSE_HOLD = True
 # and all 3 Friday entries after 13:00 lost (Oct 14-23, -$3,705 at market prices).
 # Friday entries from FRIDAY_SWING_FROM buy next week's expiry and are swing trades:
 # held over the weekend even before 2R (the max hold still closes them at Monday's sweep).
-FRIDAY_ENTRY_END = (13, 0)   # superseded by ENTRY_CUTOFF (12:00) since 2026-10-28; kept for a later cutoff change
+FRIDAY_ENTRY_END = (13, 0)
 FRIDAY_SWING_FROM = (12, 0)
 # Friday swings are tighter (2026-10-24, user decision): only the strongest setups,
 # small whatever the grade, and few of them. OUTSIDE setups made +$309 per $1k of
@@ -140,11 +140,13 @@ FRIDAY_SWING_MAX = 2         # swing positions open at once
 # sweep runs after TradingView's own 15:55 alerts have had time to arrive.
 ENTRY_START = (9, 30)
 ENTRY_END = (16, 0)
-# Lunch cutoff (2026-10-28, user decision): no new entries from 12:00 New York, every day.
-# Entry-time P&L, Oct 14-27 at market prices: 10:30-11:15 +$48.4k (28 trades), 11:15-12:00
-# +$9.2k (24), 12:00-13:00 +$0.5k (21), after 13:00 -$2.0k (21). Later signals are still
-# logged as SKIPPED, so their outcome can be studied.
-ENTRY_CUTOFF = (12, 0)
+# Afternoon cutoff (user decision; 12:00 on Oct 28, moved to 14:00 from Oct 29): from this
+# New York time only LATE_ENTRY_GRADES setups are taken, and they are held overnight even
+# before 2R. Entry-time P&L, Oct 14-27 at market prices: 10:30-11:15 +$48.4k (28 trades),
+# 11:15-12:00 +$9.2k (24), 12:00-13:00 +$0.5k (21), after 13:00 -$2.0k (21). Other late
+# signals are logged as SKIPPED, so their outcome can be studied.
+ENTRY_CUTOFF = (14, 0)
+LATE_ENTRY_GRADES = {"A+ OUTSIDE"}
 SWEEP_AT = (15, 56)
 
 ORDER_FILL_TIMEOUT_SECONDS = 30

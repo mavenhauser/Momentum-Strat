@@ -206,15 +206,19 @@ class ContractTest(unittest.TestCase):
         self.assertTrue(contracts.close_before_overnight({"trimmed": False, "opened_at": "2026-10-23T11:30:00-04:00"}))   # Friday morning 0DTE
         self.assertFalse(contracts.close_before_overnight({"trimmed": False, "opened_at": "2026-10-23T12:36:00-04:00"}))  # Friday swing: held
 
-    def test_lunch_cutoff(self):
+    def test_afternoon_cutoff(self):
         from day_trading_setup.executor import executor
         sent = []
         with mock.patch.object(executor, "notify", sent.append):
             state = {"positions": {}, "closed": []}
             sig = signals.parse("DTS: LONG AAPL @ 347.52 | stop 346.16 | target 350.24 (2R) | PDH breakout | grade A OUTSIDE")
-            executor.on_entry(None, state, sig, datetime(2026, 10, 27, 12, 0, tzinfo=executor.NY))
-        self.assertIn("no new entries from 12:00 (lunch cutoff)", sent[0])
-        self.assertEqual(state["skipped"][0]["ticker"], "AAPL")
+            executor.on_entry(None, state, sig, datetime(2026, 10, 27, 14, 0, tzinfo=executor.NY))
+        self.assertIn("from 14:00 only A+ OUTSIDE setups (this one: A OUTSIDE)", sent[0])
+        self.assertTrue(contracts.late_entry(datetime(2026, 10, 27, 14, 5)))
+        self.assertFalse(contracts.late_entry(datetime(2026, 10, 27, 13, 59)))
+        self.assertFalse(contracts.late_entry(datetime(2026, 10, 30, 14, 5)))      # Friday: FRIDAY_ENTRY_END rules
+        self.assertFalse(contracts.close_before_overnight({"trimmed": False, "opened_at": "2026-10-27T14:20:00-04:00"}))  # late A+: held
+        self.assertTrue(contracts.close_before_overnight({"trimmed": False, "opened_at": "2026-10-27T13:20:00-04:00"}))
 
     def test_friday_entry_cutoff(self):
         from day_trading_setup.executor import executor
