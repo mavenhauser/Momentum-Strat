@@ -166,6 +166,16 @@ class Broker:
         (settings.SIZING_ACCOUNT), so sizing never depends on IBKR being reachable."""
         return settings.SIZING_ACCOUNT, "notional"
 
+    def earnings(self, tickers):
+        """{ticker: (expected report date, "BMO" / "AMC" / None)} from TastyTrade."""
+        from tastytrade.metrics import get_market_metrics
+        self.tt._run(self.tt.session.refresh())
+        out = {}
+        for m in self.tt._run(get_market_metrics(self.tt.session, list(tickers)), timeout=30):
+            e = m.earnings
+            out[m.symbol] = (e.expected_report_date, e.time_of_day) if e else (None, None)
+        return out
+
     def chain(self, ticker):
         """Full option chain from TastyTrade. Large chains are slow (AMD: ~15 s for
         7,000+ contracts, which tripped the shared client's 15 s limit live on
@@ -579,6 +589,12 @@ def sweep(broker, state, t):
                            f"0DTE time stop: no 2R within {settings.ZERO_DTE_TIME_STOP_MIN} min", "time stop")
     if (t.hour, t.minute) < settings.SWEEP_AT:
         return
+    earn = {}
+    if settings.NO_OVERNIGHT_INTO_EARNINGS and state["positions"]:
+        try:
+            earn = broker.earnings({p["ticker"] for p in state["positions"].values()})
+        except Exception as e:
+            log.warning("earnings dates unavailable, overnight holds not checked for earnings: %s: %s", type(e).__name__, e)
     for pos in list(state["positions"].values()):
         exp = date.fromisoformat(pos["expiry"])
         held = contracts.sessions_held(datetime.fromisoformat(pos["opened_at"]).date(), t.date())
@@ -586,6 +602,9 @@ def sweep(broker, state, t):
             close_position(broker, state, pos, t, "expiry day, closed by the 15:56 sweep", "sweep")
         elif held >= settings.MAX_HOLD_SESSIONS:
             close_position(broker, state, pos, t, f"held {held} sessions, closed by the 15:56 sweep", "sweep")
+        elif contracts.earnings_before_next_session(*earn.get(pos["ticker"], (None, None)), t.date()):
+            rd, tod = earn[pos["ticker"]]
+            close_position(broker, state, pos, t, f"earnings {rd:%a %d %b} {tod or '(time not set)'}: no overnight hold, closed by the 15:56 sweep", "sweep")
         elif contracts.close_before_overnight(pos):
             strong = (state.get("strong_close") or {}).get(pos["ticker"])
             if not contracts.strong_close_holds(pos, strong, t):

@@ -192,6 +192,24 @@ def strong_close_holds(pos, strong, now) -> bool:
                 and strong.get("t", "")[:10] == now.date().isoformat())
 
 
+def next_session(day: date) -> date:
+    """The next weekday after `day` (market holidays not excluded)."""
+    d = day + timedelta(days=1)
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return d
+
+
+def earnings_before_next_session(report_date, time_of_day, today: date) -> bool:
+    """True if a report on `report_date` (time_of_day "BMO" / "AMC" / None) lands between
+    today's close and the next session's open, so holding overnight would carry it."""
+    if not settings.NO_OVERNIGHT_INTO_EARNINGS or report_date is None:
+        return False
+    if report_date == today:
+        return time_of_day != "BMO"              # BMO today: already out this morning
+    return today < report_date <= next_session(today) and time_of_day != "AMC"
+
+
 def time_stop_due(pos, now) -> bool:
     """True for a same-day (0DTE) position that has not reached 2R within
     ZERO_DTE_TIME_STOP_MIN minutes of entry."""

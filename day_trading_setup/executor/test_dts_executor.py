@@ -284,6 +284,31 @@ class ContractTest(unittest.TestCase):
         buy, sells = journal._events(t, [])
         self.assertEqual((buy["qty"], len(sells), sells[0]["price"]), (4, 1, 9.10))
 
+    def test_earnings_before_next_session(self):
+        thu, fri = date(2026, 10, 29), date(2026, 10, 30)
+        f = contracts.earnings_before_next_session
+        self.assertTrue(f(thu, "AMC", thu))                       # reports after today's close
+        self.assertTrue(f(thu, None, thu))                        # time unknown: treated as a risk
+        self.assertFalse(f(thu, "BMO", thu))                      # already reported this morning
+        self.assertTrue(f(fri, "BMO", thu))                       # before tomorrow's open
+        self.assertFalse(f(fri, "AMC", thu))                      # after tomorrow's close: max hold sells first
+        self.assertTrue(f(date(2026, 11, 2), "BMO", fri))         # Monday before the open, held over the weekend
+        self.assertFalse(f(date(2026, 11, 3), None, thu))
+        self.assertFalse(f(None, None, thu))
+
+    def test_sweep_sells_runner_before_earnings(self):
+        from day_trading_setup.executor import executor
+        broker = mock.Mock()
+        broker.earnings.return_value = {"AMZN": (date(2026, 10, 29), "AMC"), "AMD": (date(2026, 11, 3), None)}
+        runner = {"side": "LONG", "right": "C", "strike": 255.0, "expiry": "2026-10-30", "qty": 4, "open_qty": 2,
+                  "trimmed": True, "opened_at": "2026-10-29T10:30:00-04:00", "events": []}
+        state = {"positions": {"AMZN": dict(runner, ticker="AMZN"), "AMD": dict(runner, ticker="AMD")}, "closed": []}
+        closed = []
+        with mock.patch.object(executor, "close_position", lambda b, st, p, t, why, raw: closed.append((p["ticker"], why))):
+            executor.sweep(broker, state, datetime(2026, 10, 29, 15, 56, tzinfo=executor.NY))
+        self.assertEqual([c[0] for c in closed], ["AMZN"])
+        self.assertIn("earnings Thu 29 Oct AMC", closed[0][1])
+
     def test_sessions(self):
         self.assertEqual(contracts.sessions_held(date(2026, 10, 15), date(2026, 10, 15)), 1)   # Thu
         self.assertEqual(contracts.sessions_held(date(2026, 10, 16), date(2026, 10, 19)), 2)   # Fri -> Mon

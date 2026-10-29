@@ -122,6 +122,11 @@ HOLD_OVERNIGHT_ONLY_PAST_2R = True
 # at 15:00). Oct 14-23: 4 such holds, +14.2R vs +1.9R selling all (+6.1R without UNH's
 # earnings gap). Every overnight gap-through-stop (TSLA / AMD / MRVL, Oct 22) failed it.
 STRONG_CLOSE_HOLD = True
+# Earnings (2026-10-29, user decision): nothing is held overnight into an earnings report -
+# at the 15:56 sweep a position is sold, even a runner past 2R or a strong-close hold, if
+# the stock reports after today's close or before the next session's open (TastyTrade's
+# expected report date; an unknown time of day counts as a risk).
+NO_OVERNIGHT_INTO_EARNINGS = True
 # Friday rules (2026-10-24, user decision). No new entries from FRIDAY_ENTRY_END: with
 # under 3 hours to the 15:56 sweep, 1 in 10 entries after 13:00 reached 2R the same day
 # and all 3 Friday entries after 13:00 lost (Oct 14-23, -$3,705 at market prices).
