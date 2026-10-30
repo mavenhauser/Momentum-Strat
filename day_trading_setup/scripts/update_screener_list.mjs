@@ -3,13 +3,14 @@
 //
 //   fixed  Momentum Strategy universe (MOMENTUM_TICKERS in src/config.py - follows that
 //          list) plus any Magnificent 7 name not already in it. 12 tickers today.
-//   daily  the remaining slots up to 20 (8 today): mega caps that are up the most in
-//          premarket. Changes every trading day.
+//   daily  the remaining slots up to 20 (8 today): mega caps moving the most in premarket,
+//          up or down. Changes every trading day.
 //
 // Daily pick: US primary common stocks with market cap >= MIN_CAP, not already in the
-// list, with at least MIN_PM_VOL premarket shares, ranked by premarket % change, highest
-// first. If too few qualify (run outside premarket), the rest are filled by the last
-// session's % change, highest first.
+// list, with at least MIN_PM_VOL premarket shares, ranked by the size of the premarket %
+// change, biggest first, in either direction (since 2026-10-30: gainers-only ranking left
+// INTC, -26% premarket, off the list while KO, +1.9%, made it). If too few qualify (run
+// outside premarket), the rest are filled by the size of the last session's % change.
 //
 // With --alerts it also keeps TradingView alerts in step with the list: one "DTS Entry"
 // alert per ticker. What an alert sends is decided by the indicator's own settings on the
@@ -120,14 +121,14 @@ async function megaCaps(taken, count) {
   const pool = (await res.json()).data
     .map(r => ({ symbol: r.s, name: r.d[0], cap_bn: Math.round(r.d[1] / 1e9), change: r.d[2], pm_change: r.d[3], pm_volume: r.d[4] }))
     .filter(r => !taken.has(r.name) && !EXCLUDE.has(r.name));
-  const highest = key => (a, b) => b[key] - a[key];
+  const biggest = key => (a, b) => Math.abs(b[key]) - Math.abs(a[key]);
   const picks = pool
     .filter(r => r.pm_change != null && (r.pm_volume || 0) >= MIN_PM_VOL)
-    .sort(highest('pm_change')).slice(0, count).map(r => ({ ...r, ranked_by: 'premarket' }));
+    .sort(biggest('pm_change')).slice(0, count).map(r => ({ ...r, ranked_by: 'premarket' }));
   if (picks.length < count) {
     const have = new Set(picks.map(r => r.name));
     picks.push(...pool.filter(r => !have.has(r.name) && r.change != null)
-      .sort(highest('change')).slice(0, count - picks.length).map(r => ({ ...r, ranked_by: 'last session' })));
+      .sort(biggest('change')).slice(0, count - picks.length).map(r => ({ ...r, ranked_by: 'last session' })));
   }
   return { picks, pool_size: pool.length };
 }

@@ -68,7 +68,7 @@ the 20 tickers each trading morning and writes them into the Custom list:
 |---|---|
 | 10 | The Momentum Strategy universe (`MOMENTUM_TICKERS` in `src/config.py`, or the deployed scanner's list), so it follows that list. |
 | 2 | The Magnificent 7 names not already in that universe: AMZN and META today. All seven are always in the table. |
-| 8 | Mega caps that are up the most in premarket. Changes every trading day. |
+| 8 | Mega caps moving the most in premarket, up or down. Changes every trading day. |
 
 The fixed part is the momentum universe plus any Magnificent 7 name it
 lacks, so the split between fixed and daily slots adjusts if the momentum
@@ -76,9 +76,9 @@ list changes; the total stays at 20. There are no index ETFs in the list.
 
 The daily pick is: US primary common stocks with a market cap of at least
 $200B, not already in the list, with at least 20,000 premarket shares
-traded, ranked by premarket % change, highest first. The data comes from
+traded, ranked by the size of the premarket % change, up or down (since 2026-10-30; gainers only before that). The data comes from
 TradingView's screener feed. If too few qualify (a run outside premarket),
-the rest are filled by the last session's % change, highest first. On a
+the rest are filled by the size of the last session's % change. On a
 weak morning the last picks can be barely positive. The thresholds are
 constants at the top of the script.
 
