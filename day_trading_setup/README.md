@@ -79,7 +79,7 @@ $200B, not already in the list, with at least 20,000 premarket shares
 traded, ranked by the size of the premarket % change, up or down (since 2026-10-30; gainers only before that). The data comes from
 TradingView's screener feed. If too few qualify (a run outside premarket),
 the rest are filled by the size of the last session's % change. On a
-weak morning the last picks can be barely positive. The thresholds are
+quiet morning the last picks can be small moves. The thresholds are
 constants at the top of the script.
 
 ```bash
