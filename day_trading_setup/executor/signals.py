@@ -6,7 +6,7 @@ day_trading_setup/pine/dts_3_entry_signals.pine:
 
   DTS: LONG NVDA @ 177.16 | stop 176.40 | target 178.68 (2R) | ORH breakout + 8 EMA retest | grade A+ OUTSIDE
   DTS: NVDA hit 2R target @ 178.68 - take partial, stop to break-even 177.16
-  DTS: EXIT LONG NVDA (STOP) @ 176.40          (STOP / BE / TRAIL / EOD / TIME)
+  DTS: EXIT LONG NVDA (STOP) @ 176.40          (STOP / BE / TRAIL / RUNNER / EOD / TIME)
   DTS: A+ OUTSIDE LONG NVDA @ 177.20 - watch for the 8 EMA retest entry
   DTS: STRONG CLOSE LONG NVDA @ 179.10 | daily 8 EMA 175.20 | range 88% | 15:00 178.40   (v14.0)
 """
@@ -19,7 +19,7 @@ _TICK = r"([A-Z0-9.!_-]+)"
 
 _ENTRY = re.compile(rf"^DTS: (LONG|SHORT) {_TICK} @ {_NUM} \| stop {_NUM} \| target {_NUM} \({_NUM}R\) \| (\w+) breakout")
 _TARGET = re.compile(rf"^DTS: {_TICK} hit {_NUM}R target @ {_NUM} - take partial, stop to break-even {_NUM}")
-_EXIT = re.compile(rf"^DTS: EXIT (LONG|SHORT) {_TICK} \((STOP|BE|TRAIL|EOD|TIME)\) @ {_NUM}")
+_EXIT = re.compile(rf"^DTS: EXIT (LONG|SHORT) {_TICK} \((STOP|BE|TRAIL|RUNNER|EOD|TIME)\) @ {_NUM}")
 _GRADE = re.compile(r"\| grade (A\+|A|B|C) (OUTSIDE|inside)\s*$")   # since DTS Entry v6.0 (2026-10-16)
 _CHOP = re.compile(r"\| choppy \(QQQ crosses (\d+)\)")   # since DTS Entry v13.0 (2026-10-22): half size
 _QQQ = re.compile(r"\| QQQ ([+-]?\d+(?:\.\d+)?)% \(1h ([+-]?\d+(?:\.\d+)?)%\) (above|below) VWAP")   # since v15.0 (2026-10-30)

@@ -20,7 +20,7 @@ class ParseTest(unittest.TestCase):
         self.assertEqual((s.kind, s.ticker, s.price, s.stop), ("TARGET", "SHOP", 177.47, 176.42))
 
     def test_exits(self):
-        for reason in ("STOP", "BE", "TRAIL", "EOD", "TIME"):
+        for reason in ("STOP", "BE", "TRAIL", "RUNNER", "EOD", "TIME"):
             s = signals.parse(f"DTS: EXIT SHORT TSLA ({reason}) @ 379.68")
             self.assertEqual((s.kind, s.ticker, s.side, s.reason, s.price), ("EXIT", "TSLA", "SHORT", reason, 379.68))
 

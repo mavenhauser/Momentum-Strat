@@ -57,7 +57,7 @@ txtSize   = input.string("Small", "Text size", options = ["Tiny", "Small", "Norm
 // Declared last on purpose: input ids are positional, so new inputs go at the end to keep
 // saved chart settings and alerts lined up.
 G_AL = "Alert messages"
-exitAlerts = input.bool(true, "alert() on the 2R target and on exits", group = G_AL, tooltip = "On: alerts also carry the 2R target hit and every exit (STOP / BE / TRAIL / EOD). Off: entries and (if enabled above) new A+ setups only. The chart labels are drawn either way.", display = display.none)
+exitAlerts = input.bool(true, "alert() on the 2R target and on exits", group = G_AL, tooltip = "On: alerts also carry the 2R target hit and every exit (STOP / BE / TRAIL / RUNNER / EOD). Off: entries and (if enabled above) new A+ setups only. The chart labels are drawn either way.", display = display.none)
 holdSessions = input.int(2, "Max sessions held when 'Flat by 15:55' is off", minval = 1, group = G_RISK, tooltip = "Only used when 'Flat by 15:55 New York' is unchecked. 1 = close at 15:55 on the entry day, 2 = may be held overnight and is closed at 15:55 the next session (TIME exit), and so on. Stops, the 2R target and the trail still apply at any time.", display = display.none)
 // Added 2026-10-18 (inputs are positional, so new ones go last).
 runnerExit = input.string("Giveback", "Runner exit after the 2R target", options = ["Giveback", "EMA close"], group = G_RISK, tooltip = "Giveback (default): after 2R, exit the runner when price gives back this % of the best move since entry, on a bar close. Stands in for trailing the option's own price (the executor's option quotes are delayed). EMA close: the original trail, a close back through the 8/21 EMA.", display = display.none)
@@ -71,6 +71,8 @@ minStopNoise = input.float(2.0, "Min stop: x the typical 5-min bar (0 = off)", m
 stopWiden = input.float(1.5, "Stop distance multiplier (after the min stop)", minval = 1, step = 0.25, group = G_RISK, tooltip = "The stop is placed this many times further from the entry than the swing / min-stop rule gives; the 2R target is measured from it. The 'skip if wider than x ATR' check still uses the unwidened stop. Oct 14-21 replay (with the QQQ chop gate): 1.5x lifted trend days from +39R to +58.5R.", display = display.none)
 chopCrosses = input.int(8, "QQQ chop gate: no entries after this many QQQ VWAP crosses (0 = off)", minval = 0, group = G_RISK, tooltip = "Counts how often QQQ's 1-minute close has crossed its session VWAP today. Above this, the index is chopping and new entries (and pending confirmations) are held back. Trend days Oct 14/16 never passed 5; choppy days reached 9-13.", display = display.none)
 chopMode = input.string("Half size", "When QQQ is choppy", options = ["Half size", "Skip"], group = G_RISK, tooltip = "Half size (default, 2026-10-22): entries are still sent, tagged 'choppy (QQQ crosses N)', and the executor buys half its normal size. Skip: no entries while QQQ is choppy.", display = display.none)
+// Added 2026-10-30.
+runnerTgtR = input.float(4.0, "Runner target (R multiple, 0 = off)", minval = 0, step = 0.5, group = G_RISK, tooltip = "After the 2R target, sell the runner the moment price reaches this R multiple, on the first tick, rather than waiting for the trail to give back. On a gap past it the exit is at the open. 0 = no runner target, the trail alone.", display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744
@@ -238,6 +240,7 @@ float  exitPx  = na
 if pos != 0 and bar_index > entBar
     bestPx := pos == 1 ? math.max(bestPx, high) : math.min(bestPx, low)
     gbLevel = bestPx - (bestPx - entPx) * givebackPct / 100
+    runLvl = runnerTgtR > 0 ? entPx + (tgtPx - entPx) * runnerTgtR / rr : na
     if pos == 1
         if low <= stpPx
             exitNow := true
@@ -247,7 +250,11 @@ if pos != 0 and bar_index > entBar
             if not tgtHit and high >= tgtPx
                 tgtHit := true
                 tgtNow := true
-            if tgtHit and (runnerExit == "Giveback" ? close < gbLevel : close < trailEma)
+            if tgtHit and runnerTgtR > 0 and high >= runLvl
+                exitNow := true
+                exitPx  := math.max(open, runLvl)
+                exitTxt := "RUNNER"
+            else if tgtHit and (runnerExit == "Giveback" ? close < gbLevel : close < trailEma)
                 exitNow := true
                 exitPx  := close
                 exitTxt := "TRAIL"
@@ -260,7 +267,11 @@ if pos != 0 and bar_index > entBar
             if not tgtHit and low <= tgtPx
                 tgtHit := true
                 tgtNow := true
-            if tgtHit and (runnerExit == "Giveback" ? close > gbLevel : close > trailEma)
+            if tgtHit and runnerTgtR > 0 and low <= runLvl
+                exitNow := true
+                exitPx  := math.min(open, runLvl)
+                exitTxt := "RUNNER"
+            else if tgtHit and (runnerExit == "Giveback" ? close > gbLevel : close > trailEma)
                 exitNow := true
                 exitPx  := close
                 exitTxt := "TRAIL"
@@ -284,6 +295,10 @@ if pos != 0 and bar_index > entBar
         isWin = pos == 1 ? exitPx > entPx : exitPx < entPx
         label.new(bar_index, pos == 1 ? high : low, exitTxt + " " + fmt(exitPx), style = pos == 1 ? label.style_label_down : label.style_label_up, color = isWin ? color.new(C_BULL, 20) : color.new(C_DIM, 20), textcolor = color.black, size = size.tiny)
         if exitAlerts
+            // The runner target fires on the first tick that touches it, like the 2R alert. The
+            // bar-close call stays as a backstop; the executor ignores it once the position is shut.
+            if exitTxt == "RUNNER"
+                alert("DTS: EXIT " + (pos == 1 ? "LONG " : "SHORT ") + syminfo.ticker + " (" + exitTxt + ") @ " + fmt(exitPx), alert.freq_once_per_bar)
             alert("DTS: EXIT " + (pos == 1 ? "LONG " : "SHORT ") + syminfo.ticker + " (" + exitTxt + ") @ " + fmt(exitPx), alert.freq_once_per_bar_close)
         pos := 0
     else if tgtNow and exitAlerts

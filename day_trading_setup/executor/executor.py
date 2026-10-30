@@ -3,7 +3,7 @@
 TradingView decides every entry, stop, target and exit; this only executes.
 LONG -> buy a call, SHORT -> buy a put, this week's expiry, strike nearest the
 TradingView entry price, about 1% of net liquidation in premium. The 2R alert
-sells half, any EXIT alert (STOP / BE / TRAIL / EOD / TIME) sells the rest.
+sells half, any EXIT alert (STOP / BE / TRAIL / RUNNER / EOD / TIME) sells the rest.
 IBKR prices are used only to fill the option orders.
 
 Stateless per invocation (like the Momentum trader): one alert in, state in
