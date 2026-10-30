@@ -366,16 +366,23 @@ trendOkS = trendFilter == "Off" ? true : trendFilter == "8 > 21 only" ? e8 < e21
 vwapOkL  = not vwapFilter or close > vwapV
 vwapOkS  = not vwapFilter or close < vwapV
 // QQQ chop gate: QQQ's 1-minute close crossing its session VWAP, counted from the open.
-f_vwapCrosses() =>
+// Also QQQ's market state for the entry alert (v15.0, 2026-10-30): % from today's open,
+// % over the last hour (60 one-minute bars) and its side of VWAP. The executor takes a
+// signal after its afternoon cutoff only when the market is trending the trade's way.
+f_qqqState() =>
     vw = ta.vwap(hlc3)
     above = close > vw
     var int n = 0
+    var float o = na
     if ta.change(time("D")) != 0
         n := 0
+        o := open
     else if above != above[1]
         n += 1
-    n
-qqqCross = request.security(ticker.new("NASDAQ", "QQQ", session.regular), "1", f_vwapCrosses())
+    [n, (close / o - 1) * 100, (close / close[60] - 1) * 100, above]
+[qqqCross, qqqDay, qqqHour, qqqAbove] = request.security(ticker.new("NASDAQ", "QQQ", session.regular), "1", f_qqqState())
+f_pct(x) => (x >= 0 ? "+" : "") + str.tostring(x, "0.00") + "%"
+qqqTag = na(qqqDay) or na(qqqHour) ? "" : " | QQQ " + f_pct(qqqDay) + " (1h " + f_pct(qqqHour) + ") " + (qqqAbove ? "above" : "below") + " VWAP"
 chopOn = chopCrosses > 0 and not na(qqqCross) and qqqCross > chopCrosses
 chopSkip = chopOn and chopMode == "Skip"
 canEnter = barstate.isconfirmed and pos == 0 and pendDir == 0 and not exitNow and rth and inWindow and tradesToday < maxTrades and not chopSkip
@@ -465,7 +472,7 @@ if goDir != 0
     side = goDir == 1 ? "LONG" : "SHORT"
     txt = side + " · " + goName + " retest\nEntry " + fmt(entPx) + "\nStop " + fmt(stpPx) + "\nTarget " + fmt(tgtPx)
     label.new(bar_index, close, txt, yloc = goDir == 1 ? yloc.belowbar : yloc.abovebar, style = goDir == 1 ? label.style_label_up : label.style_label_down, color = goDir == 1 ? #00C853 : #D50000, textcolor = color.white, size = size.small)
-    alert("DTS: " + side + " " + syminfo.ticker + " @ " + fmt(entPx) + " | stop " + fmt(stpPx) + " | target " + fmt(tgtPx) + " (" + str.tostring(rr) + "R) | " + goName + " breakout + 8 EMA retest" + (chopOn ? " | choppy (QQQ crosses " + str.tostring(qqqCross) + ")" : "") + " | grade " + goGrade, confirmEntry ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
+    alert("DTS: " + side + " " + syminfo.ticker + " @ " + fmt(entPx) + " | stop " + fmt(stpPx) + " | target " + fmt(tgtPx) + " (" + str.tostring(rr) + "R) | " + goName + " breakout + 8 EMA retest" + (chopOn ? " | choppy (QQQ crosses " + str.tostring(qqqCross) + ")" : "") + qqqTag + " | grade " + goGrade, confirmEntry ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
 
 plotshape(retestNowL and pos == 0 and allowLong, "Retest (long) - get ready", shape.diamond, location.belowbar, color.new(C_BULL, 30), size = size.tiny, display = display.all - display.status_line)
 plotshape(retestNowS and pos == 0 and allowShort, "Retest (short) - get ready", shape.diamond, location.abovebar, color.new(C_BEAR, 30), size = size.tiny, display = display.all - display.status_line)

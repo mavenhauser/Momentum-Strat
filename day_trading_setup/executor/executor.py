@@ -288,6 +288,14 @@ def signal_line(sig):
     return f"<b>{h(sig.side)} {h(sig.ticker)}</b>"
 
 
+def qqq_line(sig):
+    """The entry alert's market state, e.g. 'QQQ +0.84% (1h +0.30%) above VWAP'."""
+    if not sig.qqq:
+        return "QQQ trend not in the alert"
+    day, hour, above = sig.qqq
+    return f"QQQ {day:+.2f}% (1h {hour:+.2f}%) {'above' if above else 'below'} VWAP"
+
+
 def choose_contract(broker, sig, t):
     today = t.date()
     from tastytrade.instruments import OptionType
@@ -327,11 +335,18 @@ def on_entry(broker, state, sig, t):
         return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nOutside the regular session")
     if sig.ticker in state["positions"]:
         return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nAlready holding <b>{h(describe(state['positions'][sig.ticker]))}</b>")
-    if contracts.late_entry(t) and sig.grade not in settings.LATE_ENTRY_GRADES:
-        why = (f"from {settings.ENTRY_CUTOFF[0]}:{settings.ENTRY_CUTOFF[1]:02d} only "
-               f"{' / '.join(sorted(settings.LATE_ENTRY_GRADES))} setups (this one: {sig.grade or 'no grade'})")
-        skip(state, sig, t, why)
-        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
+    late = None
+    if contracts.late_entry(t):
+        if sig.grade in settings.LATE_ENTRY_GRADES:
+            late = "overnight"
+        elif contracts.market_momentum(sig):
+            late = "momentum"
+        else:
+            why = (f"from {settings.ENTRY_CUTOFF[0]}:{settings.ENTRY_CUTOFF[1]:02d} only "
+                   f"{' / '.join(sorted(settings.LATE_ENTRY_GRADES))} setups or a strong market trend in the same direction "
+                   f"(this one: {sig.grade or 'no grade'}, {qqq_line(sig)})")
+            skip(state, sig, t, why)
+            return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
     if t.weekday() == 4 and hm >= settings.FRIDAY_ENTRY_END:
         why = f"no new entries on Friday from {settings.FRIDAY_ENTRY_END[0]}:{settings.FRIDAY_ENTRY_END[1]:02d}"
         skip(state, sig, t, why)
@@ -381,6 +396,8 @@ def on_entry(broker, state, sig, t):
                         "qty": filled, "price": avg, "bid": broker.last_quote[0], "ask": broker.last_quote[1],
                         "quote_source": broker.last_quote[2]}],
                nlv=nlv, nlv_source=nlv_src)
+    if late:
+        pos["late"] = late
     state["positions"][sig.ticker] = pos
     notify(f"{title('BOUGHT')}\n"
            f"<b>{filled} × {h(describe(pos))}</b>\n"
@@ -392,7 +409,8 @@ def on_entry(broker, state, sig, t):
            f"Premium <b>${filled * avg * 100:,.0f}</b> = {filled * avg * 100 / nlv:.1%} of ${nlv:,.0f} ({h(nlv_src)})\n"
            f"Strike chosen: delta {abs(pos['delta']) if pos.get('delta') is not None else float('nan'):.2f} · {h(pos.get('sizing_rule', ''))}\n"
            + ("Friday swing: smaller size, held over the weekend even before 2R\n" if contracts.weekend_swing(pos) else "")
-           + ("Late high-conviction entry: held overnight even before 2R\n" if contracts.late_entry(t) else "")
+           + ("Late high-conviction entry: held overnight even before 2R\n" if late == "overnight" else "")
+           + (f"Late entry on strong market momentum ({h(qqq_line(sig))}): sold at 15:56 if not at 2R\n" if late == "momentum" else "")
            + f"<i>{h(note)}</i>")
 
 

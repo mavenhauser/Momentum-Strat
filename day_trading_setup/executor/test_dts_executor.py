@@ -212,13 +212,34 @@ class ContractTest(unittest.TestCase):
         with mock.patch.object(executor, "notify", sent.append):
             state = {"positions": {}, "closed": []}
             sig = signals.parse("DTS: LONG AAPL @ 347.52 | stop 346.16 | target 350.24 (2R) | PDH breakout | grade A OUTSIDE")
-            executor.on_entry(None, state, sig, datetime(2026, 10, 27, 14, 0, tzinfo=executor.NY))
-        self.assertIn("from 14:00 only A+ OUTSIDE setups (this one: A OUTSIDE)", sent[0])
-        self.assertTrue(contracts.late_entry(datetime(2026, 10, 27, 14, 5)))
-        self.assertFalse(contracts.late_entry(datetime(2026, 10, 27, 13, 59)))
+            executor.on_entry(None, state, sig, datetime(2026, 10, 27, 13, 0, tzinfo=executor.NY))
+        self.assertIn("from 13:00 only A+ OUTSIDE setups or a strong market trend in the same direction "
+                      "(this one: A OUTSIDE, QQQ trend not in the alert)", sent[0])
+        self.assertTrue(contracts.late_entry(datetime(2026, 10, 27, 13, 5)))
+        self.assertFalse(contracts.late_entry(datetime(2026, 10, 27, 12, 59)))
         self.assertFalse(contracts.late_entry(datetime(2026, 10, 30, 14, 5)))      # Friday: FRIDAY_ENTRY_END rules
-        self.assertFalse(contracts.close_before_overnight({"trimmed": False, "opened_at": "2026-10-27T14:20:00-04:00"}))  # late A+: held
+        thu = "2026-10-27T14:20:00-04:00"
+        self.assertFalse(contracts.close_before_overnight({"trimmed": False, "opened_at": thu, "late": "overnight"}))  # late A+: held
+        self.assertTrue(contracts.close_before_overnight({"trimmed": False, "opened_at": thu, "late": "momentum"}))     # day trade
         self.assertTrue(contracts.close_before_overnight({"trimmed": False, "opened_at": "2026-10-27T13:20:00-04:00"}))
+
+    def test_late_entry_on_market_momentum(self):
+        from day_trading_setup.executor import executor
+        base = "DTS: SHORT MSFT @ 523.11 | stop 527.12 | target 515.10 (2R) | ORL breakout + 8 EMA retest"
+        sig = signals.parse(base + " | QQQ -1.05% (1h -0.53%) below VWAP | grade A OUTSIDE")
+        self.assertEqual(sig.qqq, (-1.05, -0.53, False))
+        self.assertEqual(sig.grade, "A OUTSIDE")
+        self.assertTrue(contracts.market_momentum(sig))
+        stalled = signals.parse(base + " | QQQ -0.79% (1h +0.05%) below VWAP | grade A OUTSIDE")    # trend stalled
+        self.assertFalse(contracts.market_momentum(stalled))
+        wrong_side = signals.parse(base + " | QQQ -0.60% (1h -0.30%) above VWAP | grade A OUTSIDE")
+        self.assertFalse(contracts.market_momentum(wrong_side))
+        sent = []
+        with mock.patch.object(executor, "notify", sent.append):
+            state = {"positions": {}, "closed": []}
+            executor.on_entry(None, state, stalled, datetime(2026, 10, 27, 13, 20, tzinfo=executor.NY))
+        self.assertIn("QQQ -0.79% (1h +0.05%) below VWAP", sent[0])
+        self.assertEqual(state["skipped"][0]["ticker"], "MSFT")
 
     def test_friday_entry_cutoff(self):
         from day_trading_setup.executor import executor

@@ -145,13 +145,20 @@ FRIDAY_SWING_MAX = 2         # swing positions open at once
 # sweep runs after TradingView's own 15:55 alerts have had time to arrive.
 ENTRY_START = (9, 30)
 ENTRY_END = (16, 0)
-# Afternoon cutoff (user decision; 12:00 on Oct 28, moved to 14:00 from Oct 29): from this
-# New York time only LATE_ENTRY_GRADES setups are taken, and they are held overnight even
-# before 2R. Entry-time P&L, Oct 14-27 at market prices: 10:30-11:15 +$48.4k (28 trades),
-# 11:15-12:00 +$9.2k (24), 12:00-13:00 +$0.5k (21), after 13:00 -$2.0k (21). Other late
-# signals are logged as SKIPPED, so their outcome can be studied.
-ENTRY_CUTOFF = (14, 0)
+# Afternoon cutoff (user decision; 12:00 on Oct 28, 14:00 on Oct 29, 13:00 from Oct 30).
+# From this New York time (Monday-Thursday) a signal is taken only if
+#   - its grade is in LATE_ENTRY_GRADES: held overnight even before 2R, or
+#   - the market has strong momentum in the trade's direction (DTS Entry v15's QQQ tag):
+#     QQQ at least MOMENTUM_DAY_PCT from the open and MOMENTUM_HOUR_PCT over the last hour
+#     that way, on that side of its VWAP. A normal day trade (sold at the sweep before 2R).
+# Other late signals are logged as SKIPPED, so their outcome can be studied.
+# Entry-time P&L, Oct 19-29 at market prices: before 12:00 +$2.4k (59 trades, 20 reached 2R),
+# 12:00-13:00 -$0.4k (19, 4 reached 2R), after 13:00 -$0.3k (18, 3 reached 2R). After 13:00,
+# the 3 entries with QQQ trending their way made +$747; the other 12 -$1,560 (small sample).
+ENTRY_CUTOFF = (13, 0)
 LATE_ENTRY_GRADES = {"A+ OUTSIDE"}
+MOMENTUM_DAY_PCT = 0.5
+MOMENTUM_HOUR_PCT = 0.25
 SWEEP_AT = (15, 56)
 
 ORDER_FILL_TIMEOUT_SECONDS = 30
