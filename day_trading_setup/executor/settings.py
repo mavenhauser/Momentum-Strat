@@ -160,6 +160,20 @@ LATE_ENTRY_GRADES = {"A+ OUTSIDE"}
 MOMENTUM_DAY_PCT = 0.5
 MOMENTUM_HOUR_PCT = 0.25
 SWEEP_AT = (15, 56)
+# Market calendar, New York dates, from nyse.com/trade/hours-calendars (published to 2028;
+# add each new year there). Half days (2026-11-02, user decision): no new entries on a
+# 13:00 ET early close, the market is muted. A position carried into one keeps its usual
+# exits, with the sweep moved up to HALF_DAY_SWEEP_AT. On a full holiday nothing is swept.
+HALF_DAYS = {"2026-11-27", "2026-12-24", "2027-11-26", "2028-07-03", "2028-11-24"}
+HALF_DAY_CLOSE = (13, 0)
+HALF_DAY_SWEEP_AT = (12, 56)
+MARKET_HOLIDAYS = {
+    "2026-11-26", "2026-12-25",
+    "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31", "2027-06-18",
+    "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24",
+    "2028-01-17", "2028-02-21", "2028-04-14", "2028-05-29", "2028-06-19", "2028-07-04",
+    "2028-09-04", "2028-11-23", "2028-12-25",
+}
 
 ORDER_FILL_TIMEOUT_SECONDS = 30
 

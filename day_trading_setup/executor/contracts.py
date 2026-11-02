@@ -177,6 +177,23 @@ def late_entry(t) -> bool:
     return t.weekday() < 4 and (t.hour, t.minute) >= settings.ENTRY_CUTOFF
 
 
+def half_day(day: date) -> bool:
+    """True on a 13:00 ET early close (settings.HALF_DAYS): no new entries."""
+    return day.isoformat() in settings.HALF_DAYS
+
+
+def sweep_at(day: date) -> tuple:
+    """The New York time of the day's end-of-day sweep."""
+    return settings.HALF_DAY_SWEEP_AT if half_day(day) else settings.SWEEP_AT
+
+
+def in_session(t) -> bool:
+    """True while the market is open at `t`: no weekends or holidays, shut at 13:00 on a half day."""
+    if t.weekday() >= 5 or t.date().isoformat() in settings.MARKET_HOLIDAYS:
+        return False
+    return (9, 30) <= (t.hour, t.minute) < (settings.HALF_DAY_CLOSE if half_day(t.date()) else (16, 0))
+
+
 def market_momentum(sig) -> bool:
     """True if the entry alert's QQQ tag shows the market trending the trade's way: QQQ at
     least MOMENTUM_DAY_PCT from the open and MOMENTUM_HOUR_PCT over the last hour in the

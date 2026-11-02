@@ -335,6 +335,10 @@ def on_entry(broker, state, sig, t):
         return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nOutside the regular session")
     if sig.ticker in state["positions"]:
         return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nAlready holding <b>{h(describe(state['positions'][sig.ticker]))}</b>")
+    if contracts.half_day(t.date()):
+        why = "half day (13:00 close): no new entries"
+        skip(state, sig, t, why)
+        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
     late = None
     if contracts.late_entry(t):
         if sig.grade in settings.LATE_ENTRY_GRADES:
@@ -596,17 +600,19 @@ def retry_pending(state, t):
 
 def sweep(broker, state, t):
     """Every minute in the session: the 0DTE time stop (no 2R within
-    ZERO_DTE_TIME_STOP_MIN minutes). At 15:56 ET: anything expiring today; anything past
-    the max hold if TradingView's TIME alert never arrived; and anything that has not
-    reached 2R (only runners past 2R are held overnight)."""
-    if t.weekday() >= 5 or not ((9, 30) <= (t.hour, t.minute) < (16, 0)):
+    ZERO_DTE_TIME_STOP_MIN minutes). At 15:56 ET (12:56 on a half day): anything expiring
+    today; anything past the max hold if TradingView's TIME alert never arrived; and anything
+    that has not reached 2R (only runners past 2R are held overnight)."""
+    if not contracts.in_session(t):
         return
     for pos in list(state["positions"].values()):
         if contracts.time_stop_due(pos, t):
             close_position(broker, state, pos, t,
                            f"0DTE time stop: no 2R within {settings.ZERO_DTE_TIME_STOP_MIN} min", "time stop")
-    if (t.hour, t.minute) < settings.SWEEP_AT:
+    due_at = contracts.sweep_at(t.date())
+    if (t.hour, t.minute) < due_at:
         return
+    at = f"{due_at[0]}:{due_at[1]:02d}"
     earn = {}
     if settings.NO_OVERNIGHT_INTO_EARNINGS and state["positions"]:
         try:
@@ -617,16 +623,16 @@ def sweep(broker, state, t):
         exp = date.fromisoformat(pos["expiry"])
         held = contracts.sessions_held(datetime.fromisoformat(pos["opened_at"]).date(), t.date())
         if exp <= t.date():
-            close_position(broker, state, pos, t, "expiry day, closed by the 15:56 sweep", "sweep")
+            close_position(broker, state, pos, t, f"expiry day, closed by the {at} sweep", "sweep")
         elif held >= settings.MAX_HOLD_SESSIONS:
-            close_position(broker, state, pos, t, f"held {held} sessions, closed by the 15:56 sweep", "sweep")
+            close_position(broker, state, pos, t, f"held {held} sessions, closed by the {at} sweep", "sweep")
         elif contracts.earnings_before_next_session(*earn.get(pos["ticker"], (None, None)), t.date()):
             rd, tod = earn[pos["ticker"]]
-            close_position(broker, state, pos, t, f"earnings {rd:%a %d %b} {tod or '(time not set)'}: no overnight hold, closed by the 15:56 sweep", "sweep")
+            close_position(broker, state, pos, t, f"earnings {rd:%a %d %b} {tod or '(time not set)'}: no overnight hold, closed by the {at} sweep", "sweep")
         elif contracts.close_before_overnight(pos):
             strong = (state.get("strong_close") or {}).get(pos["ticker"])
             if not contracts.strong_close_holds(pos, strong, t):
-                close_position(broker, state, pos, t, "no overnight hold before 2R: closed by the 15:56 sweep", "sweep")
+                close_position(broker, state, pos, t, f"no overnight hold before 2R: closed by the {at} sweep", "sweep")
             elif pos.get("held_strong") != t.date().isoformat():
                 pos["held_strong"] = t.date().isoformat()
                 pos["events"].append({"t": t.isoformat(), "alert": strong["raw"], "action": "HOLD overnight (strong close)"})
@@ -668,10 +674,9 @@ def main(argv=None):
                 save_state(state)
             if confirm_results(state, t):
                 save_state(state)
-            in_session = t.weekday() < 5 and (9, 30) <= (t.hour, t.minute) < (16, 0)
             due = [p for p in state["positions"].values()
-                   if contracts.time_stop_due(p, t) or (t.hour, t.minute) >= settings.SWEEP_AT]
-            if not due or not in_session:      # connect to the brokers only when something is due
+                   if contracts.time_stop_due(p, t) or (t.hour, t.minute) >= contracts.sweep_at(t.date())]
+            if not due or not contracts.in_session(t):      # connect to the brokers only when something is due
                 return 0
             broker = Broker()
             try:

@@ -251,6 +251,37 @@ class ContractTest(unittest.TestCase):
         self.assertIn("no new entries on Friday from 13:00", sent[0])
         self.assertEqual(state["skipped"][0]["ticker"], "TSLA")
 
+    def test_half_day_no_new_entries(self):
+        from day_trading_setup.executor import executor
+        sent = []
+        sig = signals.parse("DTS: SHORT TSLA @ 371.26 | stop 374.52 | target 364.74 (2R) | PML breakout")
+        for t in (datetime(2026, 11, 27, 10, 0, tzinfo=executor.NY), datetime(2026, 12, 24, 10, 0, tzinfo=executor.NY)):
+            with mock.patch.object(executor, "notify", sent.append):
+                state = {"positions": {}, "closed": []}
+                executor.on_entry(None, state, sig, t)
+            self.assertIn("half day", sent[-1])
+            self.assertEqual(state["skipped"][0]["ticker"], "TSLA")
+            self.assertEqual(state["positions"], {})
+
+    def test_half_day_and_holiday_sweep(self):
+        from day_trading_setup.executor import executor
+        closed = []
+        pos = {"ticker": "TSLA", "expiry": "2026-11-27", "opened_at": "2026-11-25T10:00:00-05:00"}
+        def run(*when):
+            state = {"positions": {"TSLA": pos}, "closed": []}
+            with mock.patch.object(executor, "close_position", lambda b, s, p, t, why, a: closed.append(why)), \
+                 mock.patch.object(contracts, "time_stop_due", lambda p, t: False), \
+                 mock.patch.object(settings, "NO_OVERNIGHT_INTO_EARNINGS", False):
+                executor.sweep(None, state, datetime(*when, tzinfo=executor.NY))
+        run(2026, 11, 26, 15, 56)                 # Thanksgiving: market shut, nothing is sold
+        run(2026, 11, 27, 12, 55)                 # half day, before its sweep
+        run(2026, 11, 27, 13, 0)                  # half day, market shut
+        self.assertEqual(closed, [])
+        run(2026, 11, 27, 12, 56)
+        self.assertEqual(closed, ["expiry day, closed by the 12:56 sweep"])
+        self.assertTrue(contracts.in_session(datetime(2026, 11, 2, 15, 59)))       # a normal day is unchanged
+        self.assertEqual(contracts.sweep_at(date(2026, 11, 2)), settings.SWEEP_AT)
+
     def test_friday_swing_filters(self):
         from day_trading_setup.executor import executor
         fri = datetime(2026, 10, 23, 12, 36, tzinfo=executor.NY)
