@@ -50,13 +50,11 @@
   .masthead h1 { font-family: var(--serif); font-size: 2rem; letter-spacing: -0.01em; margin-top: 0.15rem; }
   .masthead p { margin: 0.3rem 0 0; color: var(--ink-soft); max-width: 60ch; font-size: 14px; }
   .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
-  .seg { display: inline-flex; border: 1px solid var(--rule-strong); border-radius: 3px; overflow: hidden; }
-  .seg button { background: var(--paper-raised); border: 0; padding: 0.3rem 0.7rem; font-size: 12.5px; cursor: pointer; }
+  .seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--rule-strong); border-radius: 3px; overflow: hidden; }
+  .seg button { background: var(--paper-raised); border: 0; min-height: 2rem; padding: 0.3rem 0.9rem; font-size: 12.5px; cursor: pointer; }
+  .seg button:focus-visible { outline-offset: -2px; }
   .seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
-  .monthnav { display: inline-flex; align-items: center; gap: 0.4rem; }
-  .monthnav button { background: var(--paper-raised); border: 1px solid var(--rule-strong); border-radius: 3px; width: 2rem; height: 2rem; cursor: pointer; }
-  .monthnav button:disabled { opacity: 0.4; cursor: default; }
-  .monthnav h2 { font-family: var(--serif); font-size: 1.25rem; min-width: 9.5rem; text-align: center; }
+  .controls h2 { font-family: var(--serif); font-size: 1.25rem; }
 
   .equity { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 1rem 2rem; align-items: center; margin-top: 1.2rem; padding: 1.1rem 1.3rem; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 3px; }
   @media (max-width: 680px) { .equity { grid-template-columns: 1fr; } }
@@ -157,11 +155,8 @@
       <p>Every trading day the DTS executor acted on, booked on the day of each sale. P&amp;L is at market prices: each option's traded price at entry and exit.</p>
     </div>
     <div class="controls">
-      <div class="monthnav">
-        <button type="button" id="prev" aria-label="Previous month">‹</button>
-        <h2 id="month">—</h2>
-        <button type="button" id="next" aria-label="Next month">›</button>
-      </div>
+      <h2 id="month">—</h2>
+      <div class="seg" id="months" role="group" aria-label="Month"></div>
     </div>
   </header>
 
@@ -196,6 +191,7 @@
   const pnl = (o) => (o ? o.pnl_real : null);       // market prices at entry and exit
 
   function monthOf(iso) { const d = parseDay(iso); return { y: d.getUTCFullYear(), m: d.getUTCMonth() }; }
+  const sameMonth = (iso, { y, m }) => { const t = monthOf(iso); return t.y === y && t.m === m; };
   function daysInMonth(y, m) {
     // Weekdays only: from the Monday of the week holding the month's first weekday
     // to the Friday of the week holding its last weekday.
@@ -237,14 +233,25 @@
     return `<span class="amt-f">${money(n)}</span><span class="amt-s">${s}</span>`;
   }
 
+  // One button per month, from the first recorded month to the current New York month.
+  function renderMonths() {
+    const el = $("months"); const keys = Object.keys(S.days).sort();
+    const idx = ({ y, m }) => y * 12 + m;
+    const from = idx(keys.length ? monthOf(keys[0]) : S.month), to = Math.max(idx(monthOf(nyToday())), idx(S.month));
+    const range = `${from}-${to}`;
+    if (el.dataset.range !== range) {          // rebuilt only when a month is added, so keyboard focus stays put
+      const years = Math.floor(from / 12) !== Math.floor(to / 12);
+      let html = "";
+      for (let i = from; i <= to; i++) { const y = Math.floor(i / 12), m = i % 12; html += `<button type="button" data-month="${i}" aria-label="${MONTHS[m]} ${y}">${MONTHS[m].slice(0, 3)}${years ? " " + y : ""}</button>`; }
+      el.innerHTML = html; el.dataset.range = range;
+    }
+    el.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.month) === idx(S.month))));
+  }
+
   function renderCal() {
     const { y, m } = S.month;
     $("month").textContent = `${MONTHS[m]} ${y}`;
-    const keys = Object.keys(S.days).sort();
-    const firstM = keys.length ? monthOf(keys[0]) : { y, m };
-    const today = nyToday(); const tM = monthOf(today);
-    $("prev").disabled = y * 12 + m <= firstM.y * 12 + firstM.m;
-    $("next").disabled = y * 12 + m >= tM.y * 12 + tM.m;
+    const today = nyToday();
     renderStats(y, m);
     const head = ["Mon", "Tue", "Wed", "Thu", "Fri"].map((d) => `<div class="dow" role="columnheader">${d}</div>`).join("") + `<div class="dow wk" role="columnheader">Week</div>`;
     const dates = daysInMonth(y, m);
@@ -371,17 +378,18 @@
 
   function render() {
     const keys = Object.keys(S.days).sort();
-    if (!S.month) S.month = keys.length ? monthOf(keys[keys.length - 1]) : monthOf(nyToday());
-    renderEquity();
-    if (!S.selected && keys.length) S.selected = keys[keys.length - 1];
+    if (!S.month) S.month = monthOf(nyToday());
+    const shown = keys.filter((k) => sameMonth(k, S.month));
+    renderEquity(); renderMonths();
+    // The trade log follows the month on screen: the latest day of that month, or nothing yet.
+    if (!S.selected || !sameMonth(S.selected, S.month)) S.selected = shown[shown.length - 1] || null;
     renderCal(); renderDetail(); renderChanges();
     const empty = $("empty");
-    if (S.loaded && !keys.length) { empty.hidden = false; empty.innerHTML = "<b>No trading days recorded yet.</b> Each day the executor acts on DTS signals is added here after the close."; }
+    if (S.loaded && !shown.length) { empty.hidden = false; empty.innerHTML = `<b>No trading days recorded for ${MONTHS[S.month.m]}.</b> Each day the executor acts on DTS signals is added here after the close.`; }
     else empty.hidden = true;
   }
 
-  $("prev").addEventListener("click", () => { const { y, m } = S.month; S.month = m ? { y, m: m - 1 } : { y: y - 1, m: 11 }; render(); });
-  $("next").addEventListener("click", () => { const { y, m } = S.month; S.month = m < 11 ? { y, m: m + 1 } : { y: y + 1, m: 0 }; render(); });
+  $("months").addEventListener("click", (e) => { const b = e.target.closest("button[data-month]"); if (!b) return; const i = Number(b.dataset.month); S.month = { y: Math.floor(i / 12), m: i % 12 }; render(); });
 
   render();
   (async () => {
