@@ -316,8 +316,6 @@ def choose_contract(broker, sig, t):
     k, qty, rule, delta = contracts.choose_strike(quotes, sig.price, right, nlv * frac, move, floor)
     if k is None:
         return None, f"{rule} ({right}, {expiry})"
-    if contracts.swing_entry(t) and (quotes[k].get("ask") or 0) * 100 > nlv * frac:
-        return None, f"Friday swing: 1 contract costs ${quotes[k]['ask'] * 100:,.0f}, over the {frac:.2%} budget (${nlv * frac:,.0f})"
     return {"ticker": sig.ticker, "right": right, "expiry": expiry.isoformat(),
             "expiry_ib": expiry.strftime("%Y%m%d"), "strike": k, "streamer": opts[k].streamer_symbol,
             "qty_plan": qty, "delta": delta, "sizing_rule": rule,

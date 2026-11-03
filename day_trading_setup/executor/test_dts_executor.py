@@ -147,19 +147,26 @@ class ContractTest(unittest.TestCase):
         k, qty, rule, d = contracts.choose_strike(qs, 100.2, "C", 1000)
         self.assertEqual((k, qty), (102.5, 2))
 
-    def test_choose_single_contract(self):
+    def test_no_entry_when_only_one_contract_fits(self):
         qs = {500: self.q(11.00, 11.40, 0.52), 505: self.q(8.40, 8.80, 0.43), 510: self.q(6.10, 6.40, 0.33), 515: self.q(5.80, 6.05, 0.12)}
         k, qty, rule, d = contracts.choose_strike(qs, 500.3, "C", 1000)
-        self.assertEqual((k, qty), (500, 1))
-        self.assertIn("held through 2R", rule)
+        self.assertEqual((k, qty), (None, 0))
+        self.assertIn("under 2 contracts", rule)
 
-    def test_single_contract_searches_out_the_ladder(self):
-        # the near strikes are too wide to trade: take the first liquid one further out
+    def test_no_entry_when_a_cheap_strike_is_below_the_delta_floor(self):
+        # 515 would buy 2, but only under the 0.15 delta floor
+        qs = {500: self.q(11.00, 11.40, 0.52), 510: self.q(6.10, 6.40, 0.33), 515: self.q(4.80, 5.00, 0.12)}
+        k, qty, rule, d = contracts.choose_strike(qs, 500.3, "C", 1000)
+        self.assertEqual((k, qty), (None, 0))
+        self.assertIn("under 2 contracts", rule)
+
+    def test_two_contracts_still_trade_further_out_the_ladder(self):
+        # the near strikes are too wide to trade: take the first liquid one that buys 2
         wide = lambda d: self.q(5.00, 7.00, d)
         qs = {500: wide(0.52), 505: wide(0.45), 510: wide(0.38), 495: wide(0.60),
-              515: wide(0.30), 520: self.q(9.00, 9.40, 0.22)}
+              515: wide(0.30), 520: self.q(4.60, 4.80, 0.22)}
         k, qty, rule, d = contracts.choose_strike(qs, 500.5, "C", 1000)
-        self.assertEqual((k, qty), (520, 1))
+        self.assertEqual((k, qty), (520, 2))
 
     def test_stop_pct(self):
         self.assertAlmostEqual(contracts.stop_pct(250.0, 249.75), 0.1)

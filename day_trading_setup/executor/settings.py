@@ -60,7 +60,8 @@ ATM_TOLERANCE_PCT = 0.10
 # Strike ladder (2026-10-15): from the strike nearest the money, step out of the
 # money until a strike buys TARGET_CONTRACTS within the budget; failing that,
 # MIN_CONTRACTS_TO_TRIM (so half can be sold at 2R and half trailed); never
-# below MIN_DELTA. If none qualifies, buy 1 contract of the nearest liquid strike.
+# below MIN_DELTA. If none qualifies, the entry is skipped: 1 contract can't be split at
+# 2R (user decision, 2026-11-03; 3 single-contract trades Oct 23-Nov 2 at market prices: -$1,317, none reached 2R).
 TARGET_CONTRACTS = 4
 MIN_CONTRACTS_TO_TRIM = 2
 MIN_DELTA = 0.15             # weeklies held 1-2 days: further OTM is fine, rides the volatility spike (was 0.25 until 2026-10-16)
@@ -98,8 +99,8 @@ MIN_STOP_PCT = 0.20
 # spread eats the win (JNJ on Oct 14: TradingView 2R winner, options -$1,755).
 MIN_TARGET_TO_SPREAD = 2.0
 
-# At the 2R alert: sell half (rounded down). A single contract is held through 2R
-# and exits on the trail, break-even, stop or time exit.
+# At the 2R alert: sell half (rounded down). A single contract left after a partial fill
+# is held through 2R and exits on the trail, break-even, stop or time exit.
 TRIM_FRACTION = 0.5
 
 # Hard limits.
@@ -138,7 +139,7 @@ FRIDAY_SWING_FROM = (12, 0)
 # small whatever the grade, and few of them. OUTSIDE setups made +$309 per $1k of
 # premium on Oct 14-23 vs +$115 inside; grade B lost (-$2,088).
 FRIDAY_SWING_GRADES = {"A+ OUTSIDE", "A OUTSIDE"}
-FRIDAY_SWING_SIZE = 0.0125   # premium as a fraction of the account, any grade (halved again when choppy); skipped if 1 contract costs more
+FRIDAY_SWING_SIZE = 0.0125   # premium as a fraction of the account, any grade (halved again when choppy)
 FRIDAY_SWING_MAX = 2         # swing positions open at once
 
 # Time rules (New York). Entries only inside the regular session; the safety
