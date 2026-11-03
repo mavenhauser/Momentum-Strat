@@ -153,6 +153,13 @@ class ContractTest(unittest.TestCase):
         self.assertEqual((k, qty), (None, 0))
         self.assertIn("under 2 contracts", rule)
 
+    def test_high_priced_stock_buys_further_out_past_twelve_strikes(self):
+        # GEV-like: $2.50 steps, and only the 930 call, 14 strikes out, is liquid and buys 2
+        qs = {k: self.q(11.00, 11.40, 0.40) for k in [895 + 2.5 * i for i in range(14)]}
+        qs[930] = self.q(5.60, 6.10, 0.17)
+        k, qty, rule, d = contracts.choose_strike(qs, 895.41, "C", 1750)
+        self.assertEqual((k, qty), (930, 2))
+
     def test_no_entry_when_a_cheap_strike_is_below_the_delta_floor(self):
         # 515 would buy 2, but only under the 0.15 delta floor
         qs = {500: self.q(11.00, 11.40, 0.52), 510: self.q(6.10, 6.40, 0.33), 515: self.q(4.80, 5.00, 0.12)}

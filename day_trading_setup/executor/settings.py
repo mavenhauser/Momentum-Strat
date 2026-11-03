@@ -83,7 +83,7 @@ RESULTS_FROM = "2026-10-19T09:30"
 # the contracts sold, while the rest of the position is still open (user, 2026-10-26).
 TRIM_RESULTS_FROM = "2026-10-26T11:00"
 MIN_DELTA_0DTE = 0.15        # expiry day (normally Friday): explicit so a later weekday change doesn't touch it; 0.25 is hard to find out of the money on 0DTE
-STRIKES_TO_SCAN = 12          # out-of-the-money strikes examined beyond the nearest one
+STRIKES_TO_SCAN = 30          # out-of-the-money strikes examined beyond the nearest one (was 12 until 2026-11-03: only 3.3% out on GEV's $2.50 steps; the delta floor sets the real limit)
 MIN_OPEN_INTEREST = 100
 MIN_OPTION_VOLUME = 100     # contracts traded today in that strike (2026-10-16); unknown volume fails
 MAX_SPREAD_FRACTION = 0.15   # (ask - bid) / mid must be at or below this

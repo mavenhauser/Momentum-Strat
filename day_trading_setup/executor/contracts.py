@@ -139,7 +139,7 @@ def choose_strike(quotes: dict, entry: float, right: str, budget: float, move: f
                 return k, qty_at(k), rule, quotes[k].get("delta")
     candidates = [k for k in ladder if liquid(quotes[k])]
     if any(covers_spread(quotes[k], move) for k in candidates):
-        return None, 0, f"under {settings.MIN_CONTRACTS_TO_TRIM} contracts: no strike at delta {floor}+ buys {settings.MIN_CONTRACTS_TO_TRIM} within ${budget:,.0f}, and 1 can't be split at 2R", None
+        return None, 0, f"under {settings.MIN_CONTRACTS_TO_TRIM} contracts: no liquid strike at delta {floor}+ buys {settings.MIN_CONTRACTS_TO_TRIM} within ${budget:,.0f}, and 1 can't be split at 2R", None
     if candidates:
         return None, 0, f"2R target too small for the option spread (needs gain at target >= {settings.MIN_TARGET_TO_SPREAD:g}x spread)", None
     return None, 0, f"no liquid strike at or out of the money (price >= ${settings.MIN_OPTION_PRICE:.2f}, spread <= {settings.MAX_SPREAD_FRACTION:.0%}, OI >= {settings.MIN_OPEN_INTEREST}, volume >= {settings.MIN_OPTION_VOLUME})", None
