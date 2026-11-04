@@ -118,9 +118,11 @@ MAX_HOLD_SESSIONS = 2        # mirrors "Max sessions held" on DTS Entry (backup 
 # (TSLA / MRVL / AMD gapped through their stops on Oct 22).
 # From 2026-11-04 (user decision) this has no exceptions: the strong-close hold, the late
 # A+ OUTSIDE hold and the Friday weekend swing below no longer hold a position that hasn't
-# reached 2R. Oct 19-Nov 3: 9 such holds lost -$5,174 at market prices (TSLA -$2,840, MRVL
-# -$2,040, AMD -$2,020 gapped through their stops), while runners past 2R made +$2,735 on
-# the next day.
+# reached 2R. Under those exceptions (Oct 24-Nov 3) 3 positions were held before 2R: MRVL
+# +$1,256, META -$1,250, CRWD -$752 (-$746); no Friday swing was held. The -$5,174 quoted on
+# Nov 4 for 9 such holds included 6 entered Oct 19-21, before this rule existed (TSLA
+# -$2,840, MRVL -$2,040, AMD -$2,020 gapped through their stops). Runners past 2R made
+# +$2,735 on the next day.
 HOLD_OVERNIGHT_ONLY_PAST_2R = True
 # Strong-close exception (rule C, 2026-10-26, user decision): a not-yet-2R position is held
 # overnight when DTS Entry's 15:55 STRONG CLOSE alert says the stock is closing strong in
