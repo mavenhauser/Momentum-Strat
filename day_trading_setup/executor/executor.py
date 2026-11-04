@@ -410,8 +410,8 @@ def on_entry(broker, state, sig, t):
            + (f" (half: choppy market, QQQ crossed VWAP {sig.chop}×)" if sig.chop is not None else "") + "\n"
            f"Premium <b>${filled * avg * 100:,.0f}</b> = {filled * avg * 100 / nlv:.1%} of ${nlv:,.0f} ({h(nlv_src)})\n"
            f"Strike chosen: delta {abs(pos['delta']) if pos.get('delta') is not None else float('nan'):.2f} · {h(pos.get('sizing_rule', ''))}\n"
-           + ("Friday swing: smaller size, held over the weekend even before 2R\n" if contracts.weekend_swing(pos) else "")
-           + ("Late high-conviction entry: held overnight even before 2R\n" if late == "overnight" else "")
+           + ("Friday swing: smaller size, next week's expiry, sold at 15:56 if not at 2R\n" if contracts.weekend_swing(pos) else "")
+           + ("Late high-conviction entry: sold at 15:56 if not at 2R\n" if late == "overnight" else "")
            + (f"Late entry on strong market momentum ({h(qqq_line(sig))}): sold at 15:56 if not at 2R\n" if late == "momentum" else "")
            + f"<i>{h(note)}</i>")
 
@@ -440,7 +440,34 @@ def _close_record(state, pos, t, why):
     return pnl
 
 
+def on_runner_target(broker, state, sig, t):
+    """The runner target (4R, DTS Entry v17.0) with QQQ on the trade's side of VWAP: sell half
+    of what is left and let the rest ride the trail (user, 2026-11-04). A single contract
+    left can't be split, so it is sold here, as the 4R exit did before."""
+    pos = state["positions"].get(sig.ticker)
+    if not pos or not pos["trimmed"] or pos.get("runner_trimmed"):
+        return log.info("%gR alert for %s with no runner left to trim - ignored", sig.r_multiple, sig.ticker)
+    n = contracts.trim_quantity(pos["open_qty"]) or pos["open_qty"]
+    label = f"{sig.r_multiple:g}R"
+    filled, avg, note = _sell(broker, state, pos, n, t, f"{label} trim", sig.raw)
+    pos["runner_trimmed"] = True
+    if filled:
+        notify(f"{title(f'{label} TARGET HIT')}\n"
+               f"<b>SOLD {filled} × {h(describe(pos))}</b> @ <b>{avg:.2f}</b>\n"
+               + (f"{pos['open_qty']} left, riding the trail (market with the trade)\n\n" if pos["open_qty"] > 0
+                  else "Nothing left: the whole position was sold\n\n") +
+               f"TradingView: {h(sig.ticker)} reached {sig.price}\n"
+               f"<i>{h(note)}</i>")
+    else:
+        notify(f"{title(f'{label} TRIM NOT FILLED')}\n<b>{h(describe(pos))}</b>\nTradingView: {h(sig.ticker)} reached {sig.price}\n\n<i>{h(note)}</i>")
+    if pos["open_qty"] <= 0:
+        _close_record(state, pos, t, f"{label} (fully sold)")
+        notify(f"{title('CLOSED')}\n<b>{h(describe(pos))}</b>\nFully sold at {label}\n\n<i>P&amp;L follows once prices are confirmed (about 15 min)</i>")
+
+
 def on_target(broker, state, sig, t):
+    if sig.stop is None:                       # "the rest rides the trail": the runner target
+        return on_runner_target(broker, state, sig, t)
     pos = state["positions"].get(sig.ticker)
     if not pos or pos["trimmed"]:
         return log.info("2R alert for %s with no untrimmed position - ignored", sig.ticker)
@@ -487,15 +514,18 @@ def _results_due(state, t):
 
 
 def _trims_due(state, t):
-    """(position, 2R-sale event) pairs due a 2R RESULT message: the sale's prices can be
-    confirmed and the trade's own RESULT is not about to cover it."""
+    """(position, 2R- or 4R-sale event) pairs due a 2R / 4R RESULT message: the sale's prices
+    can be confirmed and the trade's own RESULT is not about to cover it."""
     from day_trading_setup.executor import reprice
     cutoff = t - reprice.DELAY
     held = list(state["positions"].values()) + [
         p for p in state["closed"] if not p.get("result_sent") and datetime.fromisoformat(p["closed_at"]) > cutoff]
     return [(p, ev) for p in held for ev in p["events"]
-            if "(2R trim)" in ev["action"] and not ev.get("result_sent")
+            if _TRIM.search(ev["action"]) and not ev.get("result_sent")
             and ev["t"] >= settings.TRIM_RESULTS_FROM and datetime.fromisoformat(ev["t"]) <= cutoff]
+
+
+_TRIM = re.compile(r"\((\d+(?:\.\d+)?R) trim\)")
 
 
 def prefetch_results(t):
@@ -533,9 +563,10 @@ def confirm_results(state, t):
             continue
         pnl = round(sale["qty"] * (px(sale) - px(e["buy"])) * 100)
         left = p.get("open_qty", 0) if p in state["positions"].values() else 0
-        notify(f"{title('2R RESULT')}\n<b>{h(describe(p))}</b>\n"
-               f"Bought {e['buy']['qty']} @ <b>{px(e['buy']):.2f}</b> · sold {sale['qty']} @ <b>{px(sale):.2f}</b> (2R)\n\n"
-               f"2R sale P&amp;L: <b>{money(pnl)}</b>"
+        k = _TRIM.search(ev["action"]).group(1)
+        notify(f"{title(f'{k} RESULT')}\n<b>{h(describe(p))}</b>\n"
+               f"Bought {e['buy']['qty']} @ <b>{px(e['buy']):.2f}</b> · sold {sale['qty']} @ <b>{px(sale):.2f}</b> ({k})\n\n"
+               f"{k} sale P&amp;L: <b>{money(pnl)}</b>"
                + (f" · {left} still open" if left else "") +
                "\n<i>confirmed at market prices (1-minute option prices)</i>")
         ev["result_sent"] = True
@@ -558,7 +589,10 @@ def on_exit(broker, state, sig, t):
     pos = state["positions"].get(sig.ticker)
     if not pos:
         return log.info("exit alert for %s with no open position - ignored", sig.ticker)
-    close_position(broker, state, pos, t, f"TradingView {sig.reason} @ {sig.price}", sig.raw)
+    why = f"TradingView {sig.reason} @ {sig.price}"
+    if sig.reason == "WEAK":                   # DTS Entry v17.0: runner sold early, at 3R
+        why += " (QQQ against the trade)"
+    close_position(broker, state, pos, t, why, sig.raw)
 
 
 ALERT_ATTEMPTS = 3

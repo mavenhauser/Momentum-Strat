@@ -73,8 +73,9 @@ def _quote_from_log(lines, ticker, when, words):
 
 def _exit_kind(ev):
     why = ev.get("why") or (re.search(r"\((.*)\)$", ev["action"]) or [None, ""])[1]
-    if why.startswith("2R"):
-        return "2R"
+    m = re.match(r"(\d+(?:\.\d+)?R)( trim|$)", why)
+    if m:
+        return m.group(1)
     m = re.match(r"TradingView (\w+)", why)
     if m:
         return m.group(1)

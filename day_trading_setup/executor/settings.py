@@ -116,13 +116,21 @@ MAX_HOLD_SESSIONS = 2        # mirrors "Max sessions held" on DTS Entry (backup 
 # reached 2R is sold; only runners past 2R (stop at break-even) are held overnight. On
 # Oct 14-21 the not-yet-2R overnight holds lost -$2,112 held vs +$1,896 sold at the close
 # (TSLA / MRVL / AMD gapped through their stops on Oct 22).
+# From 2026-11-04 (user decision) this has no exceptions: the strong-close hold, the late
+# A+ OUTSIDE hold and the Friday weekend swing below no longer hold a position that hasn't
+# reached 2R. Oct 19-Nov 3: 9 such holds lost -$5,174 at market prices (TSLA -$2,840, MRVL
+# -$2,040, AMD -$2,020 gapped through their stops), while runners past 2R made +$2,735 on
+# the next day.
 HOLD_OVERNIGHT_ONLY_PAST_2R = True
 # Strong-close exception (rule C, 2026-10-26, user decision): a not-yet-2R position is held
 # overnight when DTS Entry's 15:55 STRONG CLOSE alert says the stock is closing strong in
 # the trade's direction (beyond its daily 8 EMA, outer third of the day's range, better than
 # at 15:00). Oct 14-23: 4 such holds, +14.2R vs +1.9R selling all (+6.1R without UNH's
 # earnings gap). Every overnight gap-through-stop (TSLA / AMD / MRVL, Oct 22) failed it.
-STRONG_CLOSE_HOLD = True
+# Off from 2026-11-04 (user decision, see HOLD_OVERNIGHT_ONLY_PAST_2R): its holds since
+# Oct 27 were META -$1,250 and CRWD -$752 against MRVL +$1,256. The 15:55 alert is still
+# recorded, so the rule can be studied.
+STRONG_CLOSE_HOLD = False
 # Earnings (2026-10-29, user decision): nothing is held overnight into an earnings report -
 # at the 15:56 sweep a position is sold, even a runner past 2R or a strong-close hold, if
 # the stock reports after today's close or before the next session's open (TastyTrade's
@@ -131,8 +139,9 @@ NO_OVERNIGHT_INTO_EARNINGS = True
 # Friday rules (2026-10-24, user decision). No new entries from FRIDAY_ENTRY_END: with
 # under 3 hours to the 15:56 sweep, 1 in 10 entries after 13:00 reached 2R the same day
 # and all 3 Friday entries after 13:00 lost (Oct 14-23, -$3,705 at market prices).
-# Friday entries from FRIDAY_SWING_FROM buy next week's expiry and are swing trades:
-# held over the weekend even before 2R (the max hold still closes them at Monday's sweep).
+# Friday entries from FRIDAY_SWING_FROM buy next week's expiry and are swing trades. They
+# were held over the weekend even before 2R until 2026-11-04; now, like every position,
+# they are sold at the 15:56 sweep unless they have reached 2R.
 FRIDAY_ENTRY_END = (13, 0)
 FRIDAY_SWING_FROM = (12, 0)
 # Friday swings are tighter (2026-10-24, user decision): only the strongest setups,
@@ -148,7 +157,8 @@ ENTRY_START = (9, 30)
 ENTRY_END = (16, 0)
 # Afternoon cutoff (user decision; 12:00 on Oct 28, 14:00 on Oct 29, 13:00 from Oct 30).
 # From this New York time (Monday-Thursday) a signal is taken only if
-#   - its grade is in LATE_ENTRY_GRADES: held overnight even before 2R, or
+#   - its grade is in LATE_ENTRY_GRADES (held overnight even before 2R until 2026-11-04;
+#     now sold at the 15:56 sweep if it hasn't reached 2R), or
 #   - the market has strong momentum in the trade's direction (DTS Entry v15's QQQ tag):
 #     QQQ at least MOMENTUM_DAY_PCT from the open and MOMENTUM_HOUR_PCT over the last hour
 #     that way, on that side of its VWAP. A normal day trade (sold at the sweep before 2R).

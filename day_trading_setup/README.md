@@ -104,7 +104,7 @@ the alerts copy those settings:
 |---|---|---|
 | Entries, with entry / stop / target | always sent | on |
 | New A+ OUTSIDE setups | *alert() when an A+ OUTSIDE setup appears* | on |
-| 2R target hit and exits (STOP / BE / TRAIL / RUNNER / EOD) | *alert() on the 2R target and on exits* | on |
+| 2R / 4R targets hit and exits (STOP / BE / TRAIL / RUNNER / WEAK / EOD) | *alert() on the 2R target and on exits* | on |
 
 Flip a switch on the chart and the next run replaces the alerts to match.
 
@@ -251,7 +251,7 @@ What it draws:
 
 - a **LONG / SHORT label** showing the exact entry, stop and target, plus
   lines for each;
-- exit labels (`2R ✓`, `STOP`, `BE`, `TRAIL`, `RUNNER`, `EOD`);
+- exit labels (`2R ✓`, `4R ✓ partial`, `STOP`, `BE`, `TRAIL`, `RUNNER`, `WEAK`, `EOD`);
 - a **checklist panel** showing the trend, VWAP side, opening range, and
   where each side stands (`wait for break` → `armed ORH 245.10 → wait
   retest` → `retest ✓ → wait close > 8 EMA` → `IN LONG`).
@@ -384,6 +384,22 @@ close: enter at or just after it. Nothing fires mid-candle.
   2.02R against 1.65R, about +$6,200 (delta estimate); 3R and 5R did worse, and
   only 3 of 44 reached 5R, so re-check the level as data comes in. Input *Runner
   target (R multiple, 0 = off)*.
+- **The runner follows the market** (since DTS Entry v17.0, Wed 2026-11-04, user
+  decision). "With the market" = QQQ on the trade's side of its session VWAP
+  (above it for a long, below it for a short):
+  - market **against** the trade when the runner reaches **3R**: it is sold
+    there (`WEAK`, input *Weak market: sell the runner at*);
+  - market **with** the trade at **4R**: `DTS: <ticker> hit 4R target … - take
+    partial, the rest rides the trail`. The executor sells half of what is left
+    (a single contract left is sold) and the rest trails with no further target
+    (input *Runner target: take another partial when QQQ is with the trade*);
+  - market **against** at 4R: everything left is sold there (`RUNNER`), as before.
+  On the 36 runners of Oct 19-Nov 3 (same-day stock R) every version scored within
+  about 2R of the fixed 4R exit (+62.9R to +64.9R); only 7 got past 3R, so the
+  sample can't separate them yet.
+- **Not at 2R by 15:55: flat** (`EOD`, input *Flat by 15:55 unless the 2R target
+  was hit*, since v17.0), even with *Flat by 15:55* off; only runners past 2R are
+  held overnight, as in the executor.
 - Flat by **15:55** (`EOD`). Max **3 entries per day**; the panel shows
   `flat (1/3 today)`.
 
@@ -423,8 +439,9 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
 | Alert | What the executor does |
 |---|---|
 | `DTS: LONG …` / `DTS: SHORT …` | Once QQQ has crossed its session VWAP **more than 8 times** that day, entries are tagged `choppy (QQQ crosses N)` and the executor buys **half its normal size** (chop gate; v13.0, 2026-10-22; input *When QQQ is choppy* can switch it to Skip). The stop is placed **1.5× further** than the swing / min-stop rule gives (v12.0; the skip-if-wider-than-2.5-ATR check uses the unwidened stop). The executor skips new entries after **3 stop-outs in a row** in a day, unless the setup is graded **A+ OUTSIDE** (loss brake, 2026-10-22). The stop is never tighter than **2× the stock's typical 5-minute bar** (median of the last 390 bars; since v11.0, 2026-10-21; stops under ~1.5× won 32% of the time). Sent (since DTS Entry v9.0, 2026-10-20) only when price **breaks the trigger bar's high (long) / low (short) within the next three 5-minute bars (15 minutes)**, at that moment and price; the stop stays the same and 2R is measured from that entry; unconfirmed triggers lapse (input *Confirm entry*). Replayed on Oct 14–19: 40 of 52 signals confirmed within 15 minutes, +27.6R vs +16.1R (10 minutes: 36, +21.4R). Buys a call / a put. Expiry: this week's last listed expiry (normally Friday, 0DTE on Friday itself), except that on expiry day the same-day option is bought from the open **until 12:00 ET**; afternoon entries buy **next week's expiry** (2026-10-18). Strike: **never in the money** (since 2026-10-16). Start at the at-the-money strike (the nearest strike at or out of the money; one in the money by at most 0.10% of the price counts as at the money) and step out of the money until one buys **4 contracts** within the budget, never going below **0.15 delta** (weeklies held 1-2 days, so further out of the money is fine); if none does, the nearest strike that buys **2**; if none, the entry is **skipped and logged**, because 1 contract can't be split at 2R (since 2026-11-03). The ladder covers up to **30** strikes out (12 until 2026-11-03), so a high-priced stock buys further out, down to the delta floor, instead of being skipped. Every strike must pass the liquidity check (two-sided quote, **mid price at least $0.50** (since 2026-10-18), spread ≤ 15% of mid, open interest ≥ 100, and at least **100 contracts traded today** in that strike, since 2026-10-16). Size (since 2026-10-16) by the setup grade the entry alert carries (DTS Entry v6.0+): premium ≈ **5%** of a **$100k notional strategy account** for **A+ OUTSIDE** (all 4 confirmations and beyond the prior day and premarket range), **3.5%** for **A OUTSIDE**, **2.5%** for everything else and for alerts without a grade; rounded down to whole contracts, at least 1. With at most 5 open positions that caps premium out at 25% of the account. Not the paper account's own value. On expiry day (Friday 0DTE) the delta floor is `MIN_DELTA_0DTE` = 0.15. |
+| `DTS: … hit 4R target … - take partial, the rest rides the trail` | DTS Entry v17.0 (2026-11-04): the runner reached 4R with QQQ on the trade's side of VWAP. Sells half of the contracts left, rounded down; a single contract left is sold. The rest rides the trail, break-even or stop; a **4R RESULT** message follows like the 2R one. |
 | `DTS: … hit 2R target …` | Sells half the contracts, rounded down. Since DTS Entry v7.0 (2026-10-16) this alert fires on the first tick that touches the target, not at the 5-minute bar close. A single contract left by a partial fill is held and rides to the trail, break-even or stop. |
-| `DTS: EXIT … (STOP / BE / TRAIL / RUNNER / EOD / TIME)` | Sells the rest. The CLOSED message carries no P&L (the live quotes are ~15 minutes delayed); a **RESULT** message follows about 16 minutes after the exit with the fills and P&L confirmed from 1-minute option prices (since 2026-10-19). A 2R sale gets its own **2R RESULT** message the same way, about 16 minutes after the sale, with the P&L of the contracts sold and how many are still open (since 2026-10-26). |
+| `DTS: EXIT … (STOP / BE / TRAIL / RUNNER / WEAK / EOD / TIME)` | Sells the rest. `WEAK` (v17.0): the runner reached 3R with QQQ against the trade. The CLOSED message carries no P&L (the live quotes are ~15 minutes delayed); a **RESULT** message follows about 16 minutes after the exit with the fills and P&L confirmed from 1-minute option prices (since 2026-10-19). A 2R sale gets its own **2R RESULT** message the same way, about 16 minutes after the sale, with the P&L of the contracts sold and how many are still open (since 2026-10-26). |
 | *(no alert: executor's own check, every minute)* | **0DTE time stop** (since 2026-10-18): a same-day option that has not reached 2R within **90 minutes** of entry is sold. TradingView doesn't know the expiry, so it keeps its own position; its later 2R or exit alerts for that ticker are then ignored. |
 | `DTS: A+ OUTSIDE …` | Nothing (information only). |
 
@@ -441,18 +458,19 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
     if none does, the entry is skipped. JNJ on Oct 14 was a TradingView 2R
     winner that lost $1,755 in options for this reason.
 
-- **Overnight (since 2026-10-22):** at the 15:56 sweep the executor sells any position that has **not reached 2R**; only runners past 2R (stop at break-even) are held overnight. On Oct 14-21 the not-yet-2R overnight holds lost −$2,112 against +$1,896 if sold at the close.
-  **Strong-close exception (since 2026-10-27, DTS Entry v14.0):** at 15:55 DTS Entry sends `DTS: STRONG CLOSE LONG|SHORT <ticker> …` when the stock is closing strong in that direction: beyond its **daily 8 EMA** (with today's price), in the **outer third of the day's range**, and **better than at 15:00**. A not-yet-2R position in that direction is then **held overnight** (HELD OVERNIGHT message) with its stop and trail as usual, and closed by the max hold at the next session's sweep. Oct 14-23 backtest (stock R): 4 holds, +14.2R vs +1.9R selling everything (+6.1R without UNH's earnings gap); every gap-through-stop failed the check. A QQQ filter was tested and not added.
-- **No overnight hold into earnings (since 2026-10-29):** at the 15:56 sweep a position is sold, even a runner past 2R, a strong-close hold, a late A+ entry or a Friday swing, if the stock reports after today's close or before the next session's open (TastyTrade's expected report date; an unknown time of day counts as a risk). If the dates can't be fetched, the sweep logs a warning and holds as usual.
+- **Overnight (since 2026-10-22; no exceptions since 2026-11-04, user decision):** at the 15:56 sweep the executor sells any position that has **not reached 2R**; only runners past 2R (stop at break-even) are held overnight. On Oct 14-21 the not-yet-2R overnight holds lost −$2,112 against +$1,896 if sold at the close. Oct 19-Nov 3, the 9 holds made under the exceptions below lost −$5,174 (TSLA −$2,840, MRVL −$2,040, AMD −$2,020 gapped through their stops), while runners past 2R made +$2,735 on the next day, so the strong-close hold, the late A+ hold and the Friday weekend swing were ended.
+  **Strong-close exception (2026-10-27 to 2026-11-03, DTS Entry v14.0; off, `STRONG_CLOSE_HOLD = False`, the alert is still recorded):** at 15:55 DTS Entry sends `DTS: STRONG CLOSE LONG|SHORT <ticker> …` when the stock is closing strong in that direction: beyond its **daily 8 EMA** (with today's price), in the **outer third of the day's range**, and **better than at 15:00**. A not-yet-2R position in that direction is then **held overnight** (HELD OVERNIGHT message) with its stop and trail as usual, and closed by the max hold at the next session's sweep. Oct 14-23 backtest (stock R): 4 holds, +14.2R vs +1.9R selling everything (+6.1R without UNH's earnings gap); every gap-through-stop failed the check. A QQQ filter was tested and not added.
+- **No overnight hold into earnings (since 2026-10-29):** at the 15:56 sweep a position is sold, even a runner past 2R, if the stock reports after today's close or before the next session's open (TastyTrade's expected report date; an unknown time of day counts as a risk). If the dates can't be fetched, the sweep logs a warning and holds as usual.
 - **Half days (since 2026-11-02):** no new entries on a 13:00 ET early close (next: Nov 27 and Dec 24, 2026; signals are logged as SKIPPED). A position carried into one keeps its usual exits, with the sweep at **12:56 ET**. On a full market holiday the sweep does nothing. Dates in `settings.HALF_DAYS` and `settings.MARKET_HOLIDAYS`, from NYSE's calendar, published to 2028.
-- **Afternoon cutoff (since 2026-10-30; 12:00 on Oct 28, 14:00 on Oct 29):** from **13:00 ET** (Monday-Thursday) a signal is taken only if (a) it is an **A+ OUTSIDE** setup, **held overnight even before 2R** (stop, 2R sale and trail as usual; the max hold closes it at the next session's sweep), or (b) the **market has strong momentum in the trade's direction**: DTS Entry v15.0 adds QQQ's state to each entry alert (`| QQQ -1.05% (1h -0.53%) below VWAP`), and the trade needs QQQ at least 0.5% from the open and 0.25% over the last hour its way, on that side of VWAP. These are normal day trades, sold at the 15:56 sweep if not at 2R. Other late signals are logged as SKIPPED. Entry-time P&L Oct 19-29 at market prices: before 12:00 +$2.4k (59 trades), 12:00-13:00 −$0.4k (19), after 13:00 −$0.3k (18); after 13:00 the 3 entries with QQQ trending their way made +$747, the other 12 −$1,560 (small sample). Fridays keep their own 13:00 cutoff.
-- **Fridays (since 2026-10-24):** no new entries from **13:00 ET** (1 in 10 entries after 13:00 reached 2R the same day; all 3 Friday entries after 13:00 lost, −$3,705 on Oct 14-23). Friday entries from **12:00** buy next week's expiry and are **swing trades**: held over the weekend even before 2R, closed by the stop, the trail or the max hold at Monday's 15:56 sweep. Swings are tighter: only **A+ OUTSIDE / A OUTSIDE** setups, a flat **1.25%** of the account whatever the grade (halved when QQQ is choppy), and at most **2** open at once.
+- **Afternoon cutoff (since 2026-10-30; 12:00 on Oct 28, 14:00 on Oct 29):** from **13:00 ET** (Monday-Thursday) a signal is taken only if (a) it is an **A+ OUTSIDE** setup (held overnight even before 2R until 2026-11-04; now sold at the 15:56 sweep if not at 2R), or (b) the **market has strong momentum in the trade's direction**: DTS Entry v15.0 adds QQQ's state to each entry alert (`| QQQ -1.05% (1h -0.53%) below VWAP`), and the trade needs QQQ at least 0.5% from the open and 0.25% over the last hour its way, on that side of VWAP. These are normal day trades, sold at the 15:56 sweep if not at 2R. Other late signals are logged as SKIPPED. Entry-time P&L Oct 19-29 at market prices: before 12:00 +$2.4k (59 trades), 12:00-13:00 −$0.4k (19), after 13:00 −$0.3k (18); after 13:00 the 3 entries with QQQ trending their way made +$747, the other 12 −$1,560 (small sample). Fridays keep their own 13:00 cutoff.
+- **Fridays (since 2026-10-24):** no new entries from **13:00 ET** (1 in 10 entries after 13:00 reached 2R the same day; all 3 Friday entries after 13:00 lost, −$3,705 on Oct 14-23). Friday entries from **12:00** buy next week's expiry and are **swing trades** (held over the weekend even before 2R until 2026-11-04; now sold at Friday's 15:56 sweep if not at 2R, a runner past 2R is held to the stop, the trail or the max hold at Monday's sweep). Swings are tighter: only **A+ OUTSIDE / A OUTSIDE** setups, a flat **1.25%** of the account whatever the grade (halved when QQQ is choppy), and at most **2** open at once.
 - **Holding:** DTS Entry runs with *Flat by 15:55* off and *Max sessions
-  held* = 2, so a trade can be held overnight and is closed by a `TIME`
-  exit at 15:55 the next session.
+  held* = 2, so a runner past 2R can be held overnight and is closed by a
+  `TIME` exit at 15:55 the next session; since v17.0 a trade not at 2R exits
+  at 15:55 (`EOD`).
 - **Entry window:** the script's default is 09:35–12:00 ET. On the Day
   Trading Set Up chart it is set to **09:35–15:30** (since 2026-10-14), so a
-  late-day entry becomes an overnight swing closed by the next session's
+  late-day entry that reaches 2R can be held overnight to the next session's
   `TIME` exit. The alerts copy the chart setting.
 - **Orders:** limit at mid; anything unfilled after 30 s is cancelled and
   retried once at the ask (buy) or bid (sell). Before every sale the real

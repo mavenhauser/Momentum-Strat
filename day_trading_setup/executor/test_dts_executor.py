@@ -19,8 +19,12 @@ class ParseTest(unittest.TestCase):
         s = signals.parse("DTS: SHOP hit 2R target @ 177.47 - take partial, stop to break-even 176.42")
         self.assertEqual((s.kind, s.ticker, s.price, s.stop), ("TARGET", "SHOP", 177.47, 176.42))
 
+    def test_runner_target(self):
+        s = signals.parse("DTS: SHOP hit 4R target @ 179.57 - take partial, the rest rides the trail")
+        self.assertEqual((s.kind, s.ticker, s.r_multiple, s.price, s.stop), ("TARGET", "SHOP", 4.0, 179.57, None))
+
     def test_exits(self):
-        for reason in ("STOP", "BE", "TRAIL", "RUNNER", "EOD", "TIME"):
+        for reason in ("STOP", "BE", "TRAIL", "RUNNER", "WEAK", "EOD", "TIME"):
             s = signals.parse(f"DTS: EXIT SHORT TSLA ({reason}) @ 379.68")
             self.assertEqual((s.kind, s.ticker, s.side, s.reason, s.price), ("EXIT", "TSLA", "SHORT", reason, 379.68))
 
@@ -218,7 +222,8 @@ class ContractTest(unittest.TestCase):
         self.assertTrue(contracts.close_before_overnight({"trimmed": False, "opened_at": thu}))   # not yet 2R: sold at 15:56
         self.assertFalse(contracts.close_before_overnight({"trimmed": True, "opened_at": thu}))   # runner past 2R: held
         self.assertTrue(contracts.close_before_overnight({"trimmed": False, "opened_at": "2026-10-23T11:30:00-04:00"}))   # Friday morning 0DTE
-        self.assertFalse(contracts.close_before_overnight({"trimmed": False, "opened_at": "2026-10-23T12:36:00-04:00"}))  # Friday swing: held
+        self.assertTrue(contracts.close_before_overnight({"trimmed": False, "opened_at": "2026-10-23T12:36:00-04:00"}))   # Friday swing: sold too (2026-11-04)
+        self.assertFalse(contracts.close_before_overnight({"trimmed": True, "opened_at": "2026-10-23T12:36:00-04:00"}))   # Friday swing past 2R: held
 
     def test_afternoon_cutoff(self):
         from day_trading_setup.executor import executor
@@ -233,7 +238,7 @@ class ContractTest(unittest.TestCase):
         self.assertFalse(contracts.late_entry(datetime(2026, 10, 27, 12, 59)))
         self.assertFalse(contracts.late_entry(datetime(2026, 10, 30, 14, 5)))      # Friday: FRIDAY_ENTRY_END rules
         thu = "2026-10-27T14:20:00-04:00"
-        self.assertFalse(contracts.close_before_overnight({"trimmed": False, "opened_at": thu, "late": "overnight"}))  # late A+: held
+        self.assertTrue(contracts.close_before_overnight({"trimmed": False, "opened_at": thu, "late": "overnight"}))   # late A+: sold too (2026-11-04)
         self.assertTrue(contracts.close_before_overnight({"trimmed": False, "opened_at": thu, "late": "momentum"}))     # day trade
         self.assertTrue(contracts.close_before_overnight({"trimmed": False, "opened_at": "2026-10-27T13:20:00-04:00"}))
 
@@ -317,12 +322,14 @@ class ContractTest(unittest.TestCase):
         self.assertEqual((sig.kind, sig.ticker, sig.side, sig.price), ("STRONG", "GOOGL", "SHORT", 316.90))
         now = datetime(2026, 10, 26, 15, 56)
         strong = {"side": "SHORT", "t": "2026-10-26T15:55:02-04:00"}
-        self.assertTrue(contracts.strong_close_holds({"side": "SHORT"}, strong, now))
+        self.assertFalse(contracts.strong_close_holds({"side": "SHORT"}, strong, now))      # rule C off since 2026-11-04
+        with mock.patch.object(settings, "STRONG_CLOSE_HOLD", True):
+            self.assertTrue(contracts.strong_close_holds({"side": "SHORT"}, strong, now))
         self.assertFalse(contracts.strong_close_holds({"side": "LONG"}, strong, now))       # wrong direction
         self.assertFalse(contracts.strong_close_holds({"side": "SHORT"}, strong, datetime(2026, 10, 27, 15, 56)))  # stale
         self.assertFalse(contracts.strong_close_holds({"side": "SHORT"}, None, now))
 
-    def test_sweep_holds_strong_close(self):
+    def test_sweep_sells_strong_close_before_2r(self):
         from day_trading_setup.executor import executor
         pos = {"ticker": "GOOGL", "side": "SHORT", "right": "P", "strike": 305.0, "expiry": "2026-10-30", "qty": 4,
                "open_qty": 4, "trimmed": False, "opened_at": "2026-10-26T12:01:00-04:00", "events": []}
@@ -331,14 +338,13 @@ class ContractTest(unittest.TestCase):
         closed, sent = [], []
         with mock.patch.object(executor, "close_position", lambda b, st, p, t, why, raw: closed.append(p["ticker"])), \
              mock.patch.object(executor, "notify", sent.append):
-            for m in (56, 57):
-                executor.sweep(None, state, datetime(2026, 10, 26, 15, m, tzinfo=executor.NY))
-            self.assertEqual(closed, [])
-            self.assertEqual(len(sent), 1)
+            executor.sweep(None, state, datetime(2026, 10, 26, 15, 56, tzinfo=executor.NY))
+            self.assertEqual(closed, ["GOOGL"])                                              # rule C off since 2026-11-04
+            self.assertEqual(sent, [])
+            with mock.patch.object(settings, "STRONG_CLOSE_HOLD", True):                     # the rule itself still works
+                executor.sweep(None, state, datetime(2026, 10, 26, 15, 57, tzinfo=executor.NY))
+            self.assertEqual(closed, ["GOOGL"])
             self.assertIn("HELD OVERNIGHT", sent[0])
-            state["positions"]["MU"] = dict(pos, ticker="MU", side="LONG", events=[])        # no strong close: sold
-            executor.sweep(None, state, datetime(2026, 10, 26, 15, 58, tzinfo=executor.NY))
-        self.assertEqual(closed, ["MU"])
 
     def test_journal_skips_hold_notes(self):
         from day_trading_setup.executor import journal
@@ -401,6 +407,50 @@ class ContractTest(unittest.TestCase):
         self.assertIn("+$600", sent[0])            # 2 x (8.50 - 5.50) x 100
         self.assertIn("2 still open", sent[0])
         self.assertEqual(pos["events"][1]["pnl_confirmed"], 600)
+
+    def _runner(self, open_qty):
+        return {"ticker": "TSLA", "right": "C", "strike": 400.0, "expiry": "2026-11-06", "side": "LONG",
+                "qty": open_qty * 2, "open_qty": open_qty, "avg_cost": 5.70, "trimmed": True,
+                "opened_at": "2026-11-04T10:40:00-05:00", "events": []}
+
+    def _run_target(self, state, msg):
+        from day_trading_setup.executor import executor
+        broker, sent = mock.Mock(), []
+        broker.fill.side_effect = lambda side, pos, qty: (qty, 12.0, "filled at mid")
+        broker.last_quote = (11.9, 12.1, "TastyTrade")
+        with mock.patch.object(executor, "notify", sent.append):
+            executor.on_target(broker, state, signals.parse(msg), datetime(2026, 11, 4, 11, 30, tzinfo=executor.NY))
+        return sent
+
+    def test_runner_target_sells_half_of_the_runner(self):
+        state = {"positions": {"TSLA": self._runner(3)}, "closed": []}
+        sent = self._run_target(state, "DTS: TSLA hit 4R target @ 410.0 - take partial, the rest rides the trail")
+        pos = state["positions"]["TSLA"]
+        self.assertEqual((pos["open_qty"], pos["runner_trimmed"]), (2, True))
+        self.assertIn("4R TARGET HIT", sent[0])
+        self.assertIn("(4R trim)", pos["events"][-1]["action"])
+        self.assertFalse(contracts.close_before_overnight(pos))                         # still a runner past 2R
+        self._run_target(state, "DTS: TSLA hit 4R target @ 410.0 - take partial, the rest rides the trail")
+        self.assertEqual(pos["open_qty"], 2)                                            # once only
+
+    def test_runner_target_sells_a_single_contract(self):
+        state = {"positions": {"TSLA": self._runner(1)}, "closed": []}
+        sent = self._run_target(state, "DTS: TSLA hit 4R target @ 410.0 - take partial, the rest rides the trail")
+        self.assertEqual(state["positions"], {})
+        self.assertEqual(state["closed"][0]["close_reason"], "4R (fully sold)")
+        self.assertIn("CLOSED", sent[-1])
+
+    def test_runner_target_before_2r_is_ignored(self):
+        pos = dict(self._runner(4), trimmed=False)
+        state = {"positions": {"TSLA": pos}, "closed": []}
+        self._run_target(state, "DTS: TSLA hit 4R target @ 410.0 - take partial, the rest rides the trail")
+        self.assertEqual(pos["open_qty"], 4)
+
+    def test_journal_labels_runner_sales(self):
+        from day_trading_setup.executor import journal
+        self.assertEqual(journal._exit_kind({"action": "SELL 2 @ 8.1 (2R trim)", "why": "2R trim"}), "2R")
+        self.assertEqual(journal._exit_kind({"action": "SELL 1 @ 12.0 (4R trim)", "why": "4R trim"}), "4R")
+        self.assertEqual(journal._exit_kind({"action": "SELL 1 @ 9.0 (TradingView WEAK @ 410.1)"}), "WEAK")
 
 
 if __name__ == "__main__":

@@ -73,6 +73,11 @@ chopCrosses = input.int(8, "QQQ chop gate: no entries after this many QQQ VWAP c
 chopMode = input.string("Half size", "When QQQ is choppy", options = ["Half size", "Skip"], group = G_RISK, tooltip = "Half size (default, 2026-10-22): entries are still sent, tagged 'choppy (QQQ crosses N)', and the executor buys half its normal size. Skip: no entries while QQQ is choppy.", display = display.none)
 // Added 2026-10-30.
 runnerTgtR = input.float(4.0, "Runner target (R multiple, 0 = off)", minval = 0, step = 0.5, group = G_RISK, tooltip = "After the 2R target, sell the runner the moment price reaches this R multiple, on the first tick, rather than waiting for the trail to give back. On a gap past it the exit is at the open. 0 = no runner target, the trail alone.", display = display.none)
+// Added 2026-11-04 (v17.0, user decision). Kept after the older inputs so the alerts'
+// existing settings keep their ids.
+flatNo2R = input.bool(true, "Flat by 15:55 unless the 2R target was hit", group = G_RISK, tooltip = "Even with 'Flat by 15:55 New York' off, a trade that hasn't reached 2R exits at 15:55 (EOD): only runners past 2R are held overnight, as the executor does.", display = display.none)
+weakR = input.float(3.0, "Weak market: sell the runner at (R multiple, 0 = off)", minval = 0, step = 0.5, group = G_RISK, tooltip = "After the 2R target, if QQQ is on the wrong side of its VWAP for the trade (below it for a long, above it for a short) when price reaches this R multiple, the runner exits (WEAK) instead of waiting for the runner target.", display = display.none)
+runnerTrim = input.bool(true, "Runner target: take another partial when QQQ is with the trade", group = G_RISK, tooltip = "At the runner target, with QQQ on the trade's side of its VWAP: alert 'hit 4R target - take partial, the rest rides the trail' and keep trailing the rest, with no further target. With QQQ against the trade, the runner exits there (RUNNER) as before.", display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744
@@ -187,11 +192,31 @@ isEod      = eodExit and rth and time_close >= eodTs
 var int heldSessions = 0   // regular sessions the open trade has been held, counting the entry day
 isTimeUp   = not eodExit and rth and time_close >= eodTs and heldSessions >= holdSessions
 
+// QQQ chop gate: QQQ's 1-minute close crossing its session VWAP, counted from the open.
+// Also QQQ's market state for the entry alert (v15.0, 2026-10-30): % from today's open,
+// % over the last hour (60 one-minute bars) and its side of VWAP. The executor takes a
+// signal after its afternoon cutoff only when the market is trending the trade's way.
+f_qqqState() =>
+    vw = ta.vwap(hlc3)
+    above = close > vw
+    var int n = 0
+    var float o = na
+    if ta.change(time("D")) != 0
+        n := 0
+        o := open
+    else if above != above[1]
+        n += 1
+    [n, (close / o - 1) * 100, (close / close[60] - 1) * 100, above]
+[qqqCross, qqqDay, qqqHour, qqqAbove] = request.security(ticker.new("NASDAQ", "QQQ", session.regular), "1", f_qqqState())
+f_pct(x) => (x >= 0 ? "+" : "") + str.tostring(x, "0.00") + "%"
+qqqTag = na(qqqDay) or na(qqqHour) ? "" : " | QQQ " + f_pct(qqqDay) + " (1h " + f_pct(qqqHour) + ") " + (qqqAbove ? "above" : "below") + " VWAP"
+
 var int   pos = 0          // 1 long, -1 short, 0 flat
 var float entPx = na
 var float stpPx = na
 var float tgtPx = na
 var bool  tgtHit = false
+var bool  runHit = false   // runner target reached with QQQ on the trade's side: partial taken, the rest trails
 var float bestPx = na      // best price since entry (high for longs, low for shorts)
 var int   entBar = na
 var line  lnEnt = na
@@ -235,12 +260,16 @@ if chartNewDay
 // --- Manage the open trade first.
 bool   exitNow = false
 bool   tgtNow  = false
+bool   runNow  = false
 string exitTxt = ""
 float  exitPx  = na
 if pos != 0 and bar_index > entBar
     bestPx := pos == 1 ? math.max(bestPx, high) : math.min(bestPx, low)
     gbLevel = bestPx - (bestPx - entPx) * givebackPct / 100
     runLvl = runnerTgtR > 0 ? entPx + (tgtPx - entPx) * runnerTgtR / rr : na
+    weakLvl = weakR > 0 ? entPx + (tgtPx - entPx) * weakR / rr : na
+    // QQQ on the trade's side of its VWAP (na before QQQ's first bar: treated as with the trade)
+    qqqWith = na(qqqDay) or (pos == 1 ? qqqAbove : not qqqAbove)
     if pos == 1
         if low <= stpPx
             exitNow := true
@@ -250,10 +279,17 @@ if pos != 0 and bar_index > entBar
             if not tgtHit and high >= tgtPx
                 tgtHit := true
                 tgtNow := true
-            if tgtHit and runnerTgtR > 0 and high >= runLvl
+            if tgtHit and not runHit and runnerTgtR > 0 and high >= runLvl and runnerTrim and qqqWith
+                runHit := true
+                runNow := true
+            else if tgtHit and not runHit and runnerTgtR > 0 and high >= runLvl
                 exitNow := true
                 exitPx  := math.max(open, runLvl)
                 exitTxt := "RUNNER"
+            else if tgtHit and not runHit and weakR > 0 and high >= weakLvl and not qqqWith
+                exitNow := true
+                exitPx  := math.max(open, weakLvl)
+                exitTxt := "WEAK"
             else if tgtHit and (runnerExit == "Giveback" ? close < gbLevel : close < trailEma)
                 exitNow := true
                 exitPx  := close
@@ -267,15 +303,22 @@ if pos != 0 and bar_index > entBar
             if not tgtHit and low <= tgtPx
                 tgtHit := true
                 tgtNow := true
-            if tgtHit and runnerTgtR > 0 and low <= runLvl
+            if tgtHit and not runHit and runnerTgtR > 0 and low <= runLvl and runnerTrim and qqqWith
+                runHit := true
+                runNow := true
+            else if tgtHit and not runHit and runnerTgtR > 0 and low <= runLvl
                 exitNow := true
                 exitPx  := math.min(open, runLvl)
                 exitTxt := "RUNNER"
+            else if tgtHit and not runHit and weakR > 0 and low <= weakLvl and not qqqWith
+                exitNow := true
+                exitPx  := math.min(open, weakLvl)
+                exitTxt := "WEAK"
             else if tgtHit and (runnerExit == "Giveback" ? close > gbLevel : close > trailEma)
                 exitNow := true
                 exitPx  := close
                 exitTxt := "TRAIL"
-    if not exitNow and isEod
+    if not exitNow and (isEod or (flatNo2R and not tgtHit and rth and time_close >= eodTs))
         exitNow := true
         exitPx  := close
         exitTxt := "EOD"
@@ -286,6 +329,8 @@ if pos != 0 and bar_index > entBar
     line.set_x2(lnEnt, bar_index)
     line.set_x2(lnStp, bar_index)
     line.set_x2(lnTgt, bar_index)
+    if runNow and not exitNow
+        label.new(bar_index, pos == 1 ? high : low, str.tostring(runnerTgtR) + "R ✓  partial", style = pos == 1 ? label.style_label_down : label.style_label_up, color = color.new(C_BULL, 20), textcolor = color.black, size = size.tiny)
     if tgtNow
         label.new(bar_index, pos == 1 ? high : low, str.tostring(rr) + "R ✓  stop → BE", style = pos == 1 ? label.style_label_down : label.style_label_up, color = color.new(C_BULL, 20), textcolor = color.black, size = size.tiny)
         if not exitNow
@@ -297,7 +342,7 @@ if pos != 0 and bar_index > entBar
         if exitAlerts
             // The runner target fires on the first tick that touches it, like the 2R alert. The
             // bar-close call stays as a backstop; the executor ignores it once the position is shut.
-            if exitTxt == "RUNNER"
+            if exitTxt == "RUNNER" or exitTxt == "WEAK"
                 alert("DTS: EXIT " + (pos == 1 ? "LONG " : "SHORT ") + syminfo.ticker + " (" + exitTxt + ") @ " + fmt(exitPx), alert.freq_once_per_bar)
             alert("DTS: EXIT " + (pos == 1 ? "LONG " : "SHORT ") + syminfo.ticker + " (" + exitTxt + ") @ " + fmt(exitPx), alert.freq_once_per_bar_close)
         pos := 0
@@ -305,6 +350,9 @@ if pos != 0 and bar_index > entBar
         // On the first tick that touches the target (2026-10-16), not at the bar close:
         // by the close price had often bounced back and the option gain was gone.
         alert("DTS: " + syminfo.ticker + " hit " + str.tostring(rr) + "R target @ " + fmt(tgtPx) + " - take partial, stop to break-even " + fmt(entPx), alert.freq_once_per_bar)
+    // Not chained to the 2R alert: on a bar that reaches both, both are sent.
+    if runNow and not exitNow and exitAlerts
+        alert("DTS: " + syminfo.ticker + " hit " + str.tostring(runnerTgtR) + "R target @ " + fmt(entPx + (tgtPx - entPx) * runnerTgtR / rr) + " - take partial, the rest rides the trail", alert.freq_once_per_bar)
 
 // --- Arm on a key-level breakout (highest level broken wins for longs, lowest for shorts).
 float  upLvl = na
@@ -380,24 +428,6 @@ trendOkL = trendFilter == "Off" ? true : trendFilter == "8 > 21 only" ? e8 > e21
 trendOkS = trendFilter == "Off" ? true : trendFilter == "8 > 21 only" ? e8 < e21 : trend == -1
 vwapOkL  = not vwapFilter or close > vwapV
 vwapOkS  = not vwapFilter or close < vwapV
-// QQQ chop gate: QQQ's 1-minute close crossing its session VWAP, counted from the open.
-// Also QQQ's market state for the entry alert (v15.0, 2026-10-30): % from today's open,
-// % over the last hour (60 one-minute bars) and its side of VWAP. The executor takes a
-// signal after its afternoon cutoff only when the market is trending the trade's way.
-f_qqqState() =>
-    vw = ta.vwap(hlc3)
-    above = close > vw
-    var int n = 0
-    var float o = na
-    if ta.change(time("D")) != 0
-        n := 0
-        o := open
-    else if above != above[1]
-        n += 1
-    [n, (close / o - 1) * 100, (close / close[60] - 1) * 100, above]
-[qqqCross, qqqDay, qqqHour, qqqAbove] = request.security(ticker.new("NASDAQ", "QQQ", session.regular), "1", f_qqqState())
-f_pct(x) => (x >= 0 ? "+" : "") + str.tostring(x, "0.00") + "%"
-qqqTag = na(qqqDay) or na(qqqHour) ? "" : " | QQQ " + f_pct(qqqDay) + " (1h " + f_pct(qqqHour) + ") " + (qqqAbove ? "above" : "below") + " VWAP"
 chopOn = chopCrosses > 0 and not na(qqqCross) and qqqCross > chopCrosses
 chopSkip = chopOn and chopMode == "Skip"
 canEnter = barstate.isconfirmed and pos == 0 and pendDir == 0 and not exitNow and rth and inWindow and tradesToday < maxTrades and not chopSkip
@@ -477,6 +507,7 @@ if goDir != 0
     stpPx  := goStp
     tgtPx  := goDir == 1 ? goPx + rr * (goPx - goStp) : goPx - rr * (goStp - goPx)
     tgtHit := false
+    runHit := false
     bestPx := goPx
     entBar := bar_index
     tradesToday += 1
