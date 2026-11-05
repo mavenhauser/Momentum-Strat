@@ -10,6 +10,7 @@ day_trading_setup/pine/dts_3_entry_signals.pine:
   DTS: EXIT LONG NVDA (STOP) @ 176.40          (STOP / BE / TRAIL / RUNNER / WEAK / EOD / TIME)
   DTS: A+ OUTSIDE LONG NVDA @ 177.20 - watch for the 8 EMA retest entry
   DTS: STRONG CLOSE LONG NVDA @ 179.10 | daily 8 EMA 175.20 | range 88% | 15:00 178.40   (v14.0)
+  DTS: EXTENDED SHORT GEV @ 812.47 - already 4.2R from the open, no entry | grade A+ OUTSIDE   (v18.0; logged, no action)
 """
 import re
 from dataclasses import dataclass, field

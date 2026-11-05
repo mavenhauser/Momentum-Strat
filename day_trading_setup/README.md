@@ -397,6 +397,21 @@ close: enter at or just after it. Nothing fires mid-candle.
   On the 36 runners of Oct 19-Nov 3 (same-day stock R) every version scored within
   about 2R of the fixed 4R exit (+62.9R to +64.9R); only 7 got past 3R, so the
   sample can't separate them yet.
+- **Early entries and the extension filter** (since DTS Entry v18.0, Thu
+  2026-11-05, user decision, ending the Nov 4-17 rule freeze early):
+  - before **10:30 ET** the trigger candle may close any distance from the 8 EMA
+    (the 0.75 ATR *Max close distance* is ignored; input *No 'don't chase' limit
+    before*), so a fast opening move isn't waited out until the 8 EMA catches up;
+  - an entry is **skipped** when the stock has already moved **4R or more from
+    today's open** in the trade's direction (R = entry to stop; input *Skip if the
+    stock already moved this many R from the open*). TradingView sends `DTS:
+    EXTENDED … no entry` instead, which the executor logs.
+  Replay of every list stock Oct 19-Nov 4 (5-minute bars, R per signal): today's
+  rules +9.4R, no chase limit before 10:30 +18.1R (positive every week, but its
+  58 extra early trades only +1.3R); entering on the level break before 10:30
+  lost −31.6R and stays out. On the real signals the 4R filter cut 36 of 161
+  (−13.1R, 22% wins) and saved $1,855 on the trades taken, cutting 2 of the 14
+  $1k+ winners (AMAT Oct 19, AMZN Oct 22). The two were not tested together.
 - **Not at 2R by 15:55: flat** (`EOD`, input *Flat by 15:55 unless the 2R target
   was hit*, since v17.0), even with *Flat by 15:55* off; only runners past 2R are
   held overnight, as in the executor.

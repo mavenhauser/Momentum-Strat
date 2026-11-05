@@ -32,6 +32,7 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(signals.parse("DTS: A+ OUTSIDE LONG MSFT @ 539.96 - watch for the 8 EMA retest entry").kind, "APLUS")
         self.assertEqual(signals.parse("DTS screener: $KO ▲ above PDH + PMH @ 88.77").kind, "IGNORED")
         self.assertEqual(signals.parse("").kind, "IGNORED")
+        self.assertEqual(signals.parse("DTS: EXTENDED SHORT GEV @ 812.47 - already 4.2R from the open, no entry | grade A+ OUTSIDE").kind, "IGNORED")
 
 
 class ContractTest(unittest.TestCase):
