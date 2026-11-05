@@ -412,6 +412,36 @@ close: enter at or just after it. Nothing fires mid-candle.
   lost −31.6R and stays out. On the real signals the 4R filter cut 36 of 161
   (−13.1R, 22% wins) and saved $1,855 on the trades taken, cutting 2 of the 14
   $1k+ winners (AMAT Oct 19, AMZN Oct 22). The two were not tested together.
+- **Trend days** (since DTS Entry v19.0, built after the close on Thu 2026-11-05,
+  user decision). A bar counts as a trend day for a trade while **QQQ is at least
+  1% from today's open in the trade's direction and on the trade's side of its
+  VWAP** (input *Trend day: QQQ this % from the open*; QQQ's 1-minute state, so it
+  is checked bar by bar). Then:
+  - **chase**: no 'don't chase' limit all day and no 4R extension skip (input
+    *Trend day: no 'don't chase' limit and no extension skip*);
+  - **VWAP-band pullback**: the retest and the trigger use the session VWAP's
+    **1-standard-deviation band** (upper band for longs, lower for shorts) in place
+    of the 8 EMA; the broken level still counts as a retest (input *Trend day:
+    pullback to the VWAP band instead of the 8 EMA*, band width *VWAP band
+    (standard deviations)*). The entry alert reads `... breakout + VWAP band
+    retest ... | trend day | QQQ ...`;
+  - **band trail**: a trade entered on a trend day trails its runner (after 2R) on
+    a 5-minute close back inside the band instead of the 40% giveback (`TRAIL`);
+    the 3R / 4R runner rules still apply (input *Trend day: runner exits on a
+    close back through the VWAP band*).
+  On other bars v18 behaviour is unchanged. Replay of every list stock (5-minute
+  bars, executor rules: 13:00 cutoff, loss brake, 0.20% minimum stop; stock R per
+  trade) on Oct 14, Oct 16 and Oct 19-Nov 5 (16 days; trend days = QQQ closed 1%+
+  from the open: Oct 14, 16, 22, Nov 2, 5): v18 +50.7R (trend days +60.6R, normal
+  days −9.9R); v19 +58.4R (trend days +70.0R, normal days −11.6R). By part: chase
+  alone +57.0R (normal days unchanged), band pullback alone +57.9R, band trail
+  alone +51.4R. The gain is mostly Nov 5 (+14.4R → +23.5R: 17 entries before 10:30
+  instead of 9, so the 10:50-11:05 shorts caught in the bounce aren't taken); away
+  from Nov 5 v19 is −1.6R against v18 (Nov 4, a morning trend that faded: −1.7R),
+  while chase alone is +2.9R (Nov 2). Oct 14 and 16 are unchanged. The band part
+  rests mainly on one day, the day the idea came from, so it is the first thing
+  to switch off if trend days go wrong. Threshold 0.75% / 1.5% and band 0.5-1.5 SD
+  scored within ±2.5R of it; a 2 SD band only +40.6R, below v18.
 - **Not at 2R by 15:55: flat** (`EOD`, input *Flat by 15:55 unless the 2R target
   was hit*, since v17.0), even with *Flat by 15:55* off; only runners past 2R are
   held overnight, as in the executor.

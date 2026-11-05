@@ -97,6 +97,14 @@ class ContractTest(unittest.TestCase):
         self.assertEqual((s.kind, s.chop, s.grade), ("ENTRY", 9, "A inside"))
         self.assertIsNone(signals.parse(base + " | grade A inside").chop)
 
+    def test_parse_trend_day_entry(self):
+        # v19.0: trend-day entries say "VWAP band retest" and carry a "| trend day" tag
+        s = signals.parse("DTS: SHORT MU @ 731.20 | stop 738.90 | target 715.80 (2R) | ORL breakout + VWAP band retest"
+                          " | choppy (QQQ crosses 9) | trend day | QQQ -1.84% (1h -0.92%) below VWAP | grade A+ OUTSIDE")
+        self.assertEqual((s.kind, s.side, s.ticker, s.price, s.stop, s.target, s.level, s.chop, s.grade),
+                         ("ENTRY", "SHORT", "MU", 731.2, 738.9, 715.8, "ORL", 9, "A+ OUTSIDE"))
+        self.assertEqual(s.qqq, (-1.84, -0.92, False))
+
     def test_min_delta_override(self):
         # 0DTE floor passed explicitly: a 0.12-delta strike only qualifies if the floor is lowered
         qs = {100: self.q(4.90, 5.10, 0.55), 102.5: self.q(3.80, 4.00, 0.45), 107.5: self.q(1.90, 2.00, 0.12)}

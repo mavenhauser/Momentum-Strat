@@ -81,6 +81,13 @@ runnerTrim = input.bool(true, "Runner target: take another partial when QQQ is w
 // Added 2026-11-05 (v18.0, user decision; replay Oct 19-Nov 4 in the README).
 noChaseUntil = input.int(1030, "No 'don't chase' limit before (HHMM New York, 0 = off)", minval = 0, maxval = 1600, group = G_ENT, tooltip = "Before this time the trigger candle may close any distance from the 8 EMA (Max close distance is ignored), so a fast opening move isn't waited out until the 8 EMA catches up.", display = display.none)
 maxExtR = input.float(4.0, "Skip if the stock already moved this many R from the open (0 = off)", minval = 0, step = 0.5, group = G_ENT, tooltip = "At the entry, the move from today's open in the trade's direction, in R of this trade (entry to stop). At or beyond this the entry is skipped and 'DTS: EXTENDED ...' is sent instead: the move is usually spent.", display = display.none)
+// Trend day (v19.0, 2026-11-05, user decision): QQQ at least trendPct from today's open in the
+// trade's direction AND on the trade's side of its VWAP, checked bar by bar.
+trendPct = input.float(1.0, "Trend day: QQQ this % from the open, the trade's way (0 = off)", minval = 0, step = 0.25, group = G_ENT, tooltip = "A long counts as a trend-day trade while QQQ is at least this % above today's open and above its VWAP (a short: this % below the open and below VWAP). The three trend-day rules below apply only then; on other bars v18 behaviour is unchanged.", display = display.none)
+trendChase = input.bool(true, "Trend day: no 'don't chase' limit and no extension skip", group = G_ENT, tooltip = "On a trend day the trigger candle may close any distance from its pullback line all day, and the 'already moved 4R from the open' skip is not applied.", display = display.none)
+bandEntry = input.bool(true, "Trend day: pullback to the VWAP band instead of the 8 EMA", group = G_ENT, tooltip = "On a trend day the retest and the trigger use the session VWAP's standard-deviation band (upper band for longs, lower band for shorts) in place of the 8 EMA. The broken level still counts as a retest.", display = display.none)
+bandTrail = input.bool(true, "Trend day: runner exits on a close back through the VWAP band", group = G_RISK, tooltip = "For a trade entered on a trend day, after the 2R target the runner exits (TRAIL) on a 5-minute close back inside the VWAP band (below the upper band for longs, above the lower band for shorts) instead of the 40% giveback. The 3R / 4R runner rules still apply.", display = display.none)
+bandK = input.float(1.0, "VWAP band (standard deviations)", minval = 0.25, step = 0.25, group = G_ENT, display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744
@@ -162,6 +169,7 @@ e21   = ta.ema(close, midLen)
 e50   = ta.ema(close, slowLen)
 atr   = ta.atr(14)
 vwapV = ta.vwap(hlc3)
+[vwMid, vwUp, vwLo] = ta.vwap(hlc3, timeframe.change("D"), bandK)   // v19.0 trend-day band
 
 bullStack = e8 > e21 and e21 > e50
 bearStack = e8 < e21 and e21 < e50
@@ -214,6 +222,8 @@ f_qqqState() =>
     [n, (close / o - 1) * 100, (close / close[60] - 1) * 100, above]
 [qqqCross, qqqDay, qqqHour, qqqAbove] = request.security(ticker.new("NASDAQ", "QQQ", session.regular), "1", f_qqqState())
 f_pct(x) => (x >= 0 ? "+" : "") + str.tostring(x, "0.00") + "%"
+trendL = trendPct > 0 and not na(qqqDay) and qqqDay >= trendPct and qqqAbove
+trendS = trendPct > 0 and not na(qqqDay) and qqqDay <= -trendPct and not qqqAbove
 qqqTag = na(qqqDay) or na(qqqHour) ? "" : " | QQQ " + f_pct(qqqDay) + " (1h " + f_pct(qqqHour) + ") " + (qqqAbove ? "above" : "below") + " VWAP"
 
 var int   pos = 0          // 1 long, -1 short, 0 flat
@@ -221,6 +231,7 @@ var float entPx = na
 var float stpPx = na
 var float tgtPx = na
 var bool  tgtHit = false
+var bool  posTrend = false // entered on a trend day (v19.0): runner trails the VWAP band
 var bool  runHit = false   // runner target reached with QQQ on the trade's side: partial taken, the rest trails
 var float bestPx = na      // best price since entry (high for longs, low for shorts)
 var int   entBar = na
@@ -295,7 +306,7 @@ if pos != 0 and bar_index > entBar
                 exitNow := true
                 exitPx  := math.max(open, weakLvl)
                 exitTxt := "WEAK"
-            else if tgtHit and (runnerExit == "Giveback" ? close < gbLevel : close < trailEma)
+            else if tgtHit and (bandTrail and posTrend ? close < vwUp : runnerExit == "Giveback" ? close < gbLevel : close < trailEma)
                 exitNow := true
                 exitPx  := close
                 exitTxt := "TRAIL"
@@ -319,7 +330,7 @@ if pos != 0 and bar_index > entBar
                 exitNow := true
                 exitPx  := math.min(open, weakLvl)
                 exitTxt := "WEAK"
-            else if tgtHit and (runnerExit == "Giveback" ? close > gbLevel : close > trailEma)
+            else if tgtHit and (bandTrail and posTrend ? close > vwLo : runnerExit == "Giveback" ? close > gbLevel : close > trailEma)
                 exitNow := true
                 exitPx  := close
                 exitTxt := "TRAIL"
@@ -415,14 +426,17 @@ if sArmed and (close > e21 or close > sLvl + failAtr * atr)
     sSwing := na
 
 // --- Retest: pullback tags the 8 EMA or the broken level.
+// Pullback line: the 8 EMA, or on a trend day the VWAP band (v19.0).
+refL = bandEntry and trendL ? vwUp : e8
+refS = bandEntry and trendS ? vwLo : e8
 bool retestNowL = false
 bool retestNowS = false
-if lArmed and bar_index > lArmBar and (low <= e8 + tolAtr * atr or low <= lLvl + tolAtr * atr)
+if lArmed and bar_index > lArmBar and (low <= refL + tolAtr * atr or low <= lLvl + tolAtr * atr)
     retestNowL := not lRetest
     lRetest := true
 if lArmed and lRetest
     lSwing := na(lSwing) ? low : math.min(lSwing, low)
-if sArmed and bar_index > sArmBar and (high >= e8 - tolAtr * atr or high >= sLvl - tolAtr * atr)
+if sArmed and bar_index > sArmBar and (high >= refS - tolAtr * atr or high >= sLvl - tolAtr * atr)
     retestNowS := not sRetest
     sRetest := true
 if sArmed and sRetest
@@ -451,8 +465,8 @@ sRisk  = sStop - close
 
 hhmm = hour(time, NY) * 100 + minute(time, NY)
 chaseFree = noChaseUntil > 0 and hhmm < noChaseUntil
-longSig = canEnter and allowLong and lArmed and lRetest and close > e8 and close > open and close > lLvl and (chaseFree or close - e8 <= maxExt * atr) and trendOkL and vwapOkL and lRiskB > 0 and lRiskB <= maxRiskAtr * atr
-shortSig = canEnter and not longSig and allowShort and sArmed and sRetest and close < e8 and close < open and close < sLvl and (chaseFree or e8 - close <= maxExt * atr) and trendOkS and vwapOkS and sRiskB > 0 and sRiskB <= maxRiskAtr * atr
+longSig = canEnter and allowLong and lArmed and lRetest and close > refL and close > open and close > lLvl and (chaseFree or (trendChase and trendL) or close - refL <= maxExt * atr) and trendOkL and vwapOkL and lRiskB > 0 and lRiskB <= maxRiskAtr * atr
+shortSig = canEnter and not longSig and allowShort and sArmed and sRetest and close < refS and close < open and close < sLvl and (chaseFree or (trendChase and trendS) or refS - close <= maxExt * atr) and trendOkS and vwapOkS and sRiskB > 0 and sRiskB <= maxRiskAtr * atr
 
 // --- Setup grade (also drives the A+ banner below). OUTSIDE LONG: price above
 // both PDH and PMH (outside yesterday's range and the premarket range). Grade =
@@ -510,7 +524,8 @@ if longSig or shortSig
 
 // Extension filter (v18.0): skip the entry once the stock has already moved maxExtR R
 // from today's open in the trade's direction. Oct 19-Nov 4: 36 of 161 signals, -13.1R.
-if goDir != 0 and maxExtR > 0 and not na(dOpen) and goPx != goStp
+goTrend = goDir == 1 ? trendL : goDir == -1 ? trendS : false
+if goDir != 0 and maxExtR > 0 and not na(dOpen) and goPx != goStp and not (trendChase and goTrend)
     doneR = (goPx - dOpen) * goDir / math.abs(goPx - goStp)
     if doneR >= maxExtR
         label.new(bar_index, goDir == 1 ? high : low, "extended " + str.tostring(doneR, "0.0") + "R", yloc = goDir == 1 ? yloc.abovebar : yloc.belowbar, style = label.style_none, textcolor = C_DIM, size = size.tiny)
@@ -524,6 +539,7 @@ if goDir != 0
     tgtPx  := goDir == 1 ? goPx + rr * (goPx - goStp) : goPx - rr * (goStp - goPx)
     tgtHit := false
     runHit := false
+    posTrend := goTrend
     bestPx := goPx
     entBar := bar_index
     tradesToday += 1
@@ -534,7 +550,7 @@ if goDir != 0
     side = goDir == 1 ? "LONG" : "SHORT"
     txt = side + " · " + goName + " retest\nEntry " + fmt(entPx) + "\nStop " + fmt(stpPx) + "\nTarget " + fmt(tgtPx)
     label.new(bar_index, close, txt, yloc = goDir == 1 ? yloc.belowbar : yloc.abovebar, style = goDir == 1 ? label.style_label_up : label.style_label_down, color = goDir == 1 ? #00C853 : #D50000, textcolor = color.white, size = size.small)
-    alert("DTS: " + side + " " + syminfo.ticker + " @ " + fmt(entPx) + " | stop " + fmt(stpPx) + " | target " + fmt(tgtPx) + " (" + str.tostring(rr) + "R) | " + goName + " breakout + 8 EMA retest" + (chopOn ? " | choppy (QQQ crosses " + str.tostring(qqqCross) + ")" : "") + qqqTag + " | grade " + goGrade, confirmEntry ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
+    alert("DTS: " + side + " " + syminfo.ticker + " @ " + fmt(entPx) + " | stop " + fmt(stpPx) + " | target " + fmt(tgtPx) + " (" + str.tostring(rr) + "R) | " + goName + " breakout + " + (bandEntry and goTrend ? "VWAP band" : "8 EMA") + " retest" + (chopOn ? " | choppy (QQQ crosses " + str.tostring(qqqCross) + ")" : "") + (goTrend ? " | trend day" : "") + qqqTag + " | grade " + goGrade, confirmEntry ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
 
 plotshape(retestNowL and pos == 0 and allowLong, "Retest (long) - get ready", shape.diamond, location.belowbar, color.new(C_BULL, 30), size = size.tiny, display = display.all - display.status_line)
 plotshape(retestNowS and pos == 0 and allowShort, "Retest (short) - get ready", shape.diamond, location.abovebar, color.new(C_BEAR, 30), size = size.tiny, display = display.all - display.status_line)
