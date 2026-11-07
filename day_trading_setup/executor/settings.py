@@ -107,8 +107,13 @@ TRIM_FRACTION = 0.5
 # Losing-streak brake (2026-10-22): after this many stop-outs in a row in one day, new
 # entries are skipped for the rest of the day - except setups graded in
 # BRAKE_OVERRIDE_GRADES (the strongest conviction, full 5% size). A trade that reached
-# 2R, or exited at break-even / trail / time, resets the streak.
-LOSS_BRAKE = 3
+# 2R, or exited at break-even / trail / time, resets the streak; a 0DTE time stop counts
+# as a loss only if it lost money.
+# Loosened from 3 to 5 on 2026-11-07 (user decision). Replay Oct 14-Nov 6 with the
+# first-hour QQQ rule below: brake 3 +81.9R, 4 +80.8R, 5 +79.8R, none +79.8R; without that
+# rule brake 3 +46.8R vs none +63.6R (it skipped 14 live signals in Nov). At 5 it never
+# fired in the sample: a backstop for a disaster day only. 0 turns it off.
+LOSS_BRAKE = 5
 BRAKE_OVERRIDE_GRADES = {"A+ OUTSIDE"}
 MAX_OPEN_POSITIONS = 10      # raised from 5 (2026-10-18): on Oct 16 all 5 signals the cap blocked reached 2R; 10 would have taken them all
 MAX_HOLD_SESSIONS = 2        # mirrors "Max sessions held" on DTS Entry (backup only)
@@ -169,6 +174,13 @@ ENTRY_END = (16, 0)
 # 12:00-13:00 -$0.4k (19, 4 reached 2R), after 13:00 -$0.3k (18, 3 reached 2R). After 13:00,
 # the 3 entries with QQQ trending their way made +$747; the other 12 -$1,560 (small sample).
 ENTRY_CUTOFF = (13, 0)
+# First hour with the market (2026-11-07, user decision): before this New York time an
+# entry is taken only in QQQ's direction - QQQ up from the 09:30 open and above its VWAP
+# for a long, down and below for a short (DTS Entry's QQQ tag); others are SKIPPED.
+# Replay Oct 14-Nov 6 (17 days, no brake): +63.6R -> +79.8R, normal days -9.2R -> -1.1R,
+# better on 11 days, worse on 4; Oct 14-26 +28.5 -> +41.9R, Oct 27-Nov 6 +35.1 -> +37.9R.
+# First 30 min only (to 10:00): +71.7R. None = off.
+QQQ_DIRECTION_UNTIL = (10, 30)
 LATE_ENTRY_GRADES = {"A+ OUTSIDE"}
 MOMENTUM_DAY_PCT = 0.5
 MOMENTUM_HOUR_PCT = 0.25

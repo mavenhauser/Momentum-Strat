@@ -147,11 +147,13 @@ def choose_strike(quotes: dict, entry: float, right: str, budget: float, move: f
 
 def loss_streak(closed, day) -> int:
     """Stop-outs in a row at the end of `day`'s closed trades (in closing order). A loss is
-    a trade that never reached 2R and closed on a stop or a time stop; anything else resets."""
+    a trade that never reached 2R and closed on a stop, or on a time stop at a loss (since
+    2026-11-07: TSLA's +$1,884 time stop on Nov 6 counted as a stop-out); anything else resets."""
     streak = 0
     for t in sorted((t for t in closed if (t.get("closed_at") or "")[:10] == day.isoformat()), key=lambda t: t["closed_at"]):
         why = t.get("close_reason") or ""
-        lost = not t.get("trimmed") and ("STOP" in why or "time stop" in why)
+        pnl = t.get("pnl_confirmed", t.get("pnl_usd"))
+        lost = not t.get("trimmed") and ("STOP" in why or ("time stop" in why and (pnl is None or pnl < 0)))
         streak = streak + 1 if lost else 0
     return streak
 
@@ -201,6 +203,17 @@ def market_momentum(sig) -> bool:
     sgn = 1 if sig.side == "LONG" else -1
     return (sgn * day >= settings.MOMENTUM_DAY_PCT and sgn * hour >= settings.MOMENTUM_HOUR_PCT
             and above == (sgn > 0))
+
+
+def with_qqq(sig) -> bool:
+    """True if the entry alert's QQQ tag shows the market moving the trade's way: QQQ up
+    from the open and above its VWAP for a long, down and below for a short. True without
+    the tag (alerts before v15.0), so a missing tag never blocks a trade."""
+    if not sig.qqq:
+        return True
+    day, _hour, above = sig.qqq
+    sgn = 1 if sig.side == "LONG" else -1
+    return sgn * day > 0 and above == (sgn > 0)
 
 
 def close_before_overnight(pos) -> bool:

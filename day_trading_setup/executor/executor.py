@@ -337,6 +337,11 @@ def on_entry(broker, state, sig, t):
         why = "half day (13:00 close): no new entries"
         skip(state, sig, t, why)
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
+    if settings.QQQ_DIRECTION_UNTIL and hm < settings.QQQ_DIRECTION_UNTIL and not contracts.with_qqq(sig):
+        u = settings.QQQ_DIRECTION_UNTIL
+        why = f"before {u[0]}:{u[1]:02d} only trades in the direction of QQQ ({qqq_line(sig)})"
+        skip(state, sig, t, why)
+        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
     late = None
     if contracts.late_entry(t):
         if sig.grade in settings.LATE_ENTRY_GRADES:
@@ -368,7 +373,7 @@ def on_entry(broker, state, sig, t):
         skip(state, sig, t, why)
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\nStop {sig.stop} · Target {sig.target}\n\n<b>{h(why)}</b>")
     streak = contracts.loss_streak(state["closed"], t.date())
-    if streak >= settings.LOSS_BRAKE:
+    if settings.LOSS_BRAKE and streak >= settings.LOSS_BRAKE:
         if sig.grade in settings.BRAKE_OVERRIDE_GRADES:
             log.info("loss brake (%d in a row) overridden by a %s setup: %s", streak, sig.grade, sig.raw)
         else:

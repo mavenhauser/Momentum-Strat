@@ -225,6 +225,49 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(contracts.loss_streak(stops + [c("11:30", "TradingView TRAIL @ 4", True)], date(2026, 10, 21)), 0)   # a winner resets
         self.assertEqual(contracts.loss_streak(stops[:2] + [c("10:40", "TradingView BE @ 5", True)] + stops[2:3], date(2026, 10, 21)), 1)
         self.assertEqual(contracts.loss_streak(stops, date(2026, 10, 22)), 0)                                               # new day
+        tsla = {**c("11:30", "0DTE time stop: no 2R within 90 min"), "pnl_usd": 1250.0}
+        self.assertEqual(contracts.loss_streak(stops + [tsla], date(2026, 10, 21)), 0)                                      # profitable time stop resets (Nov 6)
+        self.assertEqual(contracts.loss_streak(stops + [{**tsla, "pnl_confirmed": -300}], date(2026, 10, 21)), 4)            # losing one counts
+
+    def test_loss_brake_threshold(self):
+        from day_trading_setup.executor import executor
+        d = "2026-10-21"
+        stops = [{"closed_at": f"{d}T10:{m}:00-04:00", "close_reason": "TradingView STOP @ 1", "trimmed": False} for m in (25, 35, 45, 55)]
+        sig = signals.parse("DTS: SHORT TSLA @ 371.26 | stop 374.52 | target 364.74 (2R) | PML breakout | grade A inside")
+        def run(closed, brake):
+            sent = []
+            with mock.patch.object(executor, "notify", sent.append), mock.patch.object(settings, "LOSS_BRAKE", brake), \
+                 mock.patch.object(executor, "choose_contract", lambda b, s, t: (None, "stub")):
+                executor.on_entry(None, {"positions": {}, "closed": closed}, sig, datetime(2026, 10, 21, 11, 0, tzinfo=executor.NY))
+            return sent[0]
+        self.assertNotIn("loss brake", run(stops, 5))          # 4 in a row: still trading
+        self.assertIn("loss brake: 5 stop-outs", run(stops + [{**stops[0], "closed_at": f"{d}T10:58:00-04:00"}], 5))
+        self.assertNotIn("loss brake", run(stops * 2, 0))     # 0 = off
+
+    def test_first_hour_with_qqq(self):
+        from day_trading_setup.executor import executor
+        base = "DTS: LONG NVDA @ 199.90 | stop 197.20 | target 205.30 (2R) | PDH breakout + 8 EMA retest"
+        up = signals.parse(base + " | QQQ +0.40% (1h +0.40%) above VWAP | grade A inside")
+        down = signals.parse(base + " | QQQ -0.30% (1h -0.30%) below VWAP | grade A inside")
+        up_below = signals.parse(base + " | QQQ +0.10% (1h -0.20%) below VWAP | grade A inside")
+        self.assertTrue(contracts.with_qqq(up))
+        self.assertFalse(contracts.with_qqq(down))
+        self.assertFalse(contracts.with_qqq(up_below))
+        self.assertTrue(contracts.with_qqq(signals.parse(base)))                     # no QQQ tag: never blocked
+        short = signals.parse(base.replace("LONG", "SHORT") + " | QQQ -0.30% (1h -0.30%) below VWAP | grade A inside")
+        self.assertTrue(contracts.with_qqq(short))
+        def run(sig, hm):
+            sent = []
+            state = {"positions": {}, "closed": []}
+            with mock.patch.object(executor, "notify", sent.append), \
+                 mock.patch.object(executor, "choose_contract", lambda b, s, t: (None, "stub")):
+                executor.on_entry(None, state, sig, datetime(2026, 11, 6, *hm, tzinfo=executor.NY))
+            return sent[0], state
+        msg, state = run(down, (9, 45))
+        self.assertIn("before 10:30 only trades in the direction of QQQ (QQQ -0.30% (1h -0.30%) below VWAP)", msg)
+        self.assertEqual(state["skipped"][0]["ticker"], "NVDA")
+        self.assertNotIn("direction of QQQ", run(up, (9, 45))[0])
+        self.assertNotIn("direction of QQQ", run(down, (10, 30))[0])                   # from 10:30 the usual rules
 
     def test_close_before_overnight(self):
         thu = "2026-10-22T13:20:00-04:00"
