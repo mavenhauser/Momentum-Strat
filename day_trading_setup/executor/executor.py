@@ -411,7 +411,8 @@ def on_entry(broker, state, sig, t):
            f"<b>{filled} × {h(describe(pos))}</b>\n"
            f"Expiry {expiry_label(pos)} · price <b>{avg:.2f}</b>\n\n"
            f"TradingView {signal_line(sig)} @ {sig.price}\n"
-           f"Stop {sig.stop} · Target {sig.target} · {h(sig.level)} breakout\n\n"
+           f"Stock: stop {sig.stop} · 2R target <b>{sig.target}</b> · {h(sig.level)} breakout\n"
+           + _option_2r_line(pos, sig, filled, avg) + "\n"
            f"Grade <b>{h(sig.grade or 'none (pre-v6 alert)')}</b> → size <b>{pos.get('size_fraction', 0):.1%}</b>"
            + (f" (half: choppy market, QQQ crossed VWAP {sig.chop}×)" if sig.chop is not None else "") + "\n"
            f"Premium <b>${filled * avg * 100:,.0f}</b> = {filled * avg * 100 / nlv:.1%} of ${nlv:,.0f} ({h(nlv_src)})\n"
@@ -420,6 +421,15 @@ def on_entry(broker, state, sig, t):
            + ("Late high-conviction entry: sold at 15:56 if not at 2R\n" if late == "overnight" else "")
            + (f"Late entry on strong market momentum ({h(qqq_line(sig))}): sold at 15:56 if not at 2R\n" if late == "momentum" else "")
            + f"<i>{h(note)}</i>")
+
+
+def _option_2r_line(pos, sig, qty, avg):
+    """Option 2R for reference: R = |delta| x stock stop distance per contract."""
+    r = contracts.option_r(pos.get("delta"), sig.price, sig.stop)
+    if r is None or avg is None:
+        return ""
+    return (f"Option: 2R target ≈ <b>{avg + 2 * r:.2f}</b> (+{2 * r:.2f} = +${2 * r * 100 * qty:,.0f} on {qty}) · "
+            f"at the stock stop ≈ {max(avg - r, 0):.2f} (−${r * 100 * qty:,.0f})\n")
 
 
 def _sell(broker, state, pos, qty, t, why, alert_raw):

@@ -1,6 +1,7 @@
 import unittest
 from datetime import date, datetime
 from unittest import mock
+import types
 
 from day_trading_setup.executor import settings, contracts, signals
 
@@ -70,6 +71,18 @@ class ContractTest(unittest.TestCase):
         self.assertFalse(contracts.liquid({"bid": 2.0, "ask": 2.1, "open_interest": 500}))                  # unknown
         self.assertFalse(contracts.liquid({"bid": 0.04, "ask": 0.05, "open_interest": 5000, **v}))         # KO 10-16: under $0.50
         self.assertTrue(contracts.liquid({"bid": 0.48, "ask": 0.53, "open_interest": 5000, **v}))
+
+    def test_option_r(self):
+        self.assertAlmostEqual(contracts.option_r(0.31, 166.34, 163.91), 0.7533, places=3)   # PLTR 2026-11-09
+        self.assertAlmostEqual(contracts.option_r(-0.40, 100.0, 102.0), 0.80)                 # put, short
+        self.assertIsNone(contracts.option_r(None, 100.0, 99.0))
+        self.assertIsNone(contracts.option_r(float("nan"), 100.0, 99.0))
+        self.assertIsNone(contracts.option_r(0.3, 100.0, 100.0))
+        from day_trading_setup.executor import executor
+        line = executor._option_2r_line({"delta": 0.31}, types.SimpleNamespace(price=166.34, stop=163.91), 13, 3.22)
+        self.assertIn("4.73", line)
+        self.assertIn("+$1,959 on 13", line)
+        self.assertEqual(executor._option_2r_line({}, types.SimpleNamespace(price=1, stop=0.5), 1, 1.0), "")
 
     def test_opening_liquidity(self):
         # TSLA 2026-11-09 09:45 ET alert saw the 09:30:53 quotes (15-min delayed feed)

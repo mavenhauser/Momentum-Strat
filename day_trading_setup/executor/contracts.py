@@ -58,6 +58,17 @@ def liquid(quote, early: bool = False) -> bool:
     return oi is None or oi >= settings.MIN_OPEN_INTEREST
 
 
+def option_r(delta, entry, stop):
+    """The option's R per contract in premium: what it loses if the stock goes
+    from entry to its stop, approximated as |delta| x the stop distance (user,
+    2026-11-09: 2R measured on the option, shown in notifications; trading still
+    trims at the stock's 2R until the Nov 17 review). None if unknown."""
+    if delta is None or entry is None or stop is None or delta != delta:
+        return None
+    r = abs(delta) * abs(entry - stop)
+    return r if r > 0 else None
+
+
 def size_fraction(grade):
     """Fraction of the account to spend on premium for an entry of this grade."""
     return settings.SIZE_BY_GRADE.get(grade or "", settings.SIZE_DEFAULT)
