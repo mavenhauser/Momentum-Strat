@@ -88,6 +88,16 @@ MIN_OPEN_INTEREST = 100
 MIN_OPTION_VOLUME = 100     # contracts traded today in that strike (2026-10-16); unknown volume fails
 MAX_SPREAD_FRACTION = 0.15   # (ask - bid) / mid must be at or below this
 MIN_OPTION_PRICE = 0.50      # mid of at least $0.50 (2026-10-18): KO 94C at $0.05 x277 lost 90% on Oct 16
+# Opening liquidity (user decision, 2026-11-09). The option quotes are 15 minutes
+# delayed (TastyTrade demo feed; IBKR's API options too), so before 10:00 ET the
+# executor sees the opening minute: almost no volume yet and wide opening spreads.
+# On Nov 9 that skipped 6 of 7 first-hour entries on a trend day, TSLA among them
+# (09:45 alert saw the 09:30:53 quotes: 380C volume 34, 385C spread 27%). Until
+# EARLY_LIQUIDITY_UNTIL the volume test is dropped and the spread limit is
+# EARLY_MAX_SPREAD_FRACTION; open interest (known, >= MIN_OPEN_INTEREST) and the
+# $0.50 minimum still apply. The fill is repriced from 1-minute candles later.
+EARLY_LIQUIDITY_UNTIL = (10, 0)
+EARLY_MAX_SPREAD_FRACTION = 0.30
 
 # Trade filters (2026-10-16, from the Oct 14-15 dry runs).
 # Skip entries whose TradingView stop is closer than this to the entry, as a %

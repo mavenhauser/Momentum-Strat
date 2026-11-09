@@ -71,6 +71,19 @@ class ContractTest(unittest.TestCase):
         self.assertFalse(contracts.liquid({"bid": 0.04, "ask": 0.05, "open_interest": 5000, **v}))         # KO 10-16: under $0.50
         self.assertTrue(contracts.liquid({"bid": 0.48, "ask": 0.53, "open_interest": 5000, **v}))
 
+    def test_opening_liquidity(self):
+        # TSLA 2026-11-09 09:45 ET alert saw the 09:30:53 quotes (15-min delayed feed)
+        c380 = {"bid": 3.35, "ask": 3.65, "open_interest": 7571, "volume": 34}
+        c385 = {"bid": 2.12, "ask": 2.78, "open_interest": 2088, "volume": 125}
+        self.assertFalse(contracts.liquid(c380))
+        self.assertFalse(contracts.liquid(c385))
+        self.assertTrue(contracts.liquid(c380, early=True))
+        self.assertTrue(contracts.liquid(c385, early=True))                                       # spread 27%
+        self.assertFalse(contracts.liquid({"bid": 2.0, "ask": 3.0, "open_interest": 5000}, early=True))   # spread 40%
+        self.assertFalse(contracts.liquid({"bid": 2.0, "ask": 2.1, "volume": 500}, early=True))          # OI unknown
+        self.assertFalse(contracts.liquid({"bid": 2.0, "ask": 2.1, "open_interest": 50}, early=True))
+        self.assertFalse(contracts.liquid({"bid": 0.3, "ask": 0.35, "open_interest": 5000}, early=True)) # under $0.50
+
     def test_sizing(self):
         self.assertEqual(contracts.contracts_for(100_000, 2.50), 10)          # 2.5% default: $2,500 / $250
         self.assertEqual(contracts.contracts_for(100_000, 2.50, 0.05), 20)    # A+ OUTSIDE: $5,000 / $250

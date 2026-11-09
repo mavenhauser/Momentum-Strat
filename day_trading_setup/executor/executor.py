@@ -313,13 +313,14 @@ def choose_contract(broker, sig, t):
     base = settings.FRIDAY_SWING_SIZE if contracts.swing_entry(t) else contracts.size_fraction(sig.grade)
     frac = base * (settings.CHOP_SIZE_FACTOR if sig.chop is not None else 1.0)
     floor = settings.MIN_DELTA_0DTE if expiry == today else settings.MIN_DELTA
-    k, qty, rule, delta = contracts.choose_strike(quotes, sig.price, right, nlv * frac, move, floor)
+    early = bool(settings.EARLY_LIQUIDITY_UNTIL) and (t.hour, t.minute) < settings.EARLY_LIQUIDITY_UNTIL
+    k, qty, rule, delta = contracts.choose_strike(quotes, sig.price, right, nlv * frac, move, floor, early)
     if k is None:
         return None, f"{rule} ({right}, {expiry})"
     return {"ticker": sig.ticker, "right": right, "expiry": expiry.isoformat(),
             "expiry_ib": expiry.strftime("%Y%m%d"), "strike": k, "streamer": opts[k].streamer_symbol,
             "qty_plan": qty, "delta": delta, "sizing_rule": rule,
-            "grade": sig.grade, "size_fraction": frac, "chop": sig.chop}, None
+            "grade": sig.grade, "size_fraction": frac, "chop": sig.chop, "early_liquidity": early}, None
 
 
 def skip(state, sig, t, reason):
