@@ -76,6 +76,14 @@ ZERO_DTE_TIME_STOP_MIN = 90
 # Journal days from this date use fills re-priced from 1-minute history (reprice.py);
 # earlier days keep the executor's recorded figures (user decision, 2026-10-16).
 REPRICE_FROM = "2026-10-16"
+# Exits at the close (user decision, 2026-11-09, from that day on): any sale from
+# 15:50 ET (the 15:55 EOD exit, a trail that fires on the last bar, the 15:56 sweep)
+# is booked at the mid if the option is liquid, else at the bid: liquid = it traded
+# in at least CLOSE_LIQUID_MINUTES of the 30 minutes up to the sale. Every other
+# fill stays at the last traded price.
+CLOSE_RULE_FROM = "2026-11-09"
+CLOSE_EXIT_FROM = (15, 50)
+CLOSE_LIQUID_MINUTES = 15
 # Closed trades from this time on get a RESULT message with the confirmed P&L
 # (CLOSED messages no longer carry a P&L - the live quotes are delayed).
 RESULTS_FROM = "2026-10-19T09:30"

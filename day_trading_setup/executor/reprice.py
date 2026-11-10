@@ -188,7 +188,10 @@ def run(mode="dry", since="2026-10-14T09:30", redo=None):
         price, how = true_price(bars[streamer_symbol(t)], datetime.fromisoformat(ev["t"]),
                                 bars.get(t["ticker"]), signed_delta(t), alert_price(ev))
         spread = (ev["ask"] - ev["bid"]) if ev.get("bid") is not None and ev.get("ask") is not None else None
+        minute = int(datetime.fromisoformat(ev["t"]).timestamp() * 1000) // 60000 * 60000
+        traded = sum(1 for m in bars[streamer_symbol(t)] if minute - 29 * 60000 <= m <= minute)
         done[event_key(t, ev)] = {"symbol": streamer_symbol(t), "true": price, "how": how, "spread": spread,
+                                  "trade_minutes_30": traded,
                                   "recorded": ev.get("price"), "side": "BUY" if ev["action"].startswith("BUY") else "SELL",
                                   "priced_at": now.isoformat(timespec="seconds")}
     path.write_text(json.dumps(done, indent=1))

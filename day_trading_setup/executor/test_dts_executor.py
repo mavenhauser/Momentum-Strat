@@ -485,6 +485,27 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(reprice.signed_delta({"right": "P", "delta": 0.3}), -0.3)
         self.assertEqual(reprice.signed_delta({"right": "C", "delta": -0.3}), 0.3)
 
+    def test_close_exit_rule(self):
+        from day_trading_setup.executor import journal
+        self.assertTrue(journal.close_exit("2026-11-09T15:55:03-05:00"))
+        self.assertFalse(journal.close_exit("2026-11-09T15:20:48-05:00"))
+        self.assertFalse(journal.close_exit("2026-11-06T15:55:03-05:00"))       # before CLOSE_RULE_FROM
+        buy_t, mid_t, eod_t = "2026-11-09T09:56:16-05:00", "2026-11-09T13:27:18-05:00", "2026-11-09T15:55:03-05:00"
+        trade = {"ticker": "ANET", "events": [
+            {"t": buy_t, "action": "BUY 7 @ 4.12", "qty": 7, "price": 4.12, "bid": 3.6, "ask": 4.65},
+            {"t": mid_t, "action": "SELL 3 @ 6.0 (2R trim)", "qty": 3, "price": 6.0, "bid": 5.9, "ask": 6.1},
+            {"t": eod_t, "action": "SELL 4 @ 6.83", "qty": 4, "price": 6.83, "bid": 6.5, "ask": 7.15}]}
+        buy, sells = journal._events(trade, [])
+        rp = lambda n: {f"ANET|{buy_t}": {"true": 4.99, "how": "x", "trade_minutes_30": 3},
+                        f"ANET|{mid_t}": {"true": 6.20, "how": "x", "trade_minutes_30": 2},
+                        f"ANET|{eod_t}": {"true": 5.99, "how": "x", "trade_minutes_30": n}}
+        thin = journal._true_pnl(trade, buy, sells, rp(7))
+        liquid = journal._true_pnl(trade, buy, sells, rp(20))
+        # entry and the 13:27 sale at the last trade either way; the 15:55 sale at the bid when thin
+        self.assertEqual([b[0] for b in thin[4]], [4.99, 6.20, 5.67])
+        self.assertEqual([b[0] for b in liquid[4]], [4.99, 6.20, 5.99])
+        self.assertAlmostEqual(thin[0], 3 * (6.20 - 4.99) * 100 + 4 * (5.67 - 4.99) * 100, places=2)
+
     def test_sessions(self):
         self.assertEqual(contracts.sessions_held(date(2026, 10, 15), date(2026, 10, 15)), 1)   # Thu
         self.assertEqual(contracts.sessions_held(date(2026, 10, 16), date(2026, 10, 19)), 2)   # Fri -> Mon

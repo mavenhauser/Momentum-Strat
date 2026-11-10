@@ -119,8 +119,8 @@ def _sized_off(trade, lines, buy):
 def _true_pnl(trade, buy, sells, repriced):
     """(mid, real, fallbacks) at the 1-minute-history prices, or (None, None, 0)."""
     if not repriced or not buy:
-        return None, None, 0, []
-    legs, fallbacks = [], 0
+        return None, None, 0, [], []
+    legs, fallbacks, booked_px = [], 0, []
     for leg, ev in zip([buy] + sells, reprice.fills(trade)):
         r = repriced.get(reprice.event_key(trade, ev))
         spread = (leg["ask"] - leg["bid"]) if leg.get("bid") is not None and leg.get("ask") is not None else None
@@ -129,7 +129,7 @@ def _true_pnl(trade, buy, sells, repriced):
             fallbacks += 1
             true = leg["price"] if leg["price"] is not None else None
         if true is None:
-            return None, None, fallbacks, []
+            return None, None, fallbacks, [], []
         # In the first ~15 minutes the delayed feed still shows the pre-market book (TSLA
         # 382.5C at 09:35 on 2026-10-20: 2.00/11.00), which is not a real spread. Only a
         # fill in that window with a spread over MAX_SPREAD_FRACTION of the price falls
@@ -143,12 +143,27 @@ def _true_pnl(trade, buy, sells, repriced):
             spread = min(sane) if sane else 0.05 * true
         half = spread / 2
         sign = 1 if leg is buy else -1
-        legs.append((leg["qty"], true, true + sign * half, sign, leg["t"]))
+        booked, how = true, (r or {}).get("how")
+        if leg is not buy and close_exit(leg["t"]):
+            if (r or {}).get("trade_minutes_30", 0) >= settings.CLOSE_LIQUID_MINUTES:
+                how = f"close exit, liquid ({r['trade_minutes_30']}/30 min traded): mid ≈ {how}"
+            else:
+                booked = round(true - half, 2)
+                how = (f"close exit, thin ({(r or {}).get('trade_minutes_30', 0)}/30 min traded): "
+                       f"bid ≈ {true:.2f} - half the {spread:.2f} spread")
+        legs.append((leg["qty"], booked, true + sign * half, sign, leg["t"]))
+        booked_px.append((booked, how, true))
     mid = sum(-s * q * p * 100 for q, p, _, s, _ in legs)
     real = sum(-s * q * r * 100 for q, _, r, s, _ in legs)
     _, b_true, b_real, _, _ = legs[0]
     per_sale = [(ts, q, round(q * (r - b_real) * 100, 2), round(q * (p - b_true) * 100, 2)) for q, p, r, _, ts in legs[1:]]
-    return round(mid, 2), round(real, 2), fallbacks, per_sale
+    return round(mid, 2), round(real, 2), fallbacks, per_sale, booked_px
+
+
+def close_exit(t_iso) -> bool:
+    """A sale at the close (from CLOSE_EXIT_FROM ET, on days from CLOSE_RULE_FROM)."""
+    t = _ny(t_iso)
+    return t.date().isoformat() >= settings.CLOSE_RULE_FROM and (t.hour, t.minute) >= settings.CLOSE_EXIT_FROM
 
 
 def trade_entry(trade, day, lines, repriced=None):
@@ -159,7 +174,7 @@ def trade_entry(trade, day, lines, repriced=None):
     real = None
     if buy and buy["ask"] is not None and all(s["bid"] is not None for s in sells):
         real = round((sum(s["qty"] * s["bid"] for s in sells) - buy["qty"] * buy["ask"]) * 100, 2)
-    t_mid, t_real, fb, per_sale = _true_pnl(trade, buy, sells, repriced) if sells else (None, None, 0, [])
+    t_mid, t_real, fb, per_sale, booked_px = _true_pnl(trade, buy, sells, repriced) if sells else (None, None, 0, [], [])
     # Each sale's realized P&L, so a partial sale (the 2R trim) is booked on the day it
     # happens even when the rest is held overnight (2026-10-20, WMT).
     if per_sale:
@@ -174,10 +189,14 @@ def trade_entry(trade, day, lines, repriced=None):
                     for s in sells]
     notes = []
     if t_mid is not None:
-        for leg, ev in zip([buy] + sells, reprice.fills(trade)):
+        # "true" is the price the P&L books: the last traded price, except a sale at the
+        # close (mid if liquid, else the bid; CLOSE_RULE_FROM); "last_trade" keeps the 1-minute price.
+        for leg, ev, (booked, how, last) in zip([buy] + sells, reprice.fills(trade), booked_px):
             r = (repriced or {}).get(reprice.event_key(trade, ev))
-            leg["true"] = r["true"] if r else None
-            leg["true_how"] = r["how"] if r else None
+            leg["true"] = booked if r and r["true"] is not None else (r["true"] if r else None)
+            leg["true_how"] = how if r else None
+            if r and r["true"] is not None and booked != r["true"]:
+                leg["last_trade"] = r["true"]
     if fb:
         notes.append(f"{fb} fill(s) had no 1-minute trade nearby; priced at the recorded (delayed) quote")
     if src == "dry-run default":
