@@ -459,6 +459,32 @@ class ContractTest(unittest.TestCase):
         self.assertEqual([c[0] for c in closed], ["AMZN"])
         self.assertIn("earnings Thu 29 Oct AMC", closed[0][1])
 
+    def test_true_price(self):
+        from day_trading_setup.executor import reprice
+        NY = reprice.NY
+        m = lambda hh, mm: int(datetime(2026, 11, 9, hh, mm, tzinfo=NY).timestamp() * 1000)
+        opt = {m(9, 58): (6.0, 6.0), m(10, 15): (7.45, 7.45)}                     # DELL 372.5C, Nov 9
+        stock = {m(10, 10): (346.10, 347.43), m(10, 15): (350.80, 350.74), m(9, 58): (344.0, 344.2)}
+        fill = datetime(2026, 11, 9, 10, 10, 24, tzinfo=NY)
+        self.assertEqual(reprice.true_price(opt, fill)[0], 7.45)                     # old: unadjusted
+        px, how = reprice.true_price(opt, fill, stock, 0.25)
+        self.assertAlmostEqual(px, 6.28, places=2)                                   # 7.45 + 0.25 x (346.10 - 350.80)
+        self.assertIn("delta", how)
+        self.assertEqual(reprice.true_price({m(10, 10): (6.5, 6.6)}, fill, stock, 0.25)[0], 6.5)   # own minute: as traded
+        # nothing within 5 minutes: nearest within 30, adjusted (DELL exit: last trade 15:38)
+        opt2 = {m(15, 38): (5.97, 5.97)}
+        st2 = {m(15, 38): (346.9, 346.9), m(15, 55): (346.76, 346.70)}
+        exit_t = datetime(2026, 11, 9, 15, 55, 6, tzinfo=NY)
+        self.assertIsNone(reprice.true_price(opt2, exit_t)[0])
+        self.assertAlmostEqual(reprice.true_price(opt2, exit_t, st2, 0.25)[0], 5.94, places=2)
+        # a put: delta negative, stock up -> option down
+        self.assertAlmostEqual(reprice.true_price({m(10, 15): (3.0, 3.0)}, fill, stock, -0.3)[0], 4.41, places=2)
+        self.assertAlmostEqual(reprice.true_price(opt, fill, stock, 0.25, at=346.38)[0], 6.34, places=2)   # alert price
+        self.assertEqual(reprice.alert_price({"alert": "DTS: LRCX hit 2R target @ 221.12 - take partial"}), 221.12)
+        self.assertIsNone(reprice.alert_price({"alert": None}))
+        self.assertEqual(reprice.signed_delta({"right": "P", "delta": 0.3}), -0.3)
+        self.assertEqual(reprice.signed_delta({"right": "C", "delta": -0.3}), 0.3)
+
     def test_sessions(self):
         self.assertEqual(contracts.sessions_held(date(2026, 10, 15), date(2026, 10, 15)), 1)   # Thu
         self.assertEqual(contracts.sessions_held(date(2026, 10, 16), date(2026, 10, 19)), 2)   # Fri -> Mon
