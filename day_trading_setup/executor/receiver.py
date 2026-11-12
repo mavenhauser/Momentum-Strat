@@ -35,6 +35,8 @@ def load_secret():
 
 
 SECRET = load_secret()
+VENV_PYTHON = settings.REPO / "venv" / "bin" / "python3"
+PYTHON = str(VENV_PYTHON) if VENV_PYTHON.exists() else sys.executable
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -74,10 +76,15 @@ class Handler(BaseHTTPRequestHandler):
                 row["redelivered_from"] = refired
             f.write(json.dumps(row) + "\n")
         log.info("alert: %s%s", message, f" (re-sent by the missed-alert backup, fired {refired})" if refired else "")
-        subprocess.Popen([sys.executable, "-m", "day_trading_setup.executor.executor",
-                          "--message", message, "--received", received],
-                         cwd=str(settings.REPO), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
+        # The project's venv Python, not sys.executable: under launchd, after a restart on
+        # 2026-11-11, sys.executable was the framework Python without the venv's packages,
+        # so entries (which need tastytrade) crashed silently. Output goes to a log, not
+        # /dev/null, so a crash like that is visible.
+        with open(settings.LOG_DIR / "dts_executor_spawn.log", "a") as out:
+            subprocess.Popen([PYTHON, "-m", "day_trading_setup.executor.executor",
+                              "--message", message, "--received", received],
+                             cwd=str(settings.REPO), stdout=out, stderr=subprocess.STDOUT,
+                             start_new_session=True)
         self._reply(200, "ok")
 
     def log_message(self, fmt, *args):   # route http.server's own logging through ours
@@ -89,6 +96,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
                         handlers=[logging.FileHandler(settings.LOG_DIR / "dts_receiver.log"), logging.StreamHandler()])
     server = ThreadingHTTPServer((settings.RECEIVER_HOST, settings.RECEIVER_PORT), Handler)
+    log.info("executor runs with %s", PYTHON)
     log.info("listening on %s:%s (%s)", settings.RECEIVER_HOST, settings.RECEIVER_PORT,
              "PAPER orders" if settings.EXECUTE else "dry run")
     server.serve_forever()
