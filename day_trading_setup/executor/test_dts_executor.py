@@ -578,5 +578,65 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(journal._exit_kind({"action": "SELL 1 @ 9.0 (TradingView WEAK @ 410.1)"}), "WEAK")
 
 
+class BackfillTest(unittest.TestCase):
+    """Missed-alert backup (Nov 11: AVGO's 14:20 STOP webhook failed on TradingView's side)."""
+    NY = __import__("zoneinfo").ZoneInfo("America/New_York")
+    STOP = "DTS: EXIT LONG AVGO (STOP) @ 349.52"
+    TRAIL = "DTS: EXIT LONG DELL (TRAIL) @ 376.54"
+
+    def _fire(self, fid, utc, msg, ok=True):
+        return {"fire_id": fid, "fire_time": utc, "message": msg, "webhook_ok": ok,
+                "webhook_error": None if ok else "something went wrong"}
+
+    def _now(self, h, m, s=0):
+        return datetime(2026, 11, 11, h, m, s, tzinfo=self.NY)
+
+    def test_failed_stop_is_found_and_delivered_one_is_not(self):
+        from day_trading_setup.executor import backfill
+        fires = [self._fire(1, "2026-11-11T19:20:00Z", self.STOP, ok=False),
+                 self._fire(2, "2026-11-11T19:45:01Z", self.TRAIL)]
+        inbox = [{"received": "2026-11-11T14:45:09.756-05:00", "message": self.TRAIL}]
+        got = backfill.missed(fires, inbox, {}, self._now(14, 46))
+        self.assertEqual([f["fire_id"] for f in got], [1])
+        self.assertEqual(backfill.decide(got[0], self._now(14, 46)), "send")
+
+    def test_not_resent_twice_and_waits_for_normal_delivery(self):
+        from day_trading_setup.executor import backfill
+        fires = [self._fire(1, "2026-11-11T19:20:00Z", self.STOP, ok=False)]
+        self.assertEqual(backfill.missed(fires, [], {"1": {}}, self._now(14, 30)), [])
+        self.assertEqual(backfill.missed(fires, [], {}, self._now(14, 20, 30)), [])     # under a minute old
+        self.assertEqual(len(backfill.missed(fires, [], {}, self._now(14, 21, 5))), 1)
+
+    def test_same_message_twice_needs_two_inbox_lines(self):
+        from day_trading_setup.executor import backfill
+        msg = "DTS: A+ OUTSIDE LONG AVGO @ 354.80 - watch for the 8 EMA retest entry"
+        fires = [self._fire(1, "2026-11-11T17:00:00Z", msg), self._fire(2, "2026-11-11T17:05:00Z", msg)]
+        inbox = [{"received": "2026-11-11T12:00:01-05:00", "message": msg}]
+        got = backfill.missed(fires, inbox, {}, self._now(12, 30))
+        self.assertEqual([f["fire_id"] for f in got], [2])
+        self.assertEqual(backfill.decide(got[0], self._now(12, 30)), "ignore")          # watch alerts aren't re-sent
+
+    def test_other_days_and_non_dts_fires_are_skipped(self):
+        from day_trading_setup.executor import backfill
+        fires = [self._fire(1, "2026-11-10T19:20:00Z", self.STOP, ok=False),
+                 self._fire(2, "2026-11-11T19:20:00Z", "DTS Screener updated", ok=False)]
+        self.assertEqual(backfill.missed(fires, [], {}, self._now(14, 30)), [])
+
+    def test_entries_only_while_fresh(self):
+        from day_trading_setup.executor import backfill
+        e = self._fire(1, "2026-11-11T16:25:31Z", "DTS: LONG AVGO @ 353.38 | stop 349.52 | target 361.10 (2R) | "
+                       "PMH breakout + 8 EMA retest | grade A OUTSIDE", ok=False)
+        self.assertEqual(backfill.decide(e, self._now(11, 28)), "send")
+        self.assertEqual(backfill.decide(e, self._now(11, 40)), "late entry")
+        self.assertEqual(backfill.decide(self._fire(2, "2026-11-11T16:25:31Z", self.STOP), self._now(15, 50)), "send")
+
+    def test_active_hours(self):
+        from day_trading_setup.executor import backfill
+        self.assertTrue(backfill.active(self._now(15, 58)))
+        self.assertFalse(backfill.active(self._now(16, 15)))
+        self.assertFalse(backfill.active(self._now(9, 20)))
+        self.assertFalse(backfill.active(datetime(2026, 11, 14, 11, 0, tzinfo=self.NY)))  # Saturday
+
+
 if __name__ == "__main__":
     unittest.main()

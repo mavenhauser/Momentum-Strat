@@ -11,7 +11,7 @@ state/dts_positions.json, a file lock so alerts are handled one at a time in
 arrival order.
 
   python -m day_trading_setup.executor.executor --message "DTS: LONG NVDA @ ..."
-  python -m day_trading_setup.executor.executor --sweep    # 15:56 ET safety close
+  python -m day_trading_setup.executor.executor --sweep    # every minute: missed-alert backup, retries, 15:56 ET safety close
   python -m day_trading_setup.executor.executor --status
 
 Dry run unless DTS_EXECUTE=1: contract choice, sizing and quotes are real, no
@@ -707,6 +707,11 @@ def main(argv=None):
     settings.STATE_DIR.mkdir(parents=True, exist_ok=True)
 
     if a.sweep:
+        try:                                       # missed-alert backup (2026-11-11), before the lock:
+            from day_trading_setup.executor import backfill   # a re-sent alert queues behind this sweep
+            backfill.run(now_ny(), notify)
+        except Exception as e:
+            log.warning("missed-alert backup failed: %s: %s", type(e).__name__, e)
         prefetch_results(datetime.fromisoformat(a.received).astimezone(NY) if a.received else now_ny())
     with open(settings.LOCK_FILE, "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)          # one alert at a time, in arrival order

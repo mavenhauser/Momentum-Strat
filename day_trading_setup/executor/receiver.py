@@ -59,17 +59,21 @@ class Handler(BaseHTTPRequestHandler):
         if n <= 0 or n > MAX_BODY:
             return self._reply(400, "bad length")
         raw = self.rfile.read(n).decode("utf-8", "replace").strip()
-        message = raw
+        message, refired = raw, None
         if raw.startswith("{"):                       # tolerate a JSON body {"message": ...}
             try:
-                message = json.loads(raw).get("message", raw)
+                body = json.loads(raw)
+                message, refired = body.get("message", raw), body.get("redelivered_from")
             except ValueError:
                 pass
         received = datetime.now(NY).isoformat()
         settings.STATE_DIR.mkdir(parents=True, exist_ok=True)
         with open(settings.INBOX_FILE, "a") as f:
-            f.write(json.dumps({"received": received, "message": message}) + "\n")
-        log.info("alert: %s", message)
+            row = {"received": received, "message": message}
+            if refired:                               # re-sent by the missed-alert backup (backfill.py)
+                row["redelivered_from"] = refired
+            f.write(json.dumps(row) + "\n")
+        log.info("alert: %s%s", message, f" (re-sent by the missed-alert backup, fired {refired})" if refired else "")
         subprocess.Popen([sys.executable, "-m", "day_trading_setup.executor.executor",
                           "--message", message, "--received", received],
                          cwd=str(settings.REPO), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

@@ -525,6 +525,19 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
 - **Safety sweep** (`--sweep`, every minute, acts from 15:56 ET): closes any
   option expiring that day and anything held 2 sessions whose `TIME` alert
   never arrived.
+- **Missed-alert backup** (since 2026-11-11, `backfill.py`, run by the sweep
+  every minute 09:30–16:10 ET): reads TradingView's alert fire log from the
+  desktop app (debugging port 9222, via `tv_fires.mjs`) and compares it with
+  `state/dts_alert_inbox.jsonl`. A DTS fire that never arrived (at least 60 s
+  old, no inbox line with the same message from 2 min before to 10 min after)
+  is sent to the receiver now, marked `redelivered_from` in the inbox: exits,
+  2R/4R sales and strong-close notes always, entries only within 5 minutes of
+  the fire (older ones get a MISSED ENTRY message and are not bought). Each
+  re-send gets an ALERT RECOVERED message and is remembered in
+  `state/dts_backfill.json`. If the fire log can't be read, one BACKUP OFF
+  message a day. Why: on Nov 11 TradingView fired AVGO's 14:20 STOP but its
+  webhook failed on TradingView's side, and the call was held to the 15:56
+  sweep (−$1,208 instead of about −$600). Off with `DTS_BACKFILL=0`.
 - **Notifications:** every action goes to the Telegram chat in `.env`.
 - **Paper only:** it refuses to start unless `IBKR_PORT` is 7497 or 4002.
 
@@ -558,7 +571,7 @@ venv/bin/python3 -m day_trading_setup.executor.executor --status
 |---|---|
 | `com.jameswoo.dts-receiver` | The webhook receiver, always on. Log: `logs/dts_receiver.log`. |
 | `com.jameswoo.dts-tunnel` | ngrok to port 8090, always on. Log: `~/.dts-executor/dts-tunnel.log`. Uses the static ngrok address that the SPX project's (currently stopped) tunnel also uses, so only one of the two can be online. |
-| `com.jameswoo.dts-sweep` | The 15:56 ET safety sweep, every minute. |
+| `com.jameswoo.dts-sweep` | Every minute: the missed-alert backup (09:30–16:10 ET), retries, and the 15:56 ET safety sweep. |
 | `com.jameswoo.dts-keepawake` | Keeps the Mac awake Mon–Fri 09:10–16:10 New York time (`caffeinate`), checked every 2 minutes. Script: `scripts/dts_keepawake.sh`, installed copy in `~/.dts-executor/`. Log: `~/.dts-executor/keepawake.log`. It cannot stop sleep when the lid is closed (unless an external display is attached), only prevents system sleep on AC power, and cannot wake a Mac that is already asleep: for that, `sudo pmset repeat wake MTWRF 21:05:00` (Singapore time for 09:05 ET in daylight time; 22:05 from Nov 2). |
 
 The URL secret is in `~/.dts-executor/secret` (owner-only). The daily

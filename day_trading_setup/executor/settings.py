@@ -26,6 +26,18 @@ RECEIVER_HOST = "127.0.0.1"
 RECEIVER_PORT = 8090
 SECRET_FILE = Path.home() / ".dts-executor" / "secret"
 
+# Missed-alert backup (2026-11-11, user decision; see backfill.py): each minute in
+# the session the sweep reads TradingView's alert fire log and re-sends any DTS fire
+# the receiver never got (Nov 11: AVGO's 14:20 STOP webhook failed on TradingView's
+# side and the call was held to the 15:56 sweep). Entries are re-sent only while
+# fresh; exits and 2R sales always.
+BACKFILL = os.getenv("DTS_BACKFILL", "1") == "1"
+BACKFILL_FROM = (9, 30)
+BACKFILL_UNTIL = (16, 10)          # a few minutes past the close, for the 15:55 exits
+BACKFILL_MIN_AGE_S = 60            # leave a normal delivery time to land first
+BACKFILL_ENTRY_MAX_MIN = 5         # older missed entries are reported, not bought
+BACKFILL_STATE_FILE = STATE_DIR / "dts_backfill.json"
+
 IBKR_CLIENT_ID = 47          # SPX scalp = 1, Momentum Strategy = 45
 PAPER_PORTS = (7497, 4002)   # same hard guard as the Momentum trader
 
