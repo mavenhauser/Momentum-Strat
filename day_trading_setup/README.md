@@ -538,6 +538,15 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
   message a day. Why: on Nov 11 TradingView fired AVGO's 14:20 STOP but its
   webhook failed on TradingView's side, and the call was held to the 15:56
   sweep (−$1,208 instead of about −$600). Off with `DTS_BACKFILL=0`.
+- **Time limit test** (from 2026-11-12, report only, nothing is sold): two
+  hours after entry, a trade with no sale yet (not at 2R) whose option trades
+  below the entry price would be sold. `reprice.py` prices that moment from
+  1-minute candles (key `<ticker>|<opened_at>|TL120`) and the journal adds
+  `time_limit` to each checked trade, `summary.time_limit_test` (P&L with the
+  rule vs without) and a day note. Replay Oct 14–Nov 11 (197 trades): +$8.4k on
+  +$58.6k, positive in both halves; selling every not-yet-2R trade at 30–60 min
+  lost $11–28k. Reviewed the weekend of Nov 14 on Nov 12–13; live from Nov 16
+  only if confirmed (`TIME_LIMIT_MIN`, `TIME_LIMIT_TEST_FROM` in settings).
 - **Notifications:** every action goes to the Telegram chat in `.env`.
 - **Paper only:** it refuses to start unless `IBKR_PORT` is 7497 or 4002.
 

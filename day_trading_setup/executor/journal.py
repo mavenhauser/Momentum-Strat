@@ -203,7 +203,9 @@ def trade_entry(trade, day, lines, repriced=None):
         notes.append("sized off the $100k placeholder (IBKR not connected), about a tenth of that day's normal size")
     if buy and buy.get("source") == "IBKR" and buy["t"] < "2026-10-14T10:21":
         notes.append("entry priced off IBKR's 15-minute-delayed quote")
+    tl = time_limit_test(trade, buy, repriced)
     return {
+        "time_limit": tl,
         "ticker": trade["ticker"], "side": trade["side"], "right": trade["right"], "strike": trade["strike"],
         "expiry": trade["expiry"], "qty": trade["qty"], "level": trade.get("level"),
         "tv_entry": trade.get("tv_entry"), "tv_stop": trade.get("tv_stop"), "tv_target": trade.get("tv_target"),
@@ -222,6 +224,46 @@ def trade_entry(trade, day, lines, repriced=None):
         "grade": trade.get("grade"), "size_fraction": trade.get("size_fraction"),
         "legs": legs_out,
     }
+
+
+def time_limit_test(trade, buy, repriced):
+    """The time-limit test for one trade (report only): None if it doesn't apply (opened
+    before TIME_LIMIT_TEST_FROM, sold before the checkpoint, or the checkpoint falls at the
+    close), else {"at", "price", "entry", "sell" (would be sold: option below the entry
+    price), "pnl_real" (with the rule, set by build_day once the real P&L is known)}."""
+    ev = reprice.time_limit_check(trade)
+    if not ev or not buy:
+        return None
+    r = (repriced or {}).get(reprice.event_key(trade, ev))
+    entry = buy.get("true") if buy.get("true") is not None else buy.get("price")
+    out = {"at": _hm(_ny(ev["t"]), _ny(ev["t"]).date()), "price": r["true"] if r else None, "entry": entry,
+           "sell": None, "pnl_if_sold": None}
+    if r and r["true"] is not None and entry is not None:
+        out["sell"] = r["true"] < entry
+        out["pnl_if_sold"] = round(trade["qty"] * (r["true"] - entry) * 100, 2)
+    return out
+
+
+def time_limit_summary(trades):
+    """Day totals for the time-limit test, or None when no trade was checked."""
+    checked = [t for t in trades if t.get("time_limit")]
+    if not checked:
+        return None
+    real = sum(t["pnl_real"] or 0 for t in trades)
+    with_rule = real
+    cut = []
+    for t in checked:
+        tl = t["time_limit"]
+        if tl["sell"]:
+            # the whole position goes at the checkpoint; a trade sold across days is
+            # booked in full here (time-limit sales happen on the entry day)
+            whole = t.get("pnl_trade_real", t["pnl_real"]) or 0
+            with_rule += tl["pnl_if_sold"] - whole
+            cut.append(t)
+        tl["pnl_real"] = tl["pnl_if_sold"] if tl["sell"] else t["pnl_real"]
+    return {"minutes": settings.TIME_LIMIT_MIN, "checked": len(checked), "unpriced": sum(1 for t in checked if t["time_limit"]["sell"] is None),
+            "would_sell": len(cut), "would_sell_tickers": [t["ticker"] for t in cut],
+            "pnl_real": round(real, 2), "pnl_with_rule": round(with_rule, 2), "change": round(with_rule - real, 2)}
 
 
 def build_day(day, mode="dry"):
@@ -276,6 +318,14 @@ def build_day(day, mode="dry"):
     best = max(trades, key=lambda t: t["pnl_real"] if t["pnl_real"] is not None else -1e18, default=None)
     worst = min(trades, key=lambda t: t["pnl_real"] if t["pnl_real"] is not None else 1e18, default=None)
     accounts = [t["account"] for t in trades if t["account"] and t["sized_off"] in ("IBKR", "notional")]
+    tls = time_limit_summary(trades)
+    notes = []
+    if tls:
+        names = ", ".join(tls["would_sell_tickers"]) or "none"
+        notes.append(f"Time limit test ({tls['minutes'] // 60} h, not traded): {tls['checked']} trade(s) still short of 2R at the "
+                     f"{tls['minutes'] // 60}-hour mark, {tls['would_sell']} below the entry price would have been sold ({names}); "
+                     f"P&L with the rule ${tls['pnl_with_rule']:,.0f} vs ${tls['pnl_real']:,.0f} ({tls['change']:+,.0f})"
+                     + (f"; {tls['unpriced']} not priced yet" if tls["unpriced"] else "") + ".")
     return {
         "date": day.isoformat(),
         "mode": "PAPER" if mode == "paper" else "DRY RUN",
@@ -289,9 +339,10 @@ def build_day(day, mode="dry"):
             "best": {"ticker": best["ticker"], "pnl_real": best["pnl_real"]} if best else None,
             "worst": {"ticker": worst["ticker"], "pnl_real": worst["pnl_real"]} if worst else None,
             "skipped": len(skipped), "errors": len(errors), "open": len(still_open),
+            "time_limit_test": tls,
         },
         "trades": trades, "open": still_open, "skipped": skipped, "errors": errors,
-        "notes": [], "generated_at": datetime.now(NY).isoformat(timespec="seconds"),
+        "notes": notes, "generated_at": datetime.now(NY).isoformat(timespec="seconds"),
     }
 
 

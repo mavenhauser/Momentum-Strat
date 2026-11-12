@@ -638,5 +638,36 @@ class BackfillTest(unittest.TestCase):
         self.assertFalse(backfill.active(datetime(2026, 11, 14, 11, 0, tzinfo=self.NY)))  # Saturday
 
 
+class TimeLimitTestTest(unittest.TestCase):
+    """2-hour time limit, report only (user decision 2026-11-11)."""
+    def _trade(self, opened, sells=()):
+        ev = [{"t": opened, "action": "BUY 4 @ 2.0", "qty": 4, "price": 2.0}]
+        ev += [{"t": t, "action": f"SELL {q} @ 3.0 ({why})", "qty": q, "price": 3.0} for t, q, why in sells]
+        return {"ticker": "MU", "opened_at": opened, "qty": 4, "events": ev}
+
+    def test_checkpoint_two_hours_after_entry(self):
+        from day_trading_setup.executor import reprice
+        with mock.patch.object(settings, "TIME_LIMIT_TEST_FROM", "2026-11-11"):
+            ev = reprice.time_limit_check(self._trade("2026-11-12T11:20:58-05:00", [("2026-11-12T15:55:04-05:00", 4, "TradingView EOD")]))
+            self.assertEqual(ev["t"][11:16], "13:20")
+            self.assertEqual(reprice.event_key(self._trade("2026-11-12T11:20:58-05:00"), ev), "MU|2026-11-12T11:20:58-05:00|TL120")
+
+    def test_no_checkpoint_after_a_sale_late_entry_or_before_the_test(self):
+        from day_trading_setup.executor import reprice
+        with mock.patch.object(settings, "TIME_LIMIT_TEST_FROM", "2026-11-12"):
+            self.assertIsNone(reprice.time_limit_check(self._trade("2026-11-12T10:00:00-05:00", [("2026-11-12T11:00:00-05:00", 2, "2R trim")])))
+            self.assertIsNone(reprice.time_limit_check(self._trade("2026-11-12T14:00:00-05:00")))   # 16:00 is past the close rule
+            self.assertIsNone(reprice.time_limit_check(self._trade("2026-11-11T10:00:00-05:00")))   # before the test starts
+
+    def test_summary_sells_only_losing_trades(self):
+        from day_trading_setup.executor import journal
+        trades = [{"ticker": "META", "pnl_real": -360.0, "time_limit": {"sell": True, "pnl_if_sold": -292.0}},
+                  {"ticker": "AMD", "pnl_real": -110.0, "time_limit": {"sell": False, "pnl_if_sold": 690.0}},
+                  {"ticker": "MSFT", "pnl_real": 2546.0, "time_limit": None}]
+        s = journal.time_limit_summary(trades)
+        self.assertEqual((s["checked"], s["would_sell"], s["pnl_real"], s["pnl_with_rule"], s["change"]), (2, 1, 2076.0, 2144.0, 68.0))
+        self.assertIsNone(journal.time_limit_summary([trades[2]]))
+
+
 if __name__ == "__main__":
     unittest.main()

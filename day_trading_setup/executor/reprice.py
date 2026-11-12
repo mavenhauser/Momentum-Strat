@@ -61,7 +61,26 @@ def fills(trade):
 
 
 def event_key(trade, ev):
+    if ev.get("action") == "CHECK":
+        return f"{trade['ticker']}|{trade['opened_at']}|TL{settings.TIME_LIMIT_MIN}"
     return f"{trade['ticker']}|{ev['t']}"
+
+
+def time_limit_check(trade):
+    """The time-limit test's checkpoint for a trade (TIME_LIMIT_MIN after entry), as a
+    pseudo-event to price like a fill, or None: only for trades opened from
+    TIME_LIMIT_TEST_FROM, with no sale before the checkpoint, and the checkpoint the same
+    day before CLOSE_EXIT_FROM (after that the trade is sold at the close anyway)."""
+    if not trade.get("opened_at") or trade["opened_at"][:10] < settings.TIME_LIMIT_TEST_FROM:
+        return None
+    opened = datetime.fromisoformat(trade["opened_at"]).astimezone(NY)
+    at = opened + timedelta(minutes=settings.TIME_LIMIT_MIN)
+    if at.date() != opened.date() or (at.hour, at.minute) >= settings.CLOSE_EXIT_FROM:
+        return None
+    sells = [ev for ev in fills(trade) if ev["action"].startswith("SELL")]
+    if sells and min(datetime.fromisoformat(ev["t"]) for ev in sells) <= at:
+        return None
+    return {"t": at.isoformat(), "action": "CHECK"}
 
 
 async def _candles(symbols, start):
@@ -179,6 +198,7 @@ def run(mode="dry", since="2026-10-14T09:30", redo=None):
         return ev["t"][:10] >= RETRY_FROM
 
     todo = [(t, ev) for t in trades for ev in fills(t) if due(ev, event_key(t, ev))]
+    todo += [(t, ev) for t in trades for ev in [time_limit_check(t)] if ev and due(ev, event_key(t, ev))]
     if not todo:
         return done, 0
     symbols = sorted({streamer_symbol(t) for t, _ in todo} | {t["ticker"] for t, _ in todo})
@@ -192,7 +212,8 @@ def run(mode="dry", since="2026-10-14T09:30", redo=None):
         traded = sum(1 for m in bars[streamer_symbol(t)] if minute - 29 * 60000 <= m <= minute)
         done[event_key(t, ev)] = {"symbol": streamer_symbol(t), "true": price, "how": how, "spread": spread,
                                   "trade_minutes_30": traded,
-                                  "recorded": ev.get("price"), "side": "BUY" if ev["action"].startswith("BUY") else "SELL",
+                                  "recorded": ev.get("price"),
+                                  "side": "CHECK" if ev["action"] == "CHECK" else "BUY" if ev["action"].startswith("BUY") else "SELL",
                                   "priced_at": now.isoformat(timespec="seconds")}
     path.write_text(json.dumps(done, indent=1))
     return done, len(todo)

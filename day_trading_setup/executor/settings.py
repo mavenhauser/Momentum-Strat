@@ -96,6 +96,15 @@ REPRICE_FROM = "2026-10-16"
 CLOSE_RULE_FROM = "2026-11-09"
 CLOSE_EXIT_FROM = (15, 50)
 CLOSE_LIQUID_MINUTES = 15
+# Time limit TEST (user decision, 2026-11-11; report only, nothing is sold): two hours
+# after entry, a trade that has not reached 2R (no sale yet) and whose option is below
+# the entry price would be sold. reprice.py prices that moment from 1-minute candles and
+# the journal shows the day's P&L with the rule beside the real one. Replay Oct 14-Nov 11
+# (197 trades): +$8.4k vs +$58.6k, positive in both halves (Oct +$5.7k, Nov +$2.7k);
+# selling every not-yet-2R trade at 2 h was +$6.9k, at 30-60 min -$11k to -$28k.
+# To be reviewed the weekend of Nov 14 on Nov 12-13; if confirmed, live from Nov 16.
+TIME_LIMIT_MIN = 120
+TIME_LIMIT_TEST_FROM = "2026-11-12"
 # Closed trades from this time on get a RESULT message with the confirmed P&L
 # (CLOSED messages no longer carry a P&L - the live quotes are delayed).
 RESULTS_FROM = "2026-10-19T09:30"
