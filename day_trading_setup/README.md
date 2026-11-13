@@ -547,14 +547,6 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
   +$58.6k, positive in both halves; selling every not-yet-2R trade at 30–60 min
   lost $11–28k. Reviewed the weekend of Nov 14 on Nov 12–13; live from Nov 16
   only if confirmed (`TIME_LIMIT_MIN`, `TIME_LIMIT_TEST_FROM` in settings).
-- **Option peak** (from 2026-11-09, record only, nothing is sold): for each
-  closed trade `reprice.py` records the option's best 1-minute open/close from
-  entry to the last sale and when (key `<ticker>|<opened_at>|PEAK`, plus the
-  low), and the journal adds `peak` to each trade (price, time, % over the
-  entry, P&L if the whole position had been sold there), `summary.option_peak`
-  and an "Option peaks" day note. Why: on Nov 12 GOOGL 300C went 1.99 -> 4.25
-  by 12:54 (+$11.1k on 49) without the stock reaching 2R and was sold at the
-  close for +$882. Candle fetches go in batches of 14 symbols (`CANDLE_BATCH`).
 - **Notifications:** every action goes to the Telegram chat in `.env`.
 - **Paper only:** it refuses to start unless `IBKR_PORT` is 7497 or 4002.
 

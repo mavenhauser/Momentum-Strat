@@ -206,7 +206,6 @@ def trade_entry(trade, day, lines, repriced=None):
     tl = time_limit_test(trade, buy, repriced)
     return {
         "time_limit": tl,
-        "peak": option_peak(trade, buy, repriced),
         "ticker": trade["ticker"], "side": trade["side"], "right": trade["right"], "strike": trade["strike"],
         "expiry": trade["expiry"], "qty": trade["qty"], "level": trade.get("level"),
         "tv_entry": trade.get("tv_entry"), "tv_stop": trade.get("tv_stop"), "tv_target": trade.get("tv_target"),
@@ -243,46 +242,6 @@ def time_limit_test(trade, buy, repriced):
         out["sell"] = r["true"] < entry
         out["pnl_if_sold"] = round(trade["qty"] * (r["true"] - entry) * 100, 2)
     return out
-
-
-def option_peak(trade, buy, repriced):
-    """The option's best 1-minute price between entry and exit (record only; user,
-    2026-11-12): {"price", "at", "entry", "pct", "pnl_at_peak" (the whole position sold
-    there), "low", "low_at"}, or None (open trade, before PEAK_FROM, not priced yet)."""
-    ev = reprice.peak_check(trade)
-    if not ev or not buy:
-        return None
-    r = (repriced or {}).get(reprice.event_key(trade, ev))
-    entry = buy.get("true") if buy.get("true") is not None else buy.get("price")
-    if not r or r.get("true") is None or not entry:
-        return None
-    hm = lambda iso: _hm(_ny(iso), _ny(trade["opened_at"]).date())
-    return {"price": r["true"], "at": hm(r["at"]), "entry": entry,
-            "pct": round((r["true"] / entry - 1) * 100, 1),
-            "pnl_at_peak": round(trade["qty"] * (r["true"] - entry) * 100, 2),
-            "low": r.get("low"), "low_at": hm(r["low_at"]) if r.get("low_at") else None}
-
-
-def peak_summary(trades):
-    """Day totals of the option peaks, or None when no trade has one."""
-    rec = [t for t in trades if t.get("peak")]
-    if not rec:
-        return None
-    return {"trades": len(rec), "pnl_at_peaks": round(sum(t["peak"]["pnl_at_peak"] for t in rec), 2),
-            "pnl_real": round(sum(t.get("pnl_trade_real", t["pnl_real"]) or 0 for t in rec), 2)}
-
-
-def peak_note(trades):
-    rec = sorted([t for t in trades if t.get("peak")], key=lambda t: -t["peak"]["pnl_at_peak"])
-    if not rec:
-        return None
-    parts = []
-    for t in rec:
-        p = t["peak"]
-        booked = t.get("pnl_trade_real", t["pnl_real"])
-        parts.append(f"{t['ticker']} {t['strike']:g}{t['right']} {p['entry']:.2f} -> {p['price']:.2f} at {p['at']} ET "
-                     f"({p['pct']:+.0f}%, ${p['pnl_at_peak']:+,.0f} if all sold there; booked ${booked or 0:+,.0f})")
-    return "Option peaks (best 1-minute price between entry and exit, record only): " + "; ".join(parts) + "."
 
 
 def time_limit_summary(trades):
@@ -367,9 +326,6 @@ def build_day(day, mode="dry"):
                      f"{tls['minutes'] // 60}-hour mark, {tls['would_sell']} below the entry price would have been sold ({names}); "
                      f"P&L with the rule ${tls['pnl_with_rule']:,.0f} vs ${tls['pnl_real']:,.0f} ({tls['change']:+,.0f})"
                      + (f"; {tls['unpriced']} not priced yet" if tls["unpriced"] else "") + ".")
-    pk = peak_summary(trades)
-    if pk:
-        notes.append(peak_note(trades))
     return {
         "date": day.isoformat(),
         "mode": "PAPER" if mode == "paper" else "DRY RUN",
@@ -384,7 +340,6 @@ def build_day(day, mode="dry"):
             "worst": {"ticker": worst["ticker"], "pnl_real": worst["pnl_real"]} if worst else None,
             "skipped": len(skipped), "errors": len(errors), "open": len(still_open),
             "time_limit_test": tls,
-            "option_peak": pk,
         },
         "trades": trades, "open": still_open, "skipped": skipped, "errors": errors,
         "notes": notes, "generated_at": datetime.now(NY).isoformat(timespec="seconds"),

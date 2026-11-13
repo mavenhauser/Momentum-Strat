@@ -21,10 +21,6 @@ the candles cover 5 minutes past it (DELAY + WINDOW): LRCX's 2R sale on Nov 9
 was priced at 15:37, when the candles still ended near 15:22, and fell back to
 the delayed quote; fills left without a price are retried on later runs.
 
-Each closed trade from PEAK_FROM also gets its option peak, keyed
-"<ticker>|<opened_at>|PEAK": the highest 1-minute open or close from the entry
-minute to the last sale, and when (record only; user, 2026-11-12).
-
 Results go to state/dts_reprice_<mode>.json keyed by "<ticker>|<event time>", which
 journal.py reads. Re-running only fetches events that are not priced yet.
 
@@ -66,8 +62,6 @@ def fills(trade):
 
 
 def event_key(trade, ev):
-    if ev.get("action") == "PEAK":
-        return f"{trade['ticker']}|{trade['opened_at']}|PEAK"
     if ev.get("action") == "CHECK":
         return f"{trade['ticker']}|{trade['opened_at']}|TL{settings.TIME_LIMIT_MIN}"
     return f"{trade['ticker']}|{ev['t']}"
@@ -88,31 +82,6 @@ def time_limit_check(trade):
     if sells and min(datetime.fromisoformat(ev["t"]) for ev in sells) <= at:
         return None
     return {"t": at.isoformat(), "action": "CHECK"}
-
-
-def peak_check(trade):
-    """The option-peak record for a closed trade as a pseudo-event at its last sale
-    (priced once that sale's candles are complete), or None: open trades, trades
-    opened before PEAK_FROM, or no fills."""
-    if not trade.get("closed_at") or not trade.get("opened_at") or trade["opened_at"][:10] < settings.PEAK_FROM:
-        return None
-    if not fills(trade):
-        return None
-    return {"t": trade["closed_at"], "action": "PEAK", "from": trade["opened_at"]}
-
-
-def option_peak(bars, start, end):
-    """(peak, peak minute ms, low, low minute ms, minutes traded) from 1-minute
-    {minute: (open, close)} between the minutes of start and end (inclusive), or None."""
-    lo_m = int(start.timestamp() * 1000) // 60000 * 60000
-    hi_m = int(end.timestamp() * 1000) // 60000 * 60000
-    inside = sorted((m, oc) for m, oc in bars.items() if lo_m <= m <= hi_m)
-    if not inside:
-        return None
-    pts = [(px, m) for m, oc in inside for px in oc]
-    peak = max(pts, key=lambda p: (p[0], -p[1]))
-    low = min(pts, key=lambda p: (p[0], p[1]))
-    return peak[0], peak[1], low[0], low[1], len(inside)
 
 
 async def _candles(symbols, start):
@@ -231,26 +200,16 @@ def run(mode="dry", since="2026-10-14T09:30", redo=None):
 
     todo = [(t, ev) for t in trades for ev in fills(t) if due(ev, event_key(t, ev))]
     todo += [(t, ev) for t in trades for ev in [time_limit_check(t)] if ev and due(ev, event_key(t, ev))]
-    todo += [(t, ev) for t in trades for ev in [peak_check(t)] if ev and due(ev, event_key(t, ev))]
     if not todo:
         return done, 0
     symbols = sorted({streamer_symbol(t) for t, _ in todo} | {t["ticker"] for t, _ in todo})
-    start = min(datetime.fromisoformat(ev.get("from", ev["t"])) for _, ev in todo).astimezone(NY).replace(hour=9, minute=30, second=0, microsecond=0)
+    start = min(datetime.fromisoformat(ev["t"]) for _, ev in todo).astimezone(NY).replace(hour=9, minute=30, second=0, microsecond=0)
     # TastyTrade refuses a candle subscription that is too big ("subscription size
     # ... too big", 2026-11-12 with a week of trades), so fetch in batches.
     bars = {}
     for i in range(0, len(symbols), CANDLE_BATCH):
         bars.update(asyncio.run(_candles(symbols[i:i + CANDLE_BATCH], start)))
-    iso_m = lambda m: datetime.fromtimestamp(m / 1000, NY).isoformat(timespec="minutes")
     for t, ev in todo:
-        if ev["action"] == "PEAK":
-            pk = option_peak(bars[streamer_symbol(t)], datetime.fromisoformat(ev["from"]), datetime.fromisoformat(ev["t"]))
-            done[event_key(t, ev)] = {"symbol": streamer_symbol(t), "side": "PEAK", "true": pk[0] if pk else None,
-                                      "at": iso_m(pk[1]) if pk else None, "low": pk[2] if pk else None,
-                                      "low_at": iso_m(pk[3]) if pk else None, "trade_minutes": pk[4] if pk else 0,
-                                      "how": "highest 1-minute open/close from entry to the last sale",
-                                      "priced_at": now.isoformat(timespec="seconds")}
-            continue
         price, how = true_price(bars[streamer_symbol(t)], datetime.fromisoformat(ev["t"]),
                                 bars.get(t["ticker"]), signed_delta(t), alert_price(ev))
         spread = (ev["ask"] - ev["bid"]) if ev.get("bid") is not None and ev.get("ask") is not None else None

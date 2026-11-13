@@ -105,12 +105,6 @@ CLOSE_LIQUID_MINUTES = 15
 # To be reviewed the weekend of Nov 14 on Nov 12-13; if confirmed, live from Nov 16.
 TIME_LIMIT_MIN = 120
 TIME_LIMIT_TEST_FROM = "2026-11-12"
-# Option peak (user, 2026-11-12: "record when the option premium moves"; GOOGL 300C went
-# 1.99 -> 3.90 by 13:05 without the stock reaching 2R and was sold at the close for 2.17).
-# Record only, nothing is traded on it: each closed trade's best 1-minute option price
-# between entry and exit, when, and the P&L if the whole position had been sold there.
-# From PEAK_FROM: older weeklies have expired and their candles are gone.
-PEAK_FROM = "2026-11-09"
 # Closed trades from this time on get a RESULT message with the confirmed P&L
 # (CLOSED messages no longer carry a P&L - the live quotes are delayed).
 RESULTS_FROM = "2026-10-19T09:30"
