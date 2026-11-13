@@ -207,7 +207,6 @@ def trade_entry(trade, day, lines, repriced=None):
     tl = time_limit_test(trade, buy, repriced)
     return {
         "time_limit": tl,
-        "ladder": ladder_test(trade, repriced),
         "ticker": trade["ticker"], "side": trade["side"], "right": trade["right"], "strike": trade["strike"],
         "expiry": trade["expiry"], "qty": trade["qty"], "level": trade.get("level"),
         "tv_entry": trade.get("tv_entry"), "tv_stop": trade.get("tv_stop"), "tv_target": trade.get("tv_target"),
@@ -352,7 +351,9 @@ def time_limit_summary(trades):
             "pnl_real": round(real, 2), "pnl_with_rule": round(with_rule, 2), "change": round(with_rule - real, 2)}
 
 
-def build_day(day, mode="dry"):
+def build_day(day, mode="dry", ladder=False):
+    """The day's journal document. ladder: add the premium ladder test (user, 2026-11-12:
+    kept off the journal, for the end-of-week review only)."""
     path = settings.STATE_FILE if mode == "paper" else settings.DRY_STATE_FILE
     state = json.loads(path.read_text()) if path.exists() else {"positions": {}, "closed": [], "skipped": []}
     lines = _log_lines()
@@ -365,6 +366,8 @@ def build_day(day, mode="dry"):
     for t in sorted([t for t in state["closed"] + list(state["positions"].values()) if real_entries(t)], key=lambda t: t["opened_at"]):
         closed_today = bool(t.get("closed_at")) and _ny(t["closed_at"]).date() == day
         e = trade_entry(t, day, lines, repriced)
+        if ladder:
+            e["ladder"] = ladder_test(t, repriced)
         today = [l for l in e["legs"] if _ny(l["t"]).date() == day]
         if not closed_today and not today:
             continue
@@ -412,7 +415,7 @@ def build_day(day, mode="dry"):
                      f"{tls['minutes'] // 60}-hour mark, {tls['would_sell']} below the entry price would have been sold ({names}); "
                      f"P&L with the rule ${tls['pnl_with_rule']:,.0f} vs ${tls['pnl_real']:,.0f} ({tls['change']:+,.0f})"
                      + (f"; {tls['unpriced']} not priced yet" if tls["unpriced"] else "") + ".")
-    lad = ladder_summary(trades)
+    lad = ladder_summary(trades) if ladder else None
     if lad:
         parts = [f"{name}: {v['reached_first_step']} of {lad['checked']} reached the first step, P&L ${v['pnl']:,.0f} ({v['change']:+,.0f})"
                  for name, v in lad["variants"].items()]
@@ -432,7 +435,7 @@ def build_day(day, mode="dry"):
             "worst": {"ticker": worst["ticker"], "pnl_real": worst["pnl_real"]} if worst else None,
             "skipped": len(skipped), "errors": len(errors), "open": len(still_open),
             "time_limit_test": tls,
-            "ladder_test": lad,
+            **({"ladder_test": lad} if ladder else {}),
         },
         "trades": trades, "open": still_open, "skipped": skipped, "errors": errors,
         "notes": notes, "generated_at": datetime.now(NY).isoformat(timespec="seconds"),
@@ -444,6 +447,7 @@ def main(argv=None):
     ap.add_argument("--date", default=datetime.now(NY).date().isoformat())
     ap.add_argument("--mode", choices=("dry", "paper"), default="paper" if settings.EXECUTE else "dry")
     ap.add_argument("--no-reprice", action="store_true", help="skip fetching 1-minute prices for new fills")
+    ap.add_argument("--ladder", action="store_true", help="add the premium ladder test (end-of-week review only, not the journal)")
     a = ap.parse_args(argv)
     if not a.no_reprice:
         try:
@@ -451,7 +455,7 @@ def main(argv=None):
         except Exception as e:              # journal still builds from what is already priced
             import sys
             print(f"reprice failed: {type(e).__name__}: {e}", file=sys.stderr)
-    print(json.dumps(build_day(date.fromisoformat(a.date), a.mode), indent=1, default=str))
+    print(json.dumps(build_day(date.fromisoformat(a.date), a.mode, a.ladder), indent=1, default=str))
 
 
 if __name__ == "__main__":
