@@ -669,5 +669,41 @@ class TimeLimitTestTest(unittest.TestCase):
         self.assertIsNone(journal.time_limit_summary([trades[2]]))
 
 
+class PremiumLadderTestTest(unittest.TestCase):
+    """Premium ladder, report only (user decision 2026-11-12: trim in steps as the option rises)."""
+    M = staticmethod(lambda hm: int(__import__("datetime").datetime.fromisoformat(f"2026-11-12T{hm}:00-05:00").timestamp() * 1000))
+    STEPS = [(25, 0.25), (50, 0.50), (75, 0.75), (100, 1.0)]
+
+    def test_steps_fill_at_their_price_and_the_stock_exit_sells_the_rest(self):
+        from day_trading_setup.executor import journal
+        m = self.M
+        bars = [[m("11:05"), 2.0, 2.1], [m("11:11"), 2.4, 2.55], [m("11:20"), 3.05, 2.9], [m("13:00"), 2.0, 1.9]]
+        pnl, hits = journal.ladder_pnl(self.STEPS, 2.0, 8, m("11:05"), [(m("15:55"), 8, 1.5)], bars)
+        # +25% (2.50) at 11:11: 2; +50% (3.00) at 11:20 opened above: 2 @ 3.05; rest 4 at the close 1.50
+        self.assertEqual([(g, q, p) for g, _, q, p in hits], [(25, 2, 2.5), (50, 2, 3.05)])
+        self.assertEqual(pnl, 2 * 50 + 2 * 105 + 4 * -50)
+
+    def test_trim_shares_and_last_step_sells_all(self):
+        from day_trading_setup.executor import journal
+        m = self.M
+        bars = [[m("10:01"), 1.0, 2.1]]
+        pnl, hits = journal.ladder_pnl(self.STEPS, 1.0, 4, m("10:00"), [(m("15:55"), 4, 0.5)], bars)
+        self.assertEqual([q for _, _, q, _ in hits], [1, 1, 1, 1])        # every step in one minute
+        # a 2R sale of half before any step: the stock exits sell the same share of the rest
+        pnl, hits = journal.ladder_pnl(self.STEPS, 1.0, 4, m("10:00"), [(m("10:30"), 2, 1.2), (m("15:55"), 2, 0.5)], [[m("10:45"), 1.3, 1.3]])
+        self.assertEqual((pnl, hits[0][2]), (2 * 20 + 1 * 30 + 1 * -50, 1))
+
+    def test_bars_kept_for_closed_trades_and_original_exit_used(self):
+        from day_trading_setup.executor import reprice
+        orig = {"t": "2026-11-12T15:55:04-05:00", "action": "SELL 4 @ 9.0 (TradingView EOD)", "qty": 4, "price": 9.0}
+        t = {"ticker": "AMD", "opened_at": "2026-11-12T11:00:50-05:00", "closed_at": "2026-11-12T11:17:00-05:00", "qty": 4,
+             "events": [{"t": "2026-11-12T11:00:50-05:00", "action": "BUY 4 @ 5.47", "qty": 4, "price": 5.47},
+                        {"t": "2026-11-12T11:17:00-05:00", "action": "SELL 4 @ 15.8 (PEAK)", "qty": 4, "price": 15.8, "replaced_event": orig}]}
+        ev = reprice.bars_check(t)
+        self.assertEqual((ev["t"], reprice.event_key(t, ev)), (orig["t"], "AMD|2026-11-12T11:00:50-05:00|BARS"))
+        self.assertEqual(reprice.as_traded_exits(t), [orig])
+        self.assertIsNone(reprice.bars_check(dict(t, closed_at=None)))
+
+
 if __name__ == "__main__":
     unittest.main()

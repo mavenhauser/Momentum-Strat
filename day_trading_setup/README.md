@@ -547,6 +547,16 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
   +$58.6k, positive in both halves; selling every not-yet-2R trade at 30–60 min
   lost $11–28k. Reviewed the weekend of Nov 14 on Nov 12–13; live from Nov 16
   only if confirmed (`TIME_LIMIT_MIN`, `TIME_LIMIT_TEST_FROM` in settings).
+- **Premium ladder test** (from 2026-11-12, report only, nothing is sold): sell
+  the option in steps as its price rises over the entry instead of waiting for
+  the stock's 2R, e.g. 1/4 at +25%, +50%, +75%, +100% (`LADDER_TESTS`); the
+  stock exits sell the same share of what is left. `reprice.py` keeps each closed
+  trade's option 1-minute bars (key `<ticker>|<opened_at>|BARS`, also the archive,
+  since expired weeklies lose their history) and the journal adds `ladder` per
+  trade, `summary.ladder_test` and a day note. A sale rebooked by user decision
+  is tested on its original exit (`replaced_event`). Replay Nov 9-12 (35 trades):
+  as traded -$315, 1/4 ladder +$12,976, 1/3 at +25/50/100% +$13,741. Candle
+  fetches go in batches of 14 symbols.
 - **Notifications:** every action goes to the Telegram chat in `.env`.
 - **Paper only:** it refuses to start unless `IBKR_PORT` is 7497 or 4002.
 

@@ -28,6 +28,7 @@ Prints the day as JSON (the shape the Trading Journal artifact reads from its
 """
 import argparse
 import json
+import math
 import re
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -206,6 +207,7 @@ def trade_entry(trade, day, lines, repriced=None):
     tl = time_limit_test(trade, buy, repriced)
     return {
         "time_limit": tl,
+        "ladder": ladder_test(trade, repriced),
         "ticker": trade["ticker"], "side": trade["side"], "right": trade["right"], "strike": trade["strike"],
         "expiry": trade["expiry"], "qty": trade["qty"], "level": trade.get("level"),
         "tv_entry": trade.get("tv_entry"), "tv_stop": trade.get("tv_stop"), "tv_target": trade.get("tv_target"),
@@ -241,6 +243,90 @@ def time_limit_test(trade, buy, repriced):
     if r and r["true"] is not None and entry is not None:
         out["sell"] = r["true"] < entry
         out["pnl_if_sold"] = round(trade["qty"] * (r["true"] - entry) * 100, 2)
+    return out
+
+
+def ladder_pnl(steps, entry, qty, t0_ms, sells, bars):
+    """P&L of a premium ladder on one trade. steps: [(gain %, share of the starting
+    position sold by then)], the last step sells everything left; sells: the as-traded
+    sales [(minute ms, qty, price)], each of which sells the same share of what is left;
+    bars: [[minute ms, open, close]] of the option. A step fills as a limit at its price
+    in the first minute after entry whose open or close reaches it (at the open if it
+    opened above). Returns (pnl, [(gain %, minute ms, qty, price)])."""
+    rem, pnl, done_q, k, si, act_left, hits = qty, 0.0, 0, 0, 0, qty, []
+    end = sells[-1][0] if sells else t0_ms
+
+    def sale(s):
+        nonlocal rem, pnl, act_left
+        share = s[1] / act_left
+        act_left -= s[1]
+        q = rem if act_left <= 0 else min(rem, round(rem * share))
+        pnl += q * (s[2] - entry) * 100
+        rem -= q
+
+    for m, o, c in bars:
+        if not (t0_ms < m <= end):
+            continue
+        while si < len(sells) and sells[si][0] <= m and rem > 0:
+            sale(sells[si]); si += 1
+        while rem > 0 and k < len(steps) and max(o, c) >= entry * (1 + steps[k][0] / 100):
+            thr = round(entry * (1 + steps[k][0] / 100), 2)
+            px = o if o >= thr else thr
+            target = qty if k == len(steps) - 1 else math.floor(qty * steps[k][1] + 1e-9)
+            q = min(rem, max(0, target - done_q))
+            pnl += q * (px - entry) * 100
+            rem -= q; done_q += q
+            hits.append((steps[k][0], m, q, px)); k += 1
+        if rem <= 0:
+            break
+    while si < len(sells) and rem > 0:
+        sale(sells[si]); si += 1
+    return round(pnl, 2), hits
+
+
+def ladder_test(trade, repriced):
+    """Premium ladder test for one closed trade (report only, from LADDER_TEST_FROM):
+    None until its option bars are kept, else {"entry", "pnl_traded" (the sales the
+    system made, at the journal's prices), "variants": {name: {"pnl", "steps"}}}."""
+    ev = reprice.bars_check(trade)
+    if not ev or not repriced:
+        return None
+    rb = repriced.get(reprice.event_key(trade, ev))
+    rbuy = repriced.get(reprice.event_key(trade, reprice.fills(trade)[0]))
+    if not rb or not rb.get("bars") or not rbuy or rbuy.get("true") is None:
+        return None
+    entry = rbuy["true"]
+    sells = []
+    for s in reprice.as_traded_exits(trade):
+        r = repriced.get(reprice.event_key(trade, s)) or {}
+        px = r.get("true") if r.get("true") is not None else s.get("price")
+        if px is None:
+            return None
+        if close_exit(s["t"]) and r.get("trade_minutes_30", 0) < settings.CLOSE_LIQUID_MINUTES \
+                and s.get("bid") is not None and s.get("ask") is not None:
+            px = round(px - (s["ask"] - s["bid"]) / 2, 2)
+        sells.append((int(_ny(s["t"]).timestamp() * 1000) // 60000 * 60000, s.get("qty") or int(s["action"].split()[1]), px))
+    t0 = int(_ny(trade["opened_at"]).timestamp() * 1000) // 60000 * 60000
+    day = _ny(trade["opened_at"]).date()
+    hm = lambda m: _hm(datetime.fromtimestamp(m / 1000, NY), day)
+    out = {"entry": entry, "pnl_traded": round(sum(q * (p - entry) * 100 for _, q, p in sells), 2), "variants": {}}
+    for name, steps in settings.LADDER_TESTS.items():
+        pnl, hits = ladder_pnl(steps, entry, trade["qty"], t0, sells, rb["bars"])
+        out["variants"][name] = {"pnl": pnl, "steps": [{"gain": g, "at": hm(m), "qty": q, "price": p} for g, m, q, p in hits]}
+    return out
+
+
+def ladder_summary(trades):
+    """Day totals of the premium ladder test, or None when no trade was tested."""
+    rec = [t for t in trades if t.get("ladder")]
+    if not rec:
+        return None
+    traded = sum(t["ladder"]["pnl_traded"] for t in rec)
+    out = {"checked": len(rec), "pnl_traded": round(traded, 2), "variants": {}}
+    for name in settings.LADDER_TESTS:
+        v = sum(t["ladder"]["variants"][name]["pnl"] for t in rec)
+        first = sum(1 for t in rec if t["ladder"]["variants"][name]["steps"])
+        out["variants"][name] = {"pnl": round(v, 2), "change": round(v - traded, 2), "reached_first_step": first}
     return out
 
 
@@ -326,6 +412,12 @@ def build_day(day, mode="dry"):
                      f"{tls['minutes'] // 60}-hour mark, {tls['would_sell']} below the entry price would have been sold ({names}); "
                      f"P&L with the rule ${tls['pnl_with_rule']:,.0f} vs ${tls['pnl_real']:,.0f} ({tls['change']:+,.0f})"
                      + (f"; {tls['unpriced']} not priced yet" if tls["unpriced"] else "") + ".")
+    lad = ladder_summary(trades)
+    if lad:
+        parts = [f"{name}: {v['reached_first_step']} of {lad['checked']} reached the first step, P&L ${v['pnl']:,.0f} ({v['change']:+,.0f})"
+                 for name, v in lad["variants"].items()]
+        notes.append(f"Premium ladder test (not traded; sell in steps as the option's price rises over its entry, stock exits sell "
+                     f"the same share of the rest): as traded ${lad['pnl_traded']:,.0f}; " + "; ".join(parts) + ".")
     return {
         "date": day.isoformat(),
         "mode": "PAPER" if mode == "paper" else "DRY RUN",
@@ -340,6 +432,7 @@ def build_day(day, mode="dry"):
             "worst": {"ticker": worst["ticker"], "pnl_real": worst["pnl_real"]} if worst else None,
             "skipped": len(skipped), "errors": len(errors), "open": len(still_open),
             "time_limit_test": tls,
+            "ladder_test": lad,
         },
         "trades": trades, "open": still_open, "skipped": skipped, "errors": errors,
         "notes": notes, "generated_at": datetime.now(NY).isoformat(timespec="seconds"),

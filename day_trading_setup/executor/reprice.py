@@ -21,6 +21,11 @@ the candles cover 5 minutes past it (DELAY + WINDOW): LRCX's 2R sale on Nov 9
 was priced at 15:37, when the candles still ended near 15:22, and fell back to
 the delayed quote; fills left without a price are retried on later runs.
 
+For the premium ladder test (from LADDER_TEST_FROM) each closed trade's option
+1-minute bars from entry to its last sale are kept too, keyed
+"<ticker>|<opened_at>|BARS" (weekly options' history is gone once they expire,
+so this is also the archive the tests are replayed from).
+
 Results go to state/dts_reprice_<mode>.json keyed by "<ticker>|<event time>", which
 journal.py reads. Re-running only fetches events that are not priced yet.
 
@@ -62,6 +67,8 @@ def fills(trade):
 
 
 def event_key(trade, ev):
+    if ev.get("action") == "BARS":
+        return f"{trade['ticker']}|{trade['opened_at']}|BARS"
     if ev.get("action") == "CHECK":
         return f"{trade['ticker']}|{trade['opened_at']}|TL{settings.TIME_LIMIT_MIN}"
     return f"{trade['ticker']}|{ev['t']}"
@@ -82,6 +89,23 @@ def time_limit_check(trade):
     if sells and min(datetime.fromisoformat(ev["t"]) for ev in sells) <= at:
         return None
     return {"t": at.isoformat(), "action": "CHECK"}
+
+
+def as_traded_exits(trade):
+    """The trade's sales as the system made them: a sale rebooked by user decision
+    (the event keeps the original as "replaced_event") counts at its original."""
+    return [ev.get("replaced_event") or ev for ev in fills(trade)[1:]]
+
+
+def bars_check(trade):
+    """Pseudo-event to keep a closed trade's option bars (entry to last as-traded sale)
+    for the premium ladder test, or None."""
+    if not trade.get("closed_at") or not trade.get("opened_at") or trade["opened_at"][:10] < settings.LADDER_TEST_FROM:
+        return None
+    exits = as_traded_exits(trade)
+    if not exits:
+        return None
+    return {"t": max(ev["t"] for ev in exits), "action": "BARS", "from": trade["opened_at"]}
 
 
 async def _candles(symbols, start):
@@ -200,16 +224,27 @@ def run(mode="dry", since="2026-10-14T09:30", redo=None):
 
     todo = [(t, ev) for t in trades for ev in fills(t) if due(ev, event_key(t, ev))]
     todo += [(t, ev) for t in trades for ev in [time_limit_check(t)] if ev and due(ev, event_key(t, ev))]
+    todo += [(t, ev["replaced_event"]) for t in trades for ev in fills(t)
+             if ev.get("replaced_event") and due(ev["replaced_event"], event_key(t, ev["replaced_event"]))]
+    todo += [(t, ev) for t in trades for ev in [bars_check(t)] if ev and due(ev, event_key(t, ev))]
     if not todo:
         return done, 0
     symbols = sorted({streamer_symbol(t) for t, _ in todo} | {t["ticker"] for t, _ in todo})
-    start = min(datetime.fromisoformat(ev["t"]) for _, ev in todo).astimezone(NY).replace(hour=9, minute=30, second=0, microsecond=0)
+    start = min(datetime.fromisoformat(ev.get("from", ev["t"])) for _, ev in todo).astimezone(NY).replace(hour=9, minute=30, second=0, microsecond=0)
     # TastyTrade refuses a candle subscription that is too big ("subscription size
     # ... too big", 2026-11-12 with a week of trades), so fetch in batches.
     bars = {}
     for i in range(0, len(symbols), CANDLE_BATCH):
         bars.update(asyncio.run(_candles(symbols[i:i + CANDLE_BATCH], start)))
     for t, ev in todo:
+        if ev["action"] == "BARS":
+            lo = int(datetime.fromisoformat(ev["from"]).timestamp() * 1000) // 60000 * 60000
+            hi = int(datetime.fromisoformat(ev["t"]).timestamp() * 1000) // 60000 * 60000
+            b = bars.get(streamer_symbol(t), {})
+            done[event_key(t, ev)] = {"symbol": streamer_symbol(t), "side": "BARS", "true": None,
+                                      "bars": [[m, *b[m]] for m in sorted(b) if lo <= m <= hi],
+                                      "priced_at": now.isoformat(timespec="seconds")}
+            continue
         price, how = true_price(bars[streamer_symbol(t)], datetime.fromisoformat(ev["t"]),
                                 bars.get(t["ticker"]), signed_delta(t), alert_price(ev))
         spread = (ev["ask"] - ev["bid"]) if ev.get("bid") is not None and ev.get("ask") is not None else None
@@ -231,7 +266,7 @@ def main(argv=None):
     ap.add_argument("--redo", help="price every fill of this date (YYYY-MM-DD) again")
     a = ap.parse_args(argv)
     done, n = run(a.mode, a.since, a.redo)
-    missing = [k for k, v in done.items() if v["true"] is None]
+    missing = [k for k, v in done.items() if v["true"] is None and v.get("side") != "BARS"]
     print(f"priced {n} new fills; {len(done)} total; {len(missing)} without a 1-minute price: {missing}")
 
 

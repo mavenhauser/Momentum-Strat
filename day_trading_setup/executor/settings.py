@@ -105,6 +105,19 @@ CLOSE_LIQUID_MINUTES = 15
 # To be reviewed the weekend of Nov 14 on Nov 12-13; if confirmed, live from Nov 16.
 TIME_LIMIT_MIN = 120
 TIME_LIMIT_TEST_FROM = "2026-11-12"
+# Premium ladder test (user, 2026-11-12, report only, nothing is sold): instead of waiting
+# for the stock's 2R, sell the option in steps as its premium rises, e.g. 1/4 of the
+# position at +25% over the entry price, another 1/4 at +50%, ... ; the stock exits
+# (stop, 2R, trail, close) sell the same share of whatever is left. Each step is a limit
+# at that price, filled in the first minute the option trades at or above it.
+# Replay Nov 9-12 (35 trades, real 1-minute option prices): as traded -$315,
+# 1/4 at +25/50/75/100% +$12,976, 1/3 at +25/50/100% +$13,741.
+# {name: [(gain %, share of the starting position sold by then)]}; the last step sells all.
+LADDER_TEST_FROM = "2026-11-12"
+LADDER_TESTS = {
+    "1/4 at +25/+50/+75/+100%": [(25, 0.25), (50, 0.50), (75, 0.75), (100, 1.0)],
+    "1/3 at +25/+50/+100%": [(25, 1 / 3), (50, 2 / 3), (100, 1.0)],
+}
 # Closed trades from this time on get a RESULT message with the confirmed P&L
 # (CLOSED messages no longer carry a P&L - the live quotes are delayed).
 RESULTS_FROM = "2026-10-19T09:30"
