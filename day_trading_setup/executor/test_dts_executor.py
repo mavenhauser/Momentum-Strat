@@ -669,5 +669,37 @@ class TimeLimitTestTest(unittest.TestCase):
         self.assertIsNone(journal.time_limit_summary([trades[2]]))
 
 
+class OptionPeakTest(unittest.TestCase):
+    """Option peak, record only (user 2026-11-12: record when the option premium moves)."""
+    def _trade(self, opened="2026-11-12T11:05:37-05:00", closed="2026-11-12T15:55:04-05:00"):
+        return {"ticker": "GOOGL", "opened_at": opened, "closed_at": closed, "qty": 49,
+                "events": [{"t": opened, "action": "BUY 49 @ 1.0", "qty": 49, "price": 1.0},
+                           {"t": closed, "action": "SELL 49 @ 2.55 (TradingView EOD)", "qty": 49, "price": 2.55}]}
+
+    def test_peak_is_the_best_minute_between_entry_and_exit(self):
+        from day_trading_setup.executor import reprice
+        from datetime import datetime
+        m = lambda hm: int(datetime.fromisoformat(f"2026-11-12T{hm}:00-05:00").timestamp() * 1000)
+        bars = {m("11:04"): (9.0, 9.0), m("11:05"): (1.99, 2.1), m("12:54"): (4.25, 4.15), m("15:55"): (2.17, 2.2), m("15:58"): (5.0, 5.0)}
+        pk = reprice.option_peak(bars, datetime.fromisoformat("2026-11-12T11:05:37-05:00"), datetime.fromisoformat("2026-11-12T15:55:04-05:00"))
+        self.assertEqual((pk[0], pk[1], pk[2], pk[3]), (4.25, m("12:54"), 1.99, m("11:05")))   # bars outside the trade are ignored
+
+    def test_only_closed_trades_from_peak_from(self):
+        from day_trading_setup.executor import reprice
+        t = self._trade()
+        ev = reprice.peak_check(t)
+        self.assertEqual((ev["action"], reprice.event_key(t, ev)), ("PEAK", "GOOGL|2026-11-12T11:05:37-05:00|PEAK"))
+        self.assertIsNone(reprice.peak_check(self._trade(closed=None)))
+        self.assertIsNone(reprice.peak_check(self._trade(opened="2026-11-06T10:00:00-05:00")))
+
+    def test_journal_peak_pnl_uses_the_true_entry(self):
+        from day_trading_setup.executor import journal
+        t = self._trade()
+        rp = {"GOOGL|2026-11-12T11:05:37-05:00|PEAK": {"true": 4.25, "at": "2026-11-12T12:54-05:00", "low": 1.75, "low_at": "2026-11-12T11:32-05:00"}}
+        p = journal.option_peak(t, {"true": 1.99, "price": 1.0}, rp)
+        self.assertEqual((p["price"], p["at"], p["pnl_at_peak"], p["pct"]), (4.25, "12:54", 11074.0, 113.6))
+        self.assertIsNone(journal.option_peak(t, {"true": 1.99, "price": 1.0}, {}))
+
+
 if __name__ == "__main__":
     unittest.main()
