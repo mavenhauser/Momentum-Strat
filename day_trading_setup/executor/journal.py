@@ -202,6 +202,9 @@ def trade_entry(trade, day, lines, repriced=None):
         notes.append(f"{fb} fill(s) had no 1-minute trade nearby; priced at the recorded (delayed) quote")
     if src == "dry-run default":
         notes.append("sized off the $100k placeholder (IBKR not connected), about a tenth of that day's normal size")
+    if trade.get("resized"):
+        rz = trade["resized"]
+        notes.append(f"resized from {rz['from']} to {rz['to']} contracts: {rz['why']}")
     if buy and buy.get("source") == "IBKR" and buy["t"] < "2026-10-14T10:21":
         notes.append("entry priced off IBKR's 15-minute-delayed quote")
     tl = time_limit_test(trade, buy, repriced)
