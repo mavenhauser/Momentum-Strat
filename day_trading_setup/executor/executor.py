@@ -30,11 +30,11 @@ import os
 import socket
 import sys
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from src import config
-from day_trading_setup.executor import contracts, settings, signals
+from day_trading_setup.executor import contracts, estimate, settings, signals
 
 NY = ZoneInfo("America/New_York")
 log = logging.getLogger("dts")
@@ -135,6 +135,9 @@ class Broker:
         self.ib = None
         self.tt = None
         self.last_quote = (None, None, None)   # (bid, ask, source) behind the last fill, for the journal
+        self.stock_now = None                  # live stock price from the alert being handled (QUOTE_DELAY_ADJUST)
+        self.last_adjust = None                # how the last fill's delayed quote was moved to stock_now
+        self._stock_then = {}
 
     def connect(self):
         assert_paper_port()
@@ -199,6 +202,46 @@ class Broker:
     def snapshot(self, streamer_symbols):
         return self.tt.get_option_market_snapshot(streamer_symbols)
 
+    def stock_price(self, ticker):
+        """The stock's price on the same (delayed) feed as the option quotes: quote mid, else
+        last trade; cached per alert. None if it doesn't arrive in time."""
+        if ticker in self._stock_then:
+            return self._stock_then[ticker]
+        from tastytrade import DXLinkStreamer
+        from tastytrade.dxfeed import Quote, Trade
+
+        async def fetch():
+            async with DXLinkStreamer(self.tt.session) as st:
+                await st.subscribe(Quote, [ticker])
+                await st.subscribe(Trade, [ticker])
+                q = await self.tt._collect_events(st, Quote, [ticker], 6)
+                tr = await self.tt._collect_events(st, Trade, [ticker], 3)
+            q, tr = q.get(ticker), tr.get(ticker)
+            if q and q.bid_price and q.ask_price and float(q.bid_price) > 0 and float(q.ask_price) > 0:
+                return round((float(q.bid_price) + float(q.ask_price)) / 2, 4)
+            if tr and tr.price and float(tr.price) > 0:
+                return float(tr.price)
+            return None
+        try:
+            px = self.tt._run(fetch(), timeout=20)
+        except Exception as e:
+            log.warning("stock quote for %s unavailable (%s: %s)", ticker, type(e).__name__, e)
+            px = None
+        self._stock_then[ticker] = px
+        return px
+
+    def adjust(self, pos, q):
+        """The delayed quote {bid, ask, ...} for pos moved to the live stock price
+        (self.stock_now), or q itself when the rule is off, no live price is known, or the
+        stock's delayed price is missing."""
+        if not settings.QUOTE_DELAY_ADJUST or not self.stock_now or not q:
+            return q
+        then = self.stock_price(pos["ticker"])
+        if not then:
+            return q
+        return estimate.shift_quote(q, then, self.stock_now, pos["strike"], date.fromisoformat(pos["expiry"]),
+                                    pos["right"], now_ny())
+
     def quote(self, pos):
         """(bid, ask, source) for the contract: TastyTrade's quote first (for this
         account the 15-minute-delayed demo feed - found 2026-10-16; see reprice.py),
@@ -242,6 +285,12 @@ class Broker:
         if not q:
             return 0, None, "no two-sided quote"
         bid, ask, src = q
+        self.last_adjust = None
+        a = self.adjust(pos, {"bid": bid, "ask": ask, "delta": pos.get("delta")})
+        if a is not None and a.get("adjusted"):
+            self.last_adjust = {"delayed_bid": bid, "delayed_ask": ask, "stock_then": self._stock_then.get(pos["ticker"]),
+                                "stock_now": self.stock_now}
+            bid, ask = a["bid"], a["ask"]
         self.last_quote = (bid, ask, src)
         mid = round((bid + ask) / 2, 2)
         if not settings.EXECUTE:
@@ -296,18 +345,30 @@ def qqq_line(sig):
     return f"QQQ {day:+.2f}% (1h {hour:+.2f}%) {'above' if above else 'below'} VWAP"
 
 
-def choose_contract(broker, sig, t):
+def choose_contract(broker, sig, t, expiry=None):
+    """Strike and size for an entry. expiry: force one (the Friday fallback test);
+    default this week's (contracts.pick_expiry). Quotes are moved to the alert's live
+    stock price first when QUOTE_DELAY_ADJUST is on."""
     today = t.date()
     from tastytrade.instruments import OptionType
     right = "C" if sig.side == "LONG" else "P"
     chain = broker.chain(sig.ticker)
-    expiry = contracts.pick_expiry(list(chain.keys()), today, (t.hour, t.minute))
+    if expiry is None:
+        expiry = contracts.pick_expiry(list(chain.keys()), today, (t.hour, t.minute))
     if expiry is None:
         return None, "no option expiries listed"
     opts = {float(o.strike_price): o for o in chain[expiry] if o.option_type == OptionType(right)}
     look = set(contracts.strike_ladder(opts.keys(), sig.price, right, settings.STRIKES_TO_SCAN))
     snap = broker.snapshot([opts[k].streamer_symbol for k in look])
     quotes = {k: snap.get(opts[k].streamer_symbol) or {} for k in look}
+    adjusted = 0
+    if settings.QUOTE_DELAY_ADJUST and sig.price:
+        then = broker.stock_price(sig.ticker)
+        if then:
+            quotes = {k: estimate.shift_quote(q, then, sig.price, k, expiry, right, t) for k, q in quotes.items()}
+            adjusted = sum(1 for q in quotes.values() if q.get("adjusted"))
+        log.info("sizing quotes for %s moved from the delayed stock price %s to %s (%d of %d strikes)",
+                 sig.ticker, then, sig.price, adjusted, len(quotes))
     nlv, _ = broker.nlv()
     move = abs(sig.target - sig.price) if sig.target else None
     base = settings.FRIDAY_SWING_SIZE if contracts.swing_entry(t) else contracts.size_fraction(sig.grade)
@@ -321,6 +382,34 @@ def choose_contract(broker, sig, t):
             "expiry_ib": expiry.strftime("%Y%m%d"), "strike": k, "streamer": opts[k].streamer_symbol,
             "qty_plan": qty, "delta": delta, "sizing_rule": rule,
             "grade": sig.grade, "size_fraction": frac, "chop": sig.chop, "early_liquidity": early}, None
+
+
+def friday_fallback(broker, sig, t, why):
+    """Friday fallback TEST (report only): for a Friday-morning entry skipped because no
+    same-day strike qualified, the strike, size and estimated price next week's expiry
+    would have given, or None. Nothing is bought."""
+    if not settings.FRIDAY_FALLBACK_TEST or t.weekday() != 4:
+        return None
+    start, end = settings.ZERO_DTE_WINDOW
+    if not (start <= (t.hour, t.minute) < end) or not why or "strike" not in why:
+        return None
+    try:
+        nxt = contracts.week_friday(t.date() + timedelta(days=7))
+        exps = sorted(d for d in broker.chain(sig.ticker).keys() if t.date() < d <= nxt)
+        if not exps:
+            return None
+        pos, why2 = choose_contract(broker, sig, t, expiry=exps[-1])
+        if not pos:
+            return {"expiry": exps[-1].isoformat(), "none": why2}
+        q = broker.quote(pos)
+        a = broker.adjust(pos, {"bid": q[0], "ask": q[1], "delta": pos.get("delta")}) if q else None
+        px = round((a["bid"] + a["ask"]) / 2, 2) if a else None
+        return {"expiry": pos["expiry"], "strike": pos["strike"], "right": pos["right"], "streamer": pos["streamer"],
+                "qty": pos["qty_plan"], "price": px, "delta": pos.get("delta"), "size_fraction": pos.get("size_fraction"),
+                "tv_entry": sig.price, "tv_stop": sig.stop, "tv_target": sig.target}
+    except Exception as e:
+        log.warning("Friday fallback test for %s failed: %s: %s", sig.ticker, type(e).__name__, e)
+        return None
 
 
 def skip(state, sig, t, reason):
@@ -386,8 +475,13 @@ def on_entry(broker, state, sig, t):
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\nAlready at the limit of {settings.MAX_OPEN_POSITIONS} open positions")
     pos, why = choose_contract(broker, sig, t)
     if not pos:
+        fb = friday_fallback(broker, sig, t, why)
         skip(state, sig, t, why)
-        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n{h(why)}")
+        if fb:
+            state["skipped"][-1]["fallback_test"] = fb
+        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n{h(why)}"
+                      + (f"\n\n<i>Test only (not bought): next week's {fb['strike']:g} {'call' if fb['right'] == 'C' else 'put'} "
+                         f"({h(fb['expiry'])}) would have been {fb['qty']} × ≈{fb['price'] or 0:.2f}</i>" if fb and fb.get("qty") else ""))
     q = broker.quote(pos)
     if not q:
         skip(state, sig, t, "no quote")
@@ -402,8 +496,9 @@ def on_entry(broker, state, sig, t):
                tv_target=sig.target, level=sig.level, opened_at=t.isoformat(), trimmed=False,
                events=[{"t": t.isoformat(), "alert": sig.raw, "action": f"BUY {filled} @ {avg}",
                         "qty": filled, "price": avg, "bid": broker.last_quote[0], "ask": broker.last_quote[1],
-                        "quote_source": broker.last_quote[2]}],
-               nlv=nlv, nlv_source=nlv_src)
+                        "quote_source": broker.last_quote[2],
+                        **({"quote_adjust": broker.last_adjust} if broker.last_adjust else {})}],
+               nlv=nlv, nlv_source=nlv_src, est_entry=avg)
     if late:
         pos["late"] = late
     state["positions"][sig.ticker] = pos
@@ -445,7 +540,8 @@ def _sell(broker, state, pos, qty, t, why, alert_raw):
     pos["proceeds"] = pos.get("proceeds", 0.0) + filled * (avg or 0.0)
     pos["events"].append({"t": t.isoformat(), "alert": alert_raw, "action": f"SELL {filled} @ {avg} ({why})",
                           "qty": filled, "price": avg, "bid": broker.last_quote[0], "ask": broker.last_quote[1],
-                          "quote_source": broker.last_quote[2], "why": why})
+                          "quote_source": broker.last_quote[2], "why": why,
+                          **({"quote_adjust": broker.last_adjust} if broker.last_adjust else {})})
     return filled, avg, note
 
 
@@ -508,6 +604,37 @@ def on_target(broker, state, sig, t):
     if pos["open_qty"] <= 0:
         pnl = _close_record(state, pos, t, "2R (fully sold)")
         notify(f"{title('CLOSED')}\n<b>{h(describe(pos))}</b>\nFully sold at 2R\n\n<i>P&amp;L follows once prices are confirmed (about 15 min)</i>")
+
+
+def on_check(broker, state, sig, t):
+    """The time limit (live from TIME_LIMIT_LIVE_FROM): DTS Entry's 2-hour check. A trade
+    that has sold nothing yet (no 2R) is closed if its option is below the entry price,
+    estimated at the alert's live stock price; otherwise it is held and noted."""
+    pos = state["positions"].get(sig.ticker)
+    if not pos or pos["side"] != sig.side:
+        return log.info("2-hour check for %s with no matching position - ignored", sig.ticker)
+    if t.date().isoformat() < settings.TIME_LIMIT_LIVE_FROM:
+        return log.info("2-hour check for %s before the time limit goes live - ignored", sig.ticker)
+    held = (t - datetime.fromisoformat(pos["opened_at"]).astimezone(NY)).total_seconds() / 60
+    if pos["trimmed"] or pos["open_qty"] < pos["qty"]:
+        return log.info("2-hour check for %s: already sold at 2R - nothing to do", sig.ticker)
+    if held < settings.TIME_LIMIT_MIN - settings.TIME_LIMIT_EARLY_MIN:
+        return log.info("2-hour check for %s after only %.0f min - ignored", sig.ticker, held)
+    if (t.hour, t.minute) >= settings.CLOSE_EXIT_FROM:
+        return log.info("2-hour check for %s at %s - the close sells it anyway", sig.ticker, t.strftime("%H:%M"))
+    q = broker.quote(pos)
+    if not q:
+        raise RuntimeError(f"no quote for {describe(pos)} at the 2-hour check")
+    a = broker.adjust(pos, {"bid": q[0], "ask": q[1], "delta": pos.get("delta")}) or {"bid": q[0], "ask": q[1]}
+    now_px = round((a["bid"] + a["ask"]) / 2, 2)
+    entry = pos.get("est_entry") or pos["avg_cost"]
+    line = f"option ≈{now_px:.2f} vs entry {entry:.2f} (stock {sig.price})"
+    if now_px < entry:
+        why = f"time limit: no 2R in {settings.TIME_LIMIT_MIN // 60} h and the option below its entry ({line})"
+        return close_position(broker, state, pos, t, why, sig.raw)
+    pos["events"].append({"t": t.isoformat(), "alert": sig.raw, "action": f"HOLD at the 2-hour check ({line})"})
+    notify(f"{title('2-HOUR CHECK')}\n<b>Holding {pos['open_qty']} × {h(describe(pos))}</b>\n"
+           f"No 2R yet, but the option is not below its entry: {h(line)}")
 
 
 def close_position(broker, state, pos, t, why, alert_raw):
@@ -631,7 +758,8 @@ def retry_pending(state, t):
         broker = Broker()
         try:
             broker.connect()
-            {"TARGET": on_target, "EXIT": on_exit}[sig.kind](broker, state, sig, t)
+            broker.stock_now = sig.price
+            {"TARGET": on_target, "EXIT": on_exit, "CHECK": on_check}[sig.kind](broker, state, sig, t)
             log.info("pending %s handled on retry %d", item["raw"], item["tries"] + 1)
         except Exception as e:
             item["tries"] += 1
@@ -754,7 +882,7 @@ def main(argv=None):
             log.info("duplicate alert ignored: %s", sig.raw)
             return 0
         state["processed"][key] = t.isoformat()
-        if sig.kind in ("TARGET", "EXIT") and sig.ticker not in state["positions"]:
+        if sig.kind in ("TARGET", "EXIT", "CHECK") and sig.ticker not in state["positions"]:
             log.info("%s alert for %s with no open position - ignored", sig.kind, sig.ticker)
             save_state(state)
             return 0
@@ -767,7 +895,8 @@ def main(argv=None):
             broker = Broker()
             try:
                 broker.connect()
-                {"ENTRY": on_entry, "TARGET": on_target, "EXIT": on_exit}[sig.kind](broker, state, sig, t)
+                broker.stock_now = sig.price
+                {"ENTRY": on_entry, "TARGET": on_target, "EXIT": on_exit, "CHECK": on_check}[sig.kind](broker, state, sig, t)
                 err = None
                 break
             except Exception as e:
@@ -778,7 +907,7 @@ def main(argv=None):
                 save_state(state)
             time.sleep(ALERT_RETRY_PAUSE)
         if err is not None:
-            queued = sig.kind in ("TARGET", "EXIT") and sig.ticker in state["positions"]
+            queued = sig.kind in ("TARGET", "EXIT", "CHECK") and sig.ticker in state["positions"]
             if queued:
                 state.setdefault("pending", []).append({"raw": sig.raw, "t": t.isoformat(), "tries": ALERT_ATTEMPTS})
                 save_state(state)

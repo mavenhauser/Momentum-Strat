@@ -24,7 +24,9 @@ the delayed quote; fills left without a price are retried on later runs.
 For the premium ladder test (from LADDER_TEST_FROM) each closed trade's option
 1-minute bars from entry to its last sale are kept too, keyed
 "<ticker>|<opened_at>|BARS" (weekly options' history is gone once they expire,
-so this is also the archive the tests are replayed from).
+so this is also the archive the tests are replayed from). For the volume-fade test
+(from EXIT_TESTS_FROM) the stock's 5-minute bars with volume, from VF_SESSIONS
+sessions before the entry to its last sale, are kept as "<ticker>|<opened_at>|VOL5".
 
 Results go to state/dts_reprice_<mode>.json keyed by "<ticker>|<event time>", which
 journal.py reads. Re-running only fetches events that are not priced yet.
@@ -69,6 +71,8 @@ def fills(trade):
 def event_key(trade, ev):
     if ev.get("action") == "BARS":
         return f"{trade['ticker']}|{trade['opened_at']}|BARS"
+    if ev.get("action") == "VOL5":
+        return f"{trade['ticker']}|{trade['opened_at']}|VOL5"
     if ev.get("action") == "CHECK":
         return f"{trade['ticker']}|{trade['opened_at']}|TL{settings.TIME_LIMIT_MIN}"
     return f"{trade['ticker']}|{ev['t']}"
@@ -80,6 +84,8 @@ def time_limit_check(trade):
     TIME_LIMIT_TEST_FROM, with no sale before the checkpoint, and the checkpoint the same
     day before CLOSE_EXIT_FROM (after that the trade is sold at the close anyway)."""
     if not trade.get("opened_at") or trade["opened_at"][:10] < settings.TIME_LIMIT_TEST_FROM:
+        return None
+    if trade["opened_at"][:10] >= settings.TIME_LIMIT_LIVE_FROM:     # the rule itself sells from then on
         return None
     opened = datetime.fromisoformat(trade["opened_at"]).astimezone(NY)
     at = opened + timedelta(minutes=settings.TIME_LIMIT_MIN)
@@ -106,6 +112,47 @@ def bars_check(trade):
     if not exits:
         return None
     return {"t": max(ev["t"] for ev in exits), "action": "BARS", "from": trade["opened_at"]}
+
+
+def vol_check(trade):
+    """Pseudo-event to keep a closed trade's 5-minute stock bars with volume for the
+    volume-fade test, or None."""
+    if not trade.get("closed_at") or not trade.get("opened_at") or trade["opened_at"][:10] < settings.EXIT_TESTS_FROM:
+        return None
+    exits = as_traded_exits(trade)
+    if not exits:
+        return None
+    opened = datetime.fromisoformat(trade["opened_at"])
+    return {"t": max(ev["t"] for ev in exits), "action": "VOL5",
+            "from": (opened - timedelta(days=settings.VF_SESSIONS * 7 // 5 + 4)).isoformat()}
+
+
+async def _candles5(symbols, start):
+    """{symbol: {bar start ms: [open, high, low, close, volume]}} of regular-hours 5-minute bars."""
+    import sys
+    sys.path.insert(0, str(settings.STATE_DIR.parent))
+    from src.tastytrade_client import config
+    from tastytrade import DXLinkStreamer, Session
+    from tastytrade.dxfeed import Candle
+    sess = Session(provider_secret=config.TT_CLIENT_SECRET, refresh_token=config.TT_REFRESH_TOKEN)
+    out = {s: {} for s in symbols}
+    async with DXLinkStreamer(sess) as st:
+        await st.subscribe_candle(symbols, "5m", start)
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + max(60, 6 * len(symbols))
+        while loop.time() < deadline:
+            try:
+                c = await asyncio.wait_for(st.get_event(Candle), 8)
+            except asyncio.TimeoutError:
+                break
+            base = c.event_symbol.split("{")[0]
+            if base in out and c.time and c.high is not None:
+                v = [float(c.open), float(c.high), float(c.low), float(c.close), float(c.volume or 0)]
+                if v[1] == v[1] and v[1] > 0:
+                    hm = datetime.fromtimestamp(int(c.time) / 1000, NY).strftime("%H:%M")
+                    if "09:30" <= hm < "16:00":
+                        out[base][int(c.time)] = v
+    return out
 
 
 async def _candles(symbols, start):
@@ -227,8 +274,23 @@ def run(mode="dry", since="2026-10-14T09:30", redo=None):
     todo += [(t, ev["replaced_event"]) for t in trades for ev in fills(t)
              if ev.get("replaced_event") and due(ev["replaced_event"], event_key(t, ev["replaced_event"]))]
     todo += [(t, ev) for t in trades for ev in [bars_check(t)] if ev and due(ev, event_key(t, ev))]
+    vol = [(t, ev) for t in trades for ev in [vol_check(t)] if ev and due(ev, event_key(t, ev))]
+    if vol:
+        tickers = sorted({t["ticker"] for t, _ in vol})
+        start5 = min(datetime.fromisoformat(ev["from"]) for _, ev in vol).astimezone(NY).replace(hour=9, minute=30, second=0, microsecond=0)
+        b5 = {}
+        for i in range(0, len(tickers), CANDLE_BATCH):
+            b5.update(asyncio.run(_candles5(tickers[i:i + CANDLE_BATCH], start5)))
+        for t, ev in vol:
+            lo = int(datetime.fromisoformat(ev["from"]).timestamp() * 1000)
+            hi = int(datetime.fromisoformat(ev["t"]).timestamp() * 1000)
+            b = b5.get(t["ticker"], {})
+            done[event_key(t, ev)] = {"symbol": t["ticker"], "side": "VOL5", "true": None,
+                                      "bars": [[m, *b[m]] for m in sorted(b) if lo <= m <= hi],
+                                      "priced_at": now.isoformat(timespec="seconds")}
+        path.write_text(json.dumps(done, indent=1))
     if not todo:
-        return done, 0
+        return done, len(vol)
     symbols = sorted({streamer_symbol(t) for t, _ in todo} | {t["ticker"] for t, _ in todo})
     start = min(datetime.fromisoformat(ev.get("from", ev["t"])) for _, ev in todo).astimezone(NY).replace(hour=9, minute=30, second=0, microsecond=0)
     # TastyTrade refuses a candle subscription that is too big ("subscription size
@@ -266,7 +328,7 @@ def main(argv=None):
     ap.add_argument("--redo", help="price every fill of this date (YYYY-MM-DD) again")
     a = ap.parse_args(argv)
     done, n = run(a.mode, a.since, a.redo)
-    missing = [k for k, v in done.items() if v["true"] is None and v.get("side") != "BARS"]
+    missing = [k for k, v in done.items() if v["true"] is None and v.get("side") not in ("BARS", "VOL5")]
     print(f"priced {n} new fills; {len(done)} total; {len(missing)} without a 1-minute price: {missing}")
 
 

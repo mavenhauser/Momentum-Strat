@@ -412,6 +412,11 @@ close: enter at or just after it. Nothing fires mid-candle.
   lost −31.6R and stays out. On the real signals the 4R filter cut 36 of 161
   (−13.1R, 22% wins) and saved $1,855 on the trades taken, cutting 2 of the 14
   $1k+ winners (AMAT Oct 19, AMZN Oct 22). The two were not tested together.
+- **Time-limit check** (since DTS Entry v20.0, Sat 2026-11-14, user decision): one
+  `DTS: CHECK LONG|SHORT <ticker> @ <price> | 2h without 2R | entry <price>` alert per
+  trade at the first bar close `tlMin` (120) minutes after the entry bar, before 2R
+  (input *Time-limit check after*, 0 = off; added after the older inputs). The chart's
+  trade continues; the executor decides (see the time limit below).
 - **Trend days** (since DTS Entry v19.0, built after the close on Thu 2026-11-05,
   user decision). A bar counts as a trend day for a trade while **QQQ is at least
   1% from today's open in the trade's direction and on the trade's side of its
@@ -484,6 +489,7 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
 | Alert | What the executor does |
 |---|---|
 | `DTS: LONG …` / `DTS: SHORT …` | Once QQQ has crossed its session VWAP **more than 8 times** that day, entries are tagged `choppy (QQQ crosses N)` and the executor buys **half its normal size** (chop gate; v13.0, 2026-10-22; input *When QQQ is choppy* can switch it to Skip). The stop is placed **1.5× further** than the swing / min-stop rule gives (v12.0; the skip-if-wider-than-2.5-ATR check uses the unwidened stop). Before **10:30 ET** the executor takes an entry only **in QQQ's direction**: QQQ up from the 09:30 open and above its VWAP for a long, down and below for a short (from the alert's QQQ tag; others are skipped and logged; 2026-11-07, replay Oct 14–Nov 6 +63.6R → +79.8R, normal days −9.2R → −1.1R). The executor skips new entries after **5 stop-outs in a row** in a day, unless the setup is graded **A+ OUTSIDE** (loss brake, 2026-10-22; loosened from 3 on 2026-11-07, when a 0DTE time stop stopped counting as a loss unless it lost money). The stop is never tighter than **2× the stock's typical 5-minute bar** (median of the last 390 bars; since v11.0, 2026-10-21; stops under ~1.5× won 32% of the time). Sent (since DTS Entry v9.0, 2026-10-20) only when price **breaks the trigger bar's high (long) / low (short) within the next three 5-minute bars (15 minutes)**, at that moment and price; the stop stays the same and 2R is measured from that entry; unconfirmed triggers lapse (input *Confirm entry*). Replayed on Oct 14–19: 40 of 52 signals confirmed within 15 minutes, +27.6R vs +16.1R (10 minutes: 36, +21.4R). Buys a call / a put. Expiry: this week's last listed expiry (normally Friday, 0DTE on Friday itself), except that on expiry day the same-day option is bought from the open **until 12:00 ET**; afternoon entries buy **next week's expiry** (2026-10-18). Strike: **never in the money** (since 2026-10-16). Start at the at-the-money strike (the nearest strike at or out of the money; one in the money by at most 0.10% of the price counts as at the money) and step out of the money until one buys **4 contracts** within the budget, never going below **0.15 delta** (weeklies held 1-2 days, so further out of the money is fine); if none does, the nearest strike that buys **2**; if none, the entry is **skipped and logged**, because 1 contract can't be split at 2R (since 2026-11-03). The ladder covers up to **30** strikes out (12 until 2026-11-03), so a high-priced stock buys further out, down to the delta floor, instead of being skipped. Every strike must pass the liquidity check (two-sided quote, **mid price at least $0.50** (since 2026-10-18), spread ≤ 15% of mid, open interest ≥ 100, and at least **100 contracts traded today** in that strike, since 2026-10-16). Before **10:00 ET** the volume test is dropped and the spread may be up to **30%** (open interest must be known and ≥ 100): the option quotes are 15 minutes delayed, so first-hour entries see the opening minute's thin volume and wide spreads (2026-11-09, after 6 of 7 trend-day entries were skipped, TSLA among them). Size (since 2026-10-16) by the setup grade the entry alert carries (DTS Entry v6.0+): premium ≈ **5%** of a **$100k notional strategy account** for **A+ OUTSIDE** (all 4 confirmations and beyond the prior day and premarket range), **3.5%** for **A OUTSIDE**, **2.5%** for everything else and for alerts without a grade; rounded down to whole contracts, at least 1. With at most 5 open positions that caps premium out at 25% of the account. Not the paper account's own value. On expiry day (Friday 0DTE) the delta floor is `MIN_DELTA_0DTE` = 0.15. |
+| `DTS: CHECK LONG\|SHORT … @ <price> \| 2h without 2R \| entry …` | DTS Entry v20.0 (2026-11-14): the time limit. Live from 2026-11-16: if the position has sold nothing yet, the option's price is estimated at the alert's stock price and the whole position is sold if it is below the entry price (CLOSED, reason "time limit"); otherwise it is held (2-HOUR CHECK message). |
 | `DTS: … hit 4R target … - take partial, the rest rides the trail` | DTS Entry v17.0 (2026-11-04): the runner reached 4R with QQQ on the trade's side of VWAP. Sells half of the contracts left, rounded down; a single contract left is sold. The rest rides the trail, break-even or stop; a **4R RESULT** message follows like the 2R one. |
 | `DTS: … hit 2R target …` | Sells half the contracts, rounded down. Since DTS Entry v7.0 (2026-10-16) this alert fires on the first tick that touches the target, not at the 5-minute bar close. A single contract left by a partial fill is held and rides to the trail, break-even or stop. |
 | `DTS: EXIT … (STOP / BE / TRAIL / RUNNER / WEAK / EOD / TIME)` | Sells the rest. `WEAK` (v17.0): the runner reached 3R with QQQ against the trade. The CLOSED message carries no P&L (the live quotes are ~15 minutes delayed); a **RESULT** message follows about 16 minutes after the exit with the fills and P&L confirmed from 1-minute option prices (since 2026-10-19). A 2R sale gets its own **2R RESULT** message the same way, about 16 minutes after the sale, with the P&L of the contracts sold and how many are still open (since 2026-10-26). |
@@ -538,15 +544,52 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
   message a day. Why: on Nov 11 TradingView fired AVGO's 14:20 STOP but its
   webhook failed on TradingView's side, and the call was held to the 15:56
   sweep (−$1,208 instead of about −$600). Off with `DTS_BACKFILL=0`.
-- **Time limit test** (from 2026-11-12, report only, nothing is sold): two
-  hours after entry, a trade with no sale yet (not at 2R) whose option trades
-  below the entry price would be sold. `reprice.py` prices that moment from
-  1-minute candles (key `<ticker>|<opened_at>|TL120`) and the journal adds
-  `time_limit` to each checked trade, `summary.time_limit_test` (P&L with the
-  rule vs without) and a day note. Replay Oct 14–Nov 11 (197 trades): +$8.4k on
-  +$58.6k, positive in both halves; selling every not-yet-2R trade at 30–60 min
-  lost $11–28k. Reviewed the weekend of Nov 14 on Nov 12–13; live from Nov 16
-  only if confirmed (`TIME_LIMIT_MIN`, `TIME_LIMIT_TEST_FROM` in settings).
+- **Sizing from delayed quotes** (user decision, 2026-11-14; `QUOTE_DELAY_ADJUST`,
+  `estimate.py`). The option quotes are ~15 minutes old, so in a fast market the
+  executor used to buy 2-3.5x its budget (AMD Nov 13: quote 1.98, traded 7.28,
+  17 contracts on a budget that buys 4). Before the strike and size are chosen,
+  each delayed quote is repriced to the alert's live stock price: its implied
+  volatility comes from the delayed mid at the stock's delayed price (same feed,
+  same delay), then Black-Scholes at the live price, keeping the quote's spread.
+  Fills booked on TradingView alerts (entries, 2R, exits, the 2-hour check) use the
+  same estimate; the delayed quote is kept in the event's `quote_adjust`. Tested on
+  171 fills (Oct 16-Nov 13): trades at 1.25x budget or more 30 -> 6, AMD 17 -> 5,
+  GOOGL (Nov 12) 49 -> 26 (budget 25), AVGO (Nov 13) 29 -> 15 (15); slightly more
+  undersized (10 -> 17). Turn it off once the option quotes are real time.
+- **Time limit** (live from Mon 2026-11-16, user decision Nov 14; report-only test
+  Nov 12-13): DTS Entry v20.0 sends `DTS: CHECK LONG|SHORT <ticker> @ <live price> |
+  2h without 2R | entry <price>` once per trade, at the first 5-minute close 2 hours
+  after the entry bar, if the 2R target has not been hit. The executor estimates the
+  option's price at that stock price (as for sizing) and **sells the whole position
+  if the option is below its entry price**; otherwise it holds and notes it (2-HOUR
+  CHECK message). Ignored after a 2R sale, more than 5 minutes early, or from 15:50
+  (the close sells it anyway); the missed-alert backup re-sends a lost CHECK.
+  Evidence: replay Oct 14-Nov 11 +$8.4k (25 cuts); live Nov 11 +$338, Nov 12 +$756;
+  12-week model replay (Aug 25-Nov 13, options priced by Black-Scholes calibrated to
+  171 real fills) +$2.2k to +$5.8k, better in 8 of 12 weeks; a stock-only version was
+  about flat, so the option price is what decides (`TIME_LIMIT_MIN`,
+  `TIME_LIMIT_LIVE_FROM`, `TIME_LIMIT_EARLY_MIN`). The journal's report-only test
+  (key `<ticker>|<opened_at>|TL120`) covers entries before Nov 16.
+- **Exit tests, report only** (user decision, 2026-11-14, from 2026-11-12; journal
+  notes and `summary.vf_test` / `summary.be_test`, nothing is sold; decide at the
+  Nov 17 review), both on the journal's booked exits and real 1-minute option prices:
+  - *Volume fade:* before 2R, sell at a 5-minute close when the last 3 bars all had
+    relative volume under 0.5 (bar volume / average of the same bar time over the
+    previous 5 sessions) and none made a new high (long) / low (short) beyond the best
+    since entry. `reprice.py` keeps each closed trade's 5-minute stock bars with volume
+    (key `<ticker>|<opened_at>|VOL5`). Nov 12: GEV, MSFT, DELL sold, +$2,089; Nov 13:
+    none. 12-week model +$4.6k to +$9.8k; with the time limit +$9.6k to +$16k.
+  - *Option break-even stop:* once the option has traded 25% above its entry, sell the
+    rest the first minute it trades back at or below the entry. Nov 12 −$3,769 (GOOGL
+    stopped at 1.98 before its 4.25 peak), Nov 13 +$2,096. 12-week model −$40k: it
+    shakes out runners that dip first (Oct 16 alone −$36k).
+  (`EXIT_TESTS_FROM`, `VF_BARS`, `VF_REL`, `VF_SESSIONS`, `BE_TRIGGER_PCT`.)
+- **Friday fallback test** (report only, from 2026-11-14; `FRIDAY_FALLBACK_TEST`):
+  a Friday-morning entry skipped because no same-day strike is liquid is still
+  skipped, but the strike, size and estimated price next week's expiry would have
+  given are recorded on the skip (`fallback_test`), shown in the SKIPPED message and
+  a journal note, for the review to price (Nov 13: 6 such shorts, −2.59R to
+  TradingView's exits, +3.18R with the 90-minute stop).
 - **Premium ladder test** (from 2026-11-12, end-of-week review only: not in the
   journal, nothing is sold; `journal --ladder` builds it): sell
   the option in steps as its price rises over the entry instead of waiting for
@@ -557,7 +600,11 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
   trade, `summary.ladder_test` and a note, for the weekend review. A sale rebooked by user decision
   is tested on its original exit (`replaced_event`). Replay Nov 9-12 (35 trades):
   as traded -$315, 1/4 ladder +$12,976, 1/3 at +25/50/100% +$13,741. Candle
-  fetches go in batches of 14 symbols.
+  fetches go in batches of 14 symbols. Not to be traded (Nov 14 review): over 12
+  weeks (model replay) every ladder lost $21k-$106k, because a few same-day /
+  next-day runners make most of the profit (the 7 real trades since Oct 16 that
+  finished above +100% made +$50.4k, more than all 175 trades together) and a
+  ladder sells them by +100-200%. It stays as a weekly report.
 - **Notifications:** every action goes to the Telegram chat in `.env`.
 - **Paper only:** it refuses to start unless `IBKR_PORT` is 7497 or 4002.
 

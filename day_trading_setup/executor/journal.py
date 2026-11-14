@@ -80,6 +80,8 @@ def _exit_kind(ev):
     m = re.match(r"TradingView (\w+)", why)
     if m:
         return m.group(1)
+    if why.startswith("time limit"):
+        return "TIME LIMIT"
     return "SWEEP" if "sweep" in why else why[:20]
 
 
@@ -332,6 +334,140 @@ def ladder_summary(trades):
     return out
 
 
+def _booked_sales(trade, repriced):
+    """(entry, [(minute ms, qty, price)]) of the trade's sales as the journal books them, at
+    the journal's prices (closing sales at the mid / bid by the close rule), or None."""
+    fl = reprice.fills(trade)
+    rbuy = (repriced or {}).get(reprice.event_key(trade, fl[0])) if fl else None
+    if not rbuy or rbuy.get("true") is None or len(fl) < 2:
+        return None
+    sells = []
+    for s in fl[1:]:
+        r = repriced.get(reprice.event_key(trade, s)) or {}
+        px = r.get("true") if r.get("true") is not None else s.get("price")
+        if px is None:
+            return None
+        if close_exit(s["t"]) and r.get("trade_minutes_30", 0) < settings.CLOSE_LIQUID_MINUTES \
+                and s.get("bid") is not None and s.get("ask") is not None:
+            px = round(px - (s["ask"] - s["bid"]) / 2, 2)
+        sells.append((int(_ny(s["t"]).timestamp() * 1000) // 60000 * 60000, s.get("qty") or int(s["action"].split()[1]), px))
+    return rbuy["true"], sells
+
+
+def be_test(trade, repriced):
+    """Option break-even stop TEST (report only, from EXIT_TESTS_FROM): once the option has
+    traded BE_TRIGGER_PCT above entry, everything left is sold the first minute it trades at
+    or below the entry price (at that minute's price). None without option bars, else
+    {"entry", "pnl_booked", "pnl", "armed", "fired": time or None, "price"}."""
+    if trade.get("opened_at", "")[:10] < settings.EXIT_TESTS_FROM:
+        return None
+    ev = reprice.bars_check(trade)
+    rb = (repriced or {}).get(reprice.event_key(trade, ev)) if ev else None
+    sales = _booked_sales(trade, repriced)
+    if not rb or not rb.get("bars") or not sales:
+        return None
+    entry, sells = sales
+    t0 = int(_ny(trade["opened_at"]).timestamp() * 1000) // 60000 * 60000
+    base = sum(q * (p - entry) * 100 for _, q, p in sells)
+    left, pnl, si, armed, fired = trade["qty"], 0.0, 0, None, None
+    day = _ny(trade["opened_at"]).date()
+    hm = lambda m: _hm(datetime.fromtimestamp(m / 1000, NY), day)
+    for m, o, c in rb["bars"]:
+        while si < len(sells) and sells[si][0] <= m and left > 0:
+            q = min(sells[si][1], left)
+            pnl += q * (sells[si][2] - entry) * 100
+            left -= q
+            si += 1
+        if left <= 0:
+            break
+        if m <= t0:
+            continue
+        for px in (o, c):
+            if armed and px <= entry:
+                pnl += left * (px - entry) * 100
+                fired, left = (hm(m), px), 0
+                break
+            if armed is None and px >= entry * (1 + settings.BE_TRIGGER_PCT / 100):
+                armed = hm(m)
+        if left <= 0:
+            break
+    while si < len(sells) and left > 0:
+        q = min(sells[si][1], left)
+        pnl += q * (sells[si][2] - entry) * 100
+        left -= q
+        si += 1
+    return {"entry": entry, "pnl_booked": round(base, 2), "pnl": round(pnl, 2), "armed": armed,
+            "fired": fired[0] if fired else None, "price": fired[1] if fired else None}
+
+
+def vf_test(trade, repriced):
+    """Volume-fade exit TEST (report only, from EXIT_TESTS_FROM): before the first sale,
+    sell everything at a 5-minute close when the last VF_BARS bars all had relative volume
+    below VF_REL and none made a new extreme beyond the best price since entry. Relative
+    volume = bar volume / average volume of the same bar time over the previous VF_SESSIONS
+    sessions (at least 3). None without data, else {"entry", "pnl_booked", "pnl", "fired",
+    "price"}."""
+    if trade.get("opened_at", "")[:10] < settings.EXIT_TESTS_FROM:
+        return None
+    rv = (repriced or {}).get(reprice.event_key(trade, {"action": "VOL5"}))
+    ev = reprice.bars_check(trade)
+    rb = (repriced or {}).get(reprice.event_key(trade, ev)) if ev else None
+    sales = _booked_sales(trade, repriced)
+    if not rv or not rv.get("bars") or not rb or not rb.get("bars") or not sales:
+        return None
+    entry, sells = sales
+    base = sum(q * (p - entry) * 100 for _, q, p in sells)
+    out = {"entry": entry, "pnl_booked": round(base, 2), "pnl": round(base, 2), "fired": None, "price": None}
+    opened = _ny(trade["opened_at"])
+    day = opened.date()
+    bars = sorted(rv["bars"])
+    hist, rel = {}, {}
+    for m, o, hi, lo, c, v in bars:
+        d = datetime.fromtimestamp(m / 1000, NY)
+        k = d.strftime("%H:%M")
+        prev = hist.setdefault(k, [])[-settings.VF_SESSIONS:]
+        rel[m] = v / (sum(prev) / len(prev)) if len(prev) >= 3 and sum(prev) > 0 else None
+        if d.date() < day:
+            hist[k].append(v)
+    long_ = trade["side"] == "LONG"
+    t_entry = int(opened.timestamp() * 1000)
+    first_sale = sells[0][0]
+    today = [b for b in bars if datetime.fromtimestamp(b[0] / 1000, NY).date() == day]
+    ent_i = next((i for i, b in enumerate(today) if b[0] <= t_entry < b[0] + 300000), None)
+    if ent_i is None:
+        return out
+    for i in range(ent_i + settings.VF_BARS, len(today)):
+        close_ms = today[i][0] + 300000
+        if close_ms > first_sale:
+            break
+        win = today[i - settings.VF_BARS + 1:i + 1]
+        if any(rel.get(b[0]) is None or rel[b[0]] >= settings.VF_REL for b in win):
+            continue
+        before = today[ent_i:i - settings.VF_BARS + 1]
+        ext = max(b[2] for b in before) if long_ else min(b[3] for b in before)
+        if any((b[2] > ext) if long_ else (b[3] < ext) for b in win):
+            continue
+        opt = {m: (o, c) for m, o, c in rb["bars"]}
+        px, _how = reprice.true_price(opt, datetime.fromtimestamp(close_ms / 1000, NY))
+        if px is None:
+            return out
+        out.update(fired=_hm(datetime.fromtimestamp(close_ms / 1000, NY), day), price=px,
+                   pnl=round(trade["qty"] * (px - entry) * 100, 2))
+        break
+    return out
+
+
+def exit_test_summary(trades, key):
+    """Day totals of a report-only exit test: trades checked, fired, P&L booked vs with the rule."""
+    rec = [t for t in trades if t.get(key)]
+    if not rec:
+        return None
+    booked = sum(t[key]["pnl_booked"] for t in rec)
+    rule = sum(t[key]["pnl"] for t in rec)
+    return {"checked": len(rec), "fired": [t["ticker"] for t in rec if t[key].get("fired")],
+            "pnl_booked": round(booked, 2), "pnl_with_rule": round(rule, 2), "change": round(rule - booked, 2)}
+
+
 def time_limit_summary(trades):
     """Day totals for the time-limit test, or None when no trade was checked."""
     checked = [t for t in trades if t.get("time_limit")]
@@ -369,6 +505,9 @@ def build_day(day, mode="dry", ladder=False):
     for t in sorted([t for t in state["closed"] + list(state["positions"].values()) if real_entries(t)], key=lambda t: t["opened_at"]):
         closed_today = bool(t.get("closed_at")) and _ny(t["closed_at"]).date() == day
         e = trade_entry(t, day, lines, repriced)
+        if closed_today:
+            e["vf_test"] = vf_test(t, repriced)
+            e["be_test"] = be_test(t, repriced)
         if ladder:
             e["ladder"] = ladder_test(t, repriced)
         today = [l for l in e["legs"] if _ny(l["t"]).date() == day]
@@ -418,6 +557,22 @@ def build_day(day, mode="dry", ladder=False):
                      f"{tls['minutes'] // 60}-hour mark, {tls['would_sell']} below the entry price would have been sold ({names}); "
                      f"P&L with the rule ${tls['pnl_with_rule']:,.0f} vs ${tls['pnl_real']:,.0f} ({tls['change']:+,.0f})"
                      + (f"; {tls['unpriced']} not priced yet" if tls["unpriced"] else "") + ".")
+    for key, label, rule in (
+            ("vf_test", "Volume-fade exit test", f"before 2R, sell after {settings.VF_BARS} quiet 5-min bars (volume under "
+             f"{settings.VF_REL:g}x the usual for the time of day) with no new high/low"),
+            ("be_test", "Break-even stop test", f"once the option is +{settings.BE_TRIGGER_PCT}% over its entry, sell the rest "
+             f"if it falls back to the entry price")):
+        sm = exit_test_summary(trades, key)
+        if sm:
+            notes.append(f"{label} (not traded; {rule}): {len(sm['fired'])} of {sm['checked']} trade(s) would have been sold"
+                         + (f" ({', '.join(sm['fired'])})" if sm["fired"] else "")
+                         + f"; P&L with the rule ${sm['pnl_with_rule']:,.0f} vs ${sm['pnl_booked']:,.0f} ({sm['change']:+,.0f}).")
+    fb = [s for s in skipped if s.get("fallback_test", {}).get("qty")]
+    if fb:
+        notes.append("Friday fallback test (not traded; no liquid same-day strike, next week's expiry instead): "
+                     + "; ".join(f"{s['ticker']} {s['side'].lower()} at {_ny(s['t']):%H:%M}: {s['fallback_test']['qty']} x "
+                                 f"{s['fallback_test']['strike']:g}{s['fallback_test']['right']} {s['fallback_test']['expiry']} "
+                                 f"@ about {s['fallback_test']['price'] or 0:.2f}" for s in fb) + ".")
     lad = ladder_summary(trades) if ladder else None
     if lad:
         parts = [f"{name}: {v['reached_first_step']} of {lad['checked']} reached the first step, P&L ${v['pnl']:,.0f} ({v['change']:+,.0f})"
@@ -438,6 +593,8 @@ def build_day(day, mode="dry", ladder=False):
             "worst": {"ticker": worst["ticker"], "pnl_real": worst["pnl_real"]} if worst else None,
             "skipped": len(skipped), "errors": len(errors), "open": len(still_open),
             "time_limit_test": tls,
+            "vf_test": exit_test_summary(trades, "vf_test"),
+            "be_test": exit_test_summary(trades, "be_test"),
             **({"ladder_test": lad} if ladder else {}),
         },
         "trades": trades, "open": still_open, "skipped": skipped, "errors": errors,

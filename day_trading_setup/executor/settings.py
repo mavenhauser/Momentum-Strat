@@ -105,6 +105,49 @@ CLOSE_LIQUID_MINUTES = 15
 # To be reviewed the weekend of Nov 14 on Nov 12-13; if confirmed, live from Nov 16.
 TIME_LIMIT_MIN = 120
 TIME_LIMIT_TEST_FROM = "2026-11-12"
+# Time limit LIVE (user decision, 2026-11-14): from this date the rule sells. DTS Entry
+# (v20.0) sends "DTS: CHECK LONG MU @ <live price> | 2h without 2R | entry ..." at the
+# first 5-minute close TIME_LIMIT_MIN after the entry bar while the trade has not reached
+# 2R; the executor estimates the option's price now (the delayed quote repriced to that
+# live stock price, as for sizing) and sells everything if it is below the entry price.
+# Evidence: replay Oct 14-Nov 11 +$8.4k (25 cuts); live Nov 11 +$338, Nov 12 +$756;
+# 12-week model replay (Aug 25-Nov 13) +$2.2k to +$5.8k, better in 8 of 12 weeks. A
+# stock-only version (stock on the wrong side of entry) was about flat (-$0.3k), so the
+# option price is what decides. The report-only test stops on this date.
+TIME_LIMIT_LIVE_FROM = "2026-11-16"
+TIME_LIMIT_EARLY_MIN = 5           # a CHECK this many minutes early still counts (entry inside its 5-min bar)
+# Sizing from delayed quotes (user decision, 2026-11-14). This account's option quotes are
+# ~15 minutes old, so in a fast market the executor bought 2-3.5x its budget (AMD Nov 13:
+# quote 1.98 vs 7.28 traded -> 17 contracts on a $3,500 budget that buys 4). Each delayed
+# option quote is now repriced to the alert's live stock price before the strike and size
+# are chosen: its implied volatility is read from the delayed mid at the delayed stock
+# price (the stock's quote on the same feed, delayed the same), then Black-Scholes at the
+# live price. Tested on 171 fills (Oct 16-Nov 13): median price error 6% -> 3%, trades at
+# >= 1.25x budget 33 -> 7 (AMD 17 -> 5, GOOGL Nov 12 50 -> 26, AVGO Nov 13 30 -> 15).
+# The same estimate prices fills recorded on TradingView alerts and the 2-hour check.
+# Turn OFF once the option quotes are real time (they would then need no adjustment).
+QUOTE_DELAY_ADJUST = True
+# Report-only exit tests (user decision, 2026-11-14; nothing is sold, journal notes only,
+# priced from real 1-minute option prices; decide at the Nov 17 review):
+#  - volume fade: before 2R (no sale yet), sell at a 5-minute close when the last
+#    VF_BARS bars all had relative volume < VF_REL (bar volume / average of the same bar
+#    time over the previous VF_SESSIONS sessions) and none made a new high (long) / low
+#    (short) beyond the best price since entry. 12-week model: +$4.6k to +$9.8k; with
+#    the time limit +$9.6k to +$16k.
+#  - option break-even stop: once the option has traded at least BE_TRIGGER_PCT above
+#    its entry price, everything left is sold the first minute it trades at or below the
+#    entry price. Real prices Nov 9-13 +$0.7k on the journal's exits; 12-week model -$40k
+#    (it shakes out runners that dip first, e.g. Oct 16).
+EXIT_TESTS_FROM = "2026-11-12"
+VF_BARS = 3
+VF_REL = 0.5
+VF_SESSIONS = 5
+BE_TRIGGER_PCT = 25
+# Friday fallback test (user decision, 2026-11-14, report only): when a Friday-morning
+# entry finds no liquid same-day strike, the executor still skips it but records the
+# strike and size it would have bought on next week's expiry, so the review can price it
+# (Nov 13: 6 such shorts, -2.59R to TradingView's exits, +3.18R with the 90-min stop).
+FRIDAY_FALLBACK_TEST = True
 # Premium ladder test (user, 2026-11-12, report only, nothing is sold): instead of waiting
 # for the stock's 2R, sell the option in steps as its premium rises, e.g. 1/4 of the
 # position at +25% over the entry price, another 1/4 at +50%, ... ; the stock exits

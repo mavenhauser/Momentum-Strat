@@ -705,5 +705,118 @@ class PremiumLadderTestTest(unittest.TestCase):
         self.assertIsNone(reprice.bars_check(dict(t, closed_at=None)))
 
 
+class QuoteEstimateTest(unittest.TestCase):
+    """Delayed quotes repriced to the alert's live stock price (user decision 2026-11-14)."""
+    T = datetime(2026, 11, 13, 9, 51, tzinfo=__import__("zoneinfo").ZoneInfo("America/New_York"))
+
+    def test_amd_nov13_put(self):
+        from day_trading_setup.executor import estimate
+        # delayed quote 1.91/2.04 with AMD at 562.61; alert at 548.22; traded 7.28
+        px = estimate.price_now(1.975, 562.61, 548.22, 547.5, date(2026, 11, 13), "P", self.T)
+        self.assertTrue(6.0 < px < 7.3, px)
+        q = estimate.shift_quote({"bid": 1.91, "ask": 2.04, "delta": -0.24, "volume": 500}, 562.61, 548.22, 547.5,
+                                 date(2026, 11, 13), "P", self.T)
+        self.assertTrue(q["adjusted"])
+        self.assertAlmostEqual(q["ask"] - q["bid"], 0.13, delta=0.011)      # the delayed spread is kept (to rounding)
+        self.assertEqual((q["delayed_bid"], q["volume"]), (1.91, 500))
+        self.assertLess(q["delta"], -0.24)                                  # deeper in the money now
+        self.assertEqual(int(3500 // (q["ask"] * 100)), 5)                  # 5 contracts, not 17
+
+    def test_no_move_no_change_and_missing_data(self):
+        from day_trading_setup.executor import estimate
+        px = estimate.price_now(2.0, 300.0, 300.0, 300.0, date(2026, 11, 13), "C", self.T)
+        self.assertAlmostEqual(px, 2.0, delta=0.06)                          # only 15 min of time decay
+        self.assertIsNone(estimate.price_now(2.0, None, 300.0, 300.0, date(2026, 11, 13), "C", self.T))
+        self.assertFalse(estimate.shift_quote({"bid": None, "ask": 2.0}, 300, 301, 300, date(2026, 11, 13), "C", self.T)["adjusted"])
+
+
+class TimeLimitLiveTest(unittest.TestCase):
+    """The 2-hour time limit sells from TIME_LIMIT_LIVE_FROM (user decision 2026-11-14)."""
+    NY = __import__("zoneinfo").ZoneInfo("America/New_York")
+
+    def _run(self, quote, opened="2026-11-16T10:00:00-05:00", at=(12, 0), trimmed=False, msg="DTS: CHECK LONG MU @ 795.10 | 2h without 2R | entry 790.00"):
+        from day_trading_setup.executor import executor
+        pos = {"ticker": "MU", "side": "LONG", "right": "C", "strike": 800.0, "expiry": "2026-11-20", "qty": 4,
+               "open_qty": 2 if trimmed else 4, "trimmed": trimmed, "avg_cost": 6.0, "est_entry": 6.0,
+               "opened_at": opened, "events": [], "delta": 0.4}
+        state = {"positions": {"MU": pos}, "closed": []}
+        broker = types.SimpleNamespace(quote=lambda p: (quote - 0.1, quote + 0.1, "TastyTrade"), adjust=lambda p, q: q)
+        closed, sent = [], []
+        with mock.patch.object(executor, "close_position", lambda b, st, p, t, why, raw: closed.append(why)), \
+             mock.patch.object(executor, "notify", sent.append):
+            executor.on_check(broker, state, signals.parse(msg), datetime(2026, 11, 16, *at, tzinfo=self.NY))
+        return closed, pos["events"]
+
+    def test_sells_below_entry_and_holds_above(self):
+        closed, _ = self._run(5.5)
+        self.assertEqual(len(closed), 1)
+        self.assertIn("time limit", closed[0])
+        closed, ev = self._run(6.5)
+        self.assertEqual(closed, [])
+        self.assertIn("HOLD at the 2-hour check", ev[0]["action"])
+
+    def test_ignored_after_2r_too_early_wrong_side_or_before_go_live(self):
+        self.assertEqual(self._run(5.5, trimmed=True), ([], []))
+        self.assertEqual(self._run(5.5, at=(11, 30)), ([], []))
+        self.assertEqual(self._run(5.5, msg="DTS: CHECK SHORT MU @ 795.10 | 2h without 2R | entry 790.00"), ([], []))
+        with mock.patch.object(settings, "TIME_LIMIT_LIVE_FROM", "2026-11-17"):
+            self.assertEqual(self._run(5.5), ([], []))
+        self.assertEqual(self._run(5.5, at=(11, 56))[0][:1] and "sold", "sold")   # 4 minutes early (entry inside its bar) still counts
+
+    def test_parse_backfill_and_report_test_stops(self):
+        from day_trading_setup.executor import backfill, reprice
+        sig = signals.parse("DTS: CHECK SHORT AMD @ 548.22 | 2h without 2R | entry 551.00")
+        self.assertEqual((sig.kind, sig.ticker, sig.side, sig.price), ("CHECK", "AMD", "SHORT", 548.22))
+        self.assertIn("CHECK", backfill.ACTIONABLE)
+        t = {"ticker": "MU", "opened_at": "2026-11-16T10:00:00-05:00", "qty": 4,
+             "events": [{"t": "2026-11-16T10:00:00-05:00", "action": "BUY 4 @ 2.0", "qty": 4, "price": 2.0}]}
+        self.assertIsNone(reprice.time_limit_check(t))
+
+
+class ExitTestsTest(unittest.TestCase):
+    """Report-only exit tests: option break-even stop and volume fade (user decision 2026-11-14)."""
+    NY = __import__("zoneinfo").ZoneInfo("America/New_York")
+    m = staticmethod(lambda hm, d="2026-11-16": int(datetime.fromisoformat(f"{d}T{hm}:00-05:00").timestamp() * 1000))
+
+    def _trade(self, sell_t="15:55", side="LONG"):
+        return {"ticker": "MU", "side": side, "opened_at": "2026-11-16T10:00:30-05:00", "closed_at": f"2026-11-16T{sell_t}:00-05:00",
+                "qty": 4, "events": [{"t": "2026-11-16T10:00:30-05:00", "action": "BUY 4 @ 2.0", "qty": 4, "price": 2.0},
+                                     {"t": f"2026-11-16T{sell_t}:00-05:00", "action": "SELL 4 @ 1.0 (TradingView EOD)", "qty": 4, "price": 1.0,
+                                      "bid": 0.95, "ask": 1.05}]}
+
+    def _rp(self, t, bars, vol=None):
+        from day_trading_setup.executor import reprice
+        rp = {f"MU|{t['opened_at']}": {"true": 2.0}, f"MU|{t['events'][1]['t']}": {"true": 1.0, "trade_minutes_30": 30},
+              f"MU|{t['opened_at']}|BARS": {"bars": bars}}
+        if vol is not None:
+            rp[f"MU|{t['opened_at']}|VOL5"] = {"bars": vol}
+        return rp
+
+    def test_break_even_stop(self):
+        from day_trading_setup.executor import journal
+        m, t = self.m, self._trade()
+        bars = [[m("10:01"), 2.0, 2.2], [m("10:20"), 2.6, 2.4], [m("11:00"), 2.1, 1.9], [m("15:55"), 1.0, 1.0]]
+        r = journal.be_test(t, self._rp(t, bars))
+        self.assertEqual((r["armed"], r["fired"], r["price"], r["pnl"], r["pnl_booked"]), ("10:20", "11:00", 1.9, -40.0, -400.0))
+        r = journal.be_test(t, self._rp(t, [[m("10:01"), 2.0, 2.2], [m("11:00"), 2.1, 1.9]]))   # never +25%: as booked
+        self.assertEqual((r["fired"], r["pnl"]), (None, -400.0))
+
+    def test_volume_fade(self):
+        from day_trading_setup.executor import journal
+        m, t = self.m, self._trade()
+        vol = []
+        for d in ("2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12", "2026-11-13"):
+            for hm in ("10:00", "10:05", "10:10", "10:15", "10:20", "10:25"):
+                vol.append([m(hm, d), 100, 101, 99, 100, 1000])
+        # entry bar 10:00 makes the high (105); then 3 quiet bars under it: fires at the 10:20 close (10:15 bar)
+        today = [("10:00", 105, 1500), ("10:05", 104, 300), ("10:10", 103, 300), ("10:15", 104.5, 300), ("10:20", 106, 2000)]
+        vol += [[m(hm), 102, hi, 101, 102, v] for hm, hi, v in today]
+        bars = [[m("10:01"), 2.0, 2.1], [m("10:20"), 1.8, 1.7], [m("15:55"), 1.0, 1.0]]
+        r = journal.vf_test(t, self._rp(t, bars, vol))
+        self.assertEqual((r["fired"], r["price"], r["pnl"]), ("10:20", 1.8, -80.0))
+        vol[-3][5] = 900                                                    # one bar not quiet: no fire
+        self.assertIsNone(journal.vf_test(t, self._rp(t, bars, vol))["fired"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,7 +8,7 @@ during the session (from the every-minute sweep) this compares the log with the
 receiver's inbox and sends any DTS fire that never arrived to the receiver, as if
 TradingView had delivered it now:
 
-  - exits, 2R/4R sales and strong-close notes: always re-sent, however late
+  - exits, 2R/4R sales, 2-hour checks and strong-close notes: always re-sent, however late
     (the position is still open, so selling now is what a person would do);
   - entries: re-sent only up to BACKFILL_ENTRY_MAX_MIN after the fire, later
     ones are reported but not bought (the price has moved on);
@@ -32,7 +32,7 @@ from day_trading_setup.executor import settings, signals
 
 NY = ZoneInfo("America/New_York")
 log = logging.getLogger("dts.backfill")
-ACTIONABLE = ("ENTRY", "TARGET", "EXIT", "STRONG")
+ACTIONABLE = ("ENTRY", "TARGET", "EXIT", "CHECK", "STRONG")
 MATCH_BEFORE = timedelta(minutes=2)
 MATCH_AFTER = timedelta(minutes=10)
 

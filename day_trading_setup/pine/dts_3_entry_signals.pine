@@ -88,6 +88,12 @@ trendChase = input.bool(true, "Trend day: no 'don't chase' limit and no extensio
 bandEntry = input.bool(true, "Trend day: pullback to the VWAP band instead of the 8 EMA", group = G_ENT, tooltip = "On a trend day the retest and the trigger use the session VWAP's standard-deviation band (upper band for longs, lower band for shorts) in place of the 8 EMA. The broken level still counts as a retest.", display = display.none)
 bandTrail = input.bool(true, "Trend day: runner exits on a close back through the VWAP band", group = G_RISK, tooltip = "For a trade entered on a trend day, after the 2R target the runner exits (TRAIL) on a 5-minute close back inside the VWAP band (below the upper band for longs, above the lower band for shorts) instead of the 40% giveback. The 3R / 4R runner rules still apply.", display = display.none)
 bandK = input.float(1.0, "VWAP band (standard deviations)", minval = 0.25, step = 0.25, group = G_ENT, display = display.none)
+// Time limit (v20.0, 2026-11-14, user decision): one CHECK alert with the live price at the
+// first 5-minute close this many minutes after the entry bar, while the trade has not reached
+// 2R. The executor estimates the option's price at that stock price and sells the position if
+// the option is below its entry price (nothing changes on the chart: the trade continues here).
+// Kept after the older inputs so the alerts' saved settings line up.
+tlMin = input.int(120, "Time-limit check after (minutes, 0 = off)", minval = 0, step = 5, group = G_RISK, tooltip = "Sends 'DTS: CHECK LONG/SHORT <ticker> @ <price> | 2h without 2R | entry <price>' once per trade, at the first bar close this many minutes after the entry bar, if the 2R target has not been hit. The executor sells if the option is below its entry price. 0 = off.", display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744
@@ -235,6 +241,8 @@ var bool  posTrend = false // entered on a trend day (v19.0): runner trails the 
 var bool  runHit = false   // runner target reached with QQQ on the trade's side: partial taken, the rest trails
 var float bestPx = na      // best price since entry (high for longs, low for shorts)
 var int   entBar = na
+var int   entTime = na     // entry bar's open time (v20.0 time-limit check)
+var bool  chkSent = false  // the time-limit CHECK alert went out for this trade
 var line  lnEnt = na
 var line  lnStp = na
 var line  lnTgt = na
@@ -342,6 +350,11 @@ if pos != 0 and bar_index > entBar
         exitNow := true
         exitPx  := close
         exitTxt := "TIME"
+    // Time-limit check (v20.0): once, at the first bar close tlMin after the entry bar, before 2R.
+    if not exitNow and not tgtHit and not tgtNow and not chkSent and tlMin > 0 and rth and time_close >= entTime + tlMin * 60000
+        chkSent := true
+        if exitAlerts and barstate.isconfirmed
+            alert("DTS: CHECK " + (pos == 1 ? "LONG " : "SHORT ") + syminfo.ticker + " @ " + fmt(close) + " | " + str.tostring(tlMin / 60.0, "#.##") + "h without 2R | entry " + fmt(entPx), alert.freq_once_per_bar_close)
     line.set_x2(lnEnt, bar_index)
     line.set_x2(lnStp, bar_index)
     line.set_x2(lnTgt, bar_index)
@@ -542,6 +555,8 @@ if goDir != 0
     posTrend := goTrend
     bestPx := goPx
     entBar := bar_index
+    entTime := time
+    chkSent := false
     tradesToday += 1
     heldSessions := 1
     lnEnt := line.new(bar_index, entPx, bar_index + 1, entPx, color = color.new(color.white, 30), width = 1)
