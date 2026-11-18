@@ -732,7 +732,9 @@ def rebook_quantities(p, new):
 
 def resize_to_true(state, t):
     """Resize each new position to its budget at the real entry price once that price is in
-    (user, 2026-11-17). Returns True if anything changed."""
+    (user, 2026-11-17), only during the session of its entry day: no resize after the market,
+    so a late entry whose price arrives after the close keeps its size. Returns True if
+    anything changed."""
     from day_trading_setup.executor import reprice
     due = _resize_due(state, t)
     if not due:
@@ -741,6 +743,11 @@ def resize_to_true(state, t):
     repriced = json.loads(rp.read_text()) if rp.exists() else {}
     changed = False
     for p in due:
+        if not contracts.in_session(t) or datetime.fromisoformat(p["opened_at"]).astimezone(NY).date() != t.date():
+            p["resize_checked"] = True        # no resize after the market (user, 2026-11-17): keeps its size
+            p["resize_skipped"] = "real price not in before the close"
+            changed = True
+            continue
         r = repriced.get(reprice.event_key(p, p["events"][0]))
         if r is None:
             continue                          # not priced yet: next minute
@@ -773,7 +780,7 @@ def prefetch_results(t):
     from day_trading_setup.executor import reprice
     try:
         state = load_state()
-        if _results_due(state, t) or _trims_due(state, t) or _resize_due(state, t):
+        if _results_due(state, t) or _trims_due(state, t) or (_resize_due(state, t) and contracts.in_session(t)):
             reprice.run("paper" if settings.EXECUTE else "dry")
     except Exception as e:
         log.warning("reprice failed, results retried next minute: %s: %s", type(e).__name__, e)

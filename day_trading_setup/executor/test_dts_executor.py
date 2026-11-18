@@ -427,6 +427,22 @@ class ContractTest(unittest.TestCase):
         self.assertNotIn("resize_checked", late)
         self.assertEqual(len(sent), 2)
         self.assertIn("12 → <b>7</b>", sent[0])
+        # no resize after the market: a late entry priced after the close keeps its size
+        lt = pos("AMD", 12, 4.07)
+        lt["opened_at"] = lt["events"][0]["t"] = "2026-11-18T15:50:00-05:00"
+        st2 = {"positions": {"AMD": lt}, "closed": []}
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "rp.json"
+            f.write_text(json.dumps({reprice.event_key(lt, lt["events"][0]): {"true": 6.5}}))
+            with mock.patch.object(reprice, "reprice_path", lambda mode: f), \
+                 mock.patch.object(settings, "EXECUTE", False), \
+                 mock.patch.object(settings, "RESIZE_TO_TRUE_FROM", "2026-11-18T09:30"), \
+                 mock.patch.object(executor, "notify", sent.append):
+                self.assertTrue(executor.resize_to_true(st2, datetime(2026, 11, 18, 16, 7, tzinfo=executor.NY)))
+                self.assertFalse(executor.resize_to_true(st2, datetime(2026, 11, 19, 9, 45, tzinfo=executor.NY)))
+        self.assertEqual((lt["qty"], lt["resize_checked"]), (12, True))
+        self.assertNotIn("resized", lt)
+        self.assertEqual(len(sent), 2)
 
     def test_half_day_no_new_entries(self):
         from day_trading_setup.executor import executor

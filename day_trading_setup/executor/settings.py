@@ -177,6 +177,8 @@ TRIM_RESULTS_FROM = "2026-10-26T11:00"
 # comes in"). The size is picked off ~15-minute-old quotes moved to the live stock price; about
 # 16 minutes after each entry, once its 1-minute option price is in, the position is re-booked
 # at budget / real price (at least MIN_CONTRACTS_TO_TRIM), open or closed, before its RESULT
+# message. Only while the market is open on the entry day (user: "no resize after the
+# market"): a late entry whose price arrives after the close keeps its size.
 # message. Dry run only: in paper mode the broker's fill is the real price. "" = off.
 RESIZE_TO_TRUE_FROM = "2026-11-18T09:30"
 MIN_DELTA_0DTE = 0.15        # expiry day (normally Friday): explicit so a later weekday change doesn't touch it; 0.25 is hard to find out of the money on 0DTE
