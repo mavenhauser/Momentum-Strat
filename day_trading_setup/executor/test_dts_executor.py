@@ -378,71 +378,50 @@ class ContractTest(unittest.TestCase):
                 self.assertEqual(state["skipped"][0]["ticker"], "TSLA")
                 self.assertEqual(state["positions"], {})
 
-    def test_resize_to_real_entry_price(self):
-        # 2026-11-17 (user decision): once the entry's 1-minute price is in, re-book the position
-        # at budget / real price, open or closed, before the RESULT message.
-        import tempfile
-        from pathlib import Path
-        from day_trading_setup.executor import executor, reprice
-        def pos(tk, qty, est, sells=(), closed=False):
-            t0 = "2026-11-18T09:45:00-05:00"
+    def test_end_of_day_resize(self):
+        # 2026-11-17 (user decision): no resize during the session; at the end of the day, when
+        # the journal is built, each trade opened that day is re-booked at budget / real price.
+        from day_trading_setup.executor import resize, reprice
+        def pos(tk, qty, est, sells=(), closed=True, frac=0.05, day="2026-11-18"):
+            t0 = f"{day}T09:45:00-05:00"
             ev = [{"t": t0, "action": f"BUY {qty} @ {est}", "qty": qty, "price": est}]
             for i, (n, px, why) in enumerate(sells):
-                ev.append({"t": f"2026-11-18T10:{10 + i}:00-05:00", "action": f"SELL {n} @ {px} ({why})", "qty": n, "price": px})
-            p = {"ticker": tk, "streamer": f".{tk}261120P100", "right": "P", "strike": 100.0, "expiry": "2026-11-20", "qty": qty, "open_qty": qty - sum(n for n, _, _ in sells),
-                 "avg_cost": est, "size_fraction": 0.05, "nlv": 100000, "opened_at": t0, "events": ev, "trimmed": bool(sells)}
+                ev.append({"t": f"{day}T10:{10 + i}:00-05:00", "action": f"SELL {n} @ {px} ({why})", "qty": n, "price": px})
+            p = {"ticker": tk, "streamer": f".{tk}261120P100", "right": "P", "strike": 100.0, "qty": qty,
+                 "open_qty": qty - sum(n for n, _, _ in sells), "avg_cost": est, "size_fraction": frac,
+                 "nlv": 100000, "opened_at": t0, "events": ev, "trimmed": bool(sells), "pnl_confirmed": 1.0}
             if closed:
-                p.update(closed_at="2026-11-18T10:20:00-05:00", open_qty=0)
+                p.update(closed_at=f"{day}T15:55:00-05:00", open_qty=0)
             return p
-        unh = pos("UNH", 12, 4.07, [(6, 5.0, "2R trim")])                 # open, trimmed at 2R
-        mu = pos("MU", 4, 8.41, [(2, 13.91, "2R trim"), (2, 12.44, "TradingView TRAIL @ 685.2")], closed=True)
-        mu["size_fraction"] = 0.035                                        # A OUTSIDE: $3,500
-        ok = pos("AMZN", 9, 4.95)                                          # already at budget
-        late = pos("META", 4, 10.4)                                        # entry not priced yet
-        state = {"positions": {"UNH": unh, "AMZN": ok, "META": late}, "closed": [mu]}
-        real = {"UNH": 6.50, "MU": 9.15, "AMZN": 5.12}
-        with tempfile.TemporaryDirectory() as d:
-            f = Path(d) / "rp.json"
-            f.write_text(json.dumps({reprice.event_key(p, p["events"][0]): {"true": real[p["ticker"]]}
-                                     for p in (unh, mu, ok)}))
-            sent = []
-            with mock.patch.object(reprice, "reprice_path", lambda mode: f), \
-                 mock.patch.object(settings, "EXECUTE", False), \
-                 mock.patch.object(settings, "RESIZE_TO_TRUE_FROM", "2026-11-18T09:30"), \
-                 mock.patch.object(executor, "notify", sent.append):
-                early = datetime(2026, 11, 18, 9, 55, tzinfo=executor.NY)
-                self.assertFalse(executor.resize_to_true(state, early))            # under 16 min: not yet
-                t = datetime(2026, 11, 18, 10, 30, tzinfo=executor.NY)
-                self.assertTrue(executor.resize_to_true(state, t))
-                self.assertFalse(executor.resize_to_true(state, t))                # done once
-        self.assertEqual((unh["qty"], unh["events"][0]["qty"], unh["events"][1]["qty"], unh["open_qty"]), (7, 7, 3, 4))
-        self.assertEqual(unh["events"][1]["action"], "SELL 3 @ 5.0 (2R trim)")
-        self.assertEqual(unh["resized"]["from"], 12)
-        self.assertEqual([e["qty"] for e in mu["events"]], [3, 1, 2])          # 2R = half rounded down, the rest at the trail
-        self.assertEqual(mu["pnl_usd"], round((13.91 + 2 * 12.44 - 3 * 8.41) * 100, 2))
-        self.assertEqual(ok["qty"], 9)
-        self.assertNotIn("resized", ok)
-        self.assertTrue(ok["resize_checked"])
-        self.assertEqual(late["qty"], 4)
-        self.assertNotIn("resize_checked", late)
-        self.assertEqual(len(sent), 2)
-        self.assertIn("12 → <b>7</b>", sent[0])
-        # no resize after the market: a late entry priced after the close keeps its size
-        lt = pos("AMD", 12, 4.07)
-        lt["opened_at"] = lt["events"][0]["t"] = "2026-11-18T15:50:00-05:00"
-        st2 = {"positions": {"AMD": lt}, "closed": []}
-        with tempfile.TemporaryDirectory() as d:
-            f = Path(d) / "rp.json"
-            f.write_text(json.dumps({reprice.event_key(lt, lt["events"][0]): {"true": 6.5}}))
-            with mock.patch.object(reprice, "reprice_path", lambda mode: f), \
-                 mock.patch.object(settings, "EXECUTE", False), \
-                 mock.patch.object(settings, "RESIZE_TO_TRUE_FROM", "2026-11-18T09:30"), \
-                 mock.patch.object(executor, "notify", sent.append):
-                self.assertTrue(executor.resize_to_true(st2, datetime(2026, 11, 18, 16, 7, tzinfo=executor.NY)))
-                self.assertFalse(executor.resize_to_true(st2, datetime(2026, 11, 19, 9, 45, tzinfo=executor.NY)))
-        self.assertEqual((lt["qty"], lt["resize_checked"]), (12, True))
-        self.assertNotIn("resized", lt)
-        self.assertEqual(len(sent), 2)
+        unh = pos("UNH", 12, 4.07, [(12, 4.24, "TradingView STOP @ 395.13")])
+        mu = pos("MU", 4, 8.41, [(2, 13.91, "2R trim"), (2, 12.44, "TradingView TRAIL @ 685.2")], frac=0.035)
+        mu["events"][1]["pnl_confirmed"] = 1290
+        held = pos("GOOGL", 4, 3.67, [(2, 6.12, "2R trim")], closed=False, frac=0.0175)   # runner held overnight
+        ok = pos("AMZN", 9, 4.95, [(9, 3.96, "TradingView STOP @ 256.99")])
+        unpriced = pos("META", 4, 10.4, [(4, 8.9, "TradingView STOP @ 621.5")])
+        old_day = pos("AMD", 17, 1.98, [(17, 20.0, "EOD")], day="2026-11-17")
+        state = {"positions": {"GOOGL": held}, "closed": [unh, mu, ok, unpriced, old_day]}
+        k = lambda p, i: reprice.event_key(p, p["events"][i])
+        rp = {k(unh, 0): {"true": 6.50}, k(unh, 1): {"true": 4.22},
+              k(mu, 0): {"true": 9.15}, k(mu, 1): {"true": 15.60}, k(mu, 2): {"true": 11.73},
+              k(held, 0): {"true": 3.50}, k(held, 1): {"true": 6.09}, k(ok, 0): {"true": 5.12},
+              k(old_day, 0): {"true": 7.28}}
+        out = resize.resize_day(state, date(2026, 11, 18), rp)
+        self.assertEqual({r["ticker"]: (r["from"], r["to"]) for r in out["resized"]},
+                         {"UNH": (12, 7), "MU": (4, 3), "GOOGL": (4, 5)})
+        self.assertEqual((out["unchanged"], out["no_price"]), (1, ["META"]))
+        self.assertEqual([e["qty"] for e in unh["events"]], [7, 7])
+        self.assertEqual(unh["pnl_confirmed"], -1596)
+        self.assertEqual([e["qty"] for e in mu["events"]], [3, 1, 2])           # 2R = half rounded down
+        self.assertEqual((mu["events"][1]["pnl_confirmed"], mu["pnl_confirmed"]), (645, 1161))
+        self.assertEqual((held["qty"], held["events"][1]["qty"], held["open_qty"]), (5, 2, 3))
+        self.assertEqual(old_day["qty"], 17)                                     # another day: untouched
+        self.assertNotIn("resize_checked", unpriced)                              # retried next run
+        again = resize.resize_day(state, date(2026, 11, 18), rp)
+        self.assertEqual((again["resized"], again["unchanged"]), ([], 0))         # once only
+        early = pos("TSLA", 12, 4.0, [(12, 3.0, "EOD")], day="2026-11-17")
+        self.assertEqual(resize.resize_day({"positions": {}, "closed": [early]}, date(2026, 11, 17),
+                                           {k(early, 0): {"true": 6.5}})["resized"], [])   # before RESIZE_FROM
 
     def test_half_day_no_new_entries(self):
         from day_trading_setup.executor import executor

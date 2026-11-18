@@ -26,7 +26,6 @@ import html
 import json
 import re
 import logging
-import math
 import os
 import socket
 import sys
@@ -688,99 +687,13 @@ def _trims_due(state, t):
 _TRIM = re.compile(r"\((\d+(?:\.\d+)?R) trim\)")
 
 
-def _resize_due(state, t):
-    """Positions (open, or closed without a RESULT yet) whose entry can now be priced from
-    1-minute option history and that haven't been checked against their budget."""
-    from day_trading_setup.executor import reprice
-    if settings.EXECUTE or not settings.RESIZE_TO_TRUE_FROM:
-        return []
-    cutoff = t - reprice.DELAY
-    held = list(state["positions"].values()) + [p for p in state["closed"] if not p.get("result_sent")]
-    return [p for p in held if not p.get("resize_checked") and not p.get("resized")
-            and p.get("opened_at", "") >= settings.RESIZE_TO_TRUE_FROM
-            and datetime.fromisoformat(p["opened_at"]) <= cutoff]
-
-
-def rebook_quantities(p, new):
-    """Re-book a position at `new` contracts: the buy, then each sale by the executor's own
-    rules (2R trim = half rounded down, runner trim = half or the last one, an exit = the
-    rest). Returns the contracts still open."""
-    buy = p["events"][0]
-    buy["qty"] = new
-    buy["action"] = re.sub(r"^BUY \d+", f"BUY {new}", buy["action"])
-    left, trims, proceeds = new, 0, 0.0
-    for e in p["events"][1:]:
-        if not e.get("action", "").startswith("SELL"):
-            continue
-        if _TRIM.search(e["action"]):
-            n = contracts.trim_quantity(left) if trims == 0 else (contracts.trim_quantity(left) or left)
-            trims += 1
-        else:
-            n = left
-        e["qty"] = n
-        e["action"] = re.sub(r"^SELL \d+", f"SELL {n}", e["action"])
-        left -= n
-        proceeds += n * (e.get("price") or 0.0)
-    p["qty"] = new
-    p["proceeds"] = proceeds
-    if "closed_at" in p:
-        p["pnl_usd"] = round((proceeds - new * p["avg_cost"]) * 100, 2)
-    else:
-        p["open_qty"] = left
-    return left
-
-
-def resize_to_true(state, t):
-    """Resize each new position to its budget at the real entry price once that price is in
-    (user, 2026-11-17), only during the session of its entry day: no resize after the market,
-    so a late entry whose price arrives after the close keeps its size. Returns True if
-    anything changed."""
-    from day_trading_setup.executor import reprice
-    due = _resize_due(state, t)
-    if not due:
-        return False
-    rp = reprice.reprice_path("dry")
-    repriced = json.loads(rp.read_text()) if rp.exists() else {}
-    changed = False
-    for p in due:
-        if not contracts.in_session(t) or datetime.fromisoformat(p["opened_at"]).astimezone(NY).date() != t.date():
-            p["resize_checked"] = True        # no resize after the market (user, 2026-11-17): keeps its size
-            p["resize_skipped"] = "real price not in before the close"
-            changed = True
-            continue
-        r = repriced.get(reprice.event_key(p, p["events"][0]))
-        if r is None:
-            continue                          # not priced yet: next minute
-        p["resize_checked"] = True
-        changed = True
-        real, frac, nlv = r.get("true"), p.get("size_fraction"), p.get("nlv")
-        if not real or not frac or not nlv:
-            continue
-        new = max(math.floor(nlv * frac / (real * 100)), settings.MIN_CONTRACTS_TO_TRIM)
-        old = p["qty"]
-        if new == old:
-            continue
-        left = rebook_quantities(p, new)
-        p["resized"] = {"from": old, "to": new, "why": f"budget at the real entry price {real:.2f} "
-                        f"(automatic once the 1-minute price is in; user decision, 2026-11-17)"}
-        log.info("resized %s %d -> %d contracts at the real entry %.2f (estimated %.2f)",
-                 p["ticker"], old, new, real, p["events"][0].get("price") or 0)
-        notify(f"{title('RESIZED')}\n<b>{h(describe(p))}</b>\n"
-               f"{old} → <b>{new}</b> contracts: the real entry price was <b>{real:.2f}</b> "
-               f"(sized at {p['events'][0].get('price') or 0:.2f} from delayed quotes), budget "
-               f"${nlv * frac:,.0f}"
-               + (f"\n{left} still open" if "closed_at" not in p else "") +
-               "\n<i>booked at budget from the real price</i>")
-    return changed
-
-
 def prefetch_results(t):
     """Fetch 1-minute prices for trades due a RESULT message. Network, up to a
     minute, so it runs before the lock: alerts are never held up by it."""
     from day_trading_setup.executor import reprice
     try:
         state = load_state()
-        if _results_due(state, t) or _trims_due(state, t) or (_resize_due(state, t) and contracts.in_session(t)):
+        if _results_due(state, t) or _trims_due(state, t):
             reprice.run("paper" if settings.EXECUTE else "dry")
     except Exception as e:
         log.warning("reprice failed, results retried next minute: %s: %s", type(e).__name__, e)
@@ -955,8 +868,6 @@ def main(argv=None):
         if a.sweep:
             check_tws_port(t)
             if retry_pending(state, t):
-                save_state(state)
-            if resize_to_true(state, t):       # before any RESULT, so it carries the new size
                 save_state(state)
             if confirm_results(state, t):
                 save_state(state)
