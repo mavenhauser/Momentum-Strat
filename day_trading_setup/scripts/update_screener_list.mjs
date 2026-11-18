@@ -31,7 +31,7 @@
 // Prints JSON. Exit 1 + {"error": ...} if the data feed or TradingView can't be reached,
 // or if any alert could not be created or deleted.
 import { createRequire } from 'module';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 const LAYOUT = 'Day Trading Set Up';
@@ -56,6 +56,16 @@ const WEBHOOK_BASE = 'https://sherill-sudoriparous-soothedly.ngrok-free.dev/dts/
 const WEBHOOK_SECRET_FILE = `${process.env.HOME}/.dts-executor/secret`;
 // The executor's open positions (absolute path: the scheduled copy runs from ~/.dts-screener).
 const DTS_STATE_FILES = ['dts_positions_dry.json', 'dts_positions.json'].map(f => `${process.env.HOME}/Documents/Trading/Momentum Strat/state/${f}`);
+// The day's list for the executor (2026-11-17, user decision): it takes new entries only on
+// these tickers. A ticker held overnight keeps its alert so TradingView still sends its exits,
+// but holding it does not put it on the day's list.
+const DTS_LIST_FILE = `${process.env.HOME}/Documents/Trading/Momentum Strat/state/dts_today_list.json`;
+function writeDayList(tickers, heldOnly) {
+  const nyDate = new Date().toLocaleString('sv-SE', { timeZone: 'America/New_York' }).slice(0, 10);
+  writeFileSync(DTS_LIST_FILE, JSON.stringify({ date: nyDate, tickers, held_only: heldOnly,
+    as_of_new_york: new Date().toLocaleString('sv-SE', { timeZone: 'America/New_York' }) }, null, 1));
+  return DTS_LIST_FILE;
+}
 
 // Tickers the executor still holds. Their alerts are kept even when the ticker drops off
 // the day's list (2026-10-20: AMAT, held overnight, lost its alert in the rotation, so
@@ -153,6 +163,7 @@ function alertSyncExpression(params) {
     var api = window.TradingViewApi;
     if (!api || typeof api.layoutName !== 'function' || api.layoutName() !== P.layout) return { skip: true };
     var chart = api.activeChart();
+    var startIds = {};
     async function series(name) {
       var s = chart.getAllStudies().filter(function(x){ return x.name === name; })[0];
       if (!s) throw new Error(name + ' is not on the ' + P.layout + ' chart');
@@ -169,6 +180,10 @@ function alertSyncExpression(params) {
       var mi = j && j.result && j.result.metaInfo;
       var latest = (j && j.result && j.result.version) || (mi && mi.pine && mi.pine.version);
       if (!mi || !latest) throw new Error('could not read the latest version of ' + name);
+      // "Alert start" (DTS Entry v21.0): stamped with the creation time on each new alert, so the
+      // alert takes no trade from bars before it existed (LLY, 2026-11-17). Not compared by same().
+      var st0 = (mi.inputs || []).filter(function(i){ return /^Alert start/.test(i.name || ''); })[0];
+      if (st0) startIds[name] = st0.id;
       if (parseFloat(latest) > parseFloat(pineVersion)) {
         ser.pine_version = String(latest);
         (mi.inputs || []).forEach(function(i){ if (/^in_\\d+$/.test(i.id) && !(i.id in inputs)) inputs[i.id] = i.defval; });
@@ -180,7 +195,8 @@ function alertSyncExpression(params) {
     function same(want, got) {
       if (!got || got.pine_id !== want.pine_id || got.pine_version !== want.pine_version) return false;
       var gi = got.inputs || {};
-      return Object.keys(want.inputs).every(function(k){ return JSON.stringify(want.inputs[k]) === JSON.stringify(gi[k]); });
+      var skip = startIds[P.entryStudy];
+      return Object.keys(want.inputs).every(function(k){ return k === skip || JSON.stringify(want.inputs[k]) === JSON.stringify(gi[k]); });
     }
     function call(path, payload) {
       var url = 'https://pricealerts.tradingview.com/' + path + '?log_username=' + encodeURIComponent(window.user.username) + (path === 'create_alert' ? '&maintenance_unset_reason=initial_operated' : '');
@@ -198,7 +214,7 @@ function alertSyncExpression(params) {
     if (listed.s !== 'ok') throw new Error('could not list alerts: ' + JSON.stringify(listed).slice(0, 200));
     var want = {}; P.tickers.forEach(function(t){ want[t.ticker] = t; });
     var chartVersion = entry.chart_version; delete entry.chart_version; if (screener) delete screener.chart_version;
-    var have = {}, drop = [], out = { kept: [], created: [], deleted: [], errors: [], entry_script_version: entry.pine_version, chart_script_version: chartVersion, confirm_entry: entry.inputs.in_33, confirm_bars: entry.inputs.in_34 };
+    var have = {}, drop = [], out = { kept: [], created: [], deleted: [], errors: [], entry_script_version: entry.pine_version, chart_script_version: chartVersion, confirm_entry: entry.inputs.in_33, confirm_bars: entry.inputs.in_34, alert_start_input: startIds[P.entryStudy] || null };
     (listed.r || []).forEach(function(a){
       if (typeof a.name !== 'string') return;
       var isScreener = a.name === P.screenerName, isEntry = a.name.indexOf(P.entryPrefix) === 0;
@@ -224,7 +240,11 @@ function alertSyncExpression(params) {
     for (var i = 0; i < make.length; i++) {
       var m = make[i], made = null, last = null;
       for (var j = 0; j < m.symbols.length && !made; j++) {
-        last = await call('create_alert', body(m.symbols[j], m.name, m.ser));
+        var ser = m.ser;
+        if (ser === entry && startIds[P.entryStudy]) {            // this alert's own start time
+          ser = JSON.parse(JSON.stringify(entry)); ser.inputs[startIds[P.entryStudy]] = Date.now();
+        }
+        last = await call('create_alert', body(m.symbols[j], m.name, ser));
         if (last.s === 'ok') made = m.symbols[j];
       }
       if (made) out.created.push(made === m.symbols[0] ? m.name : m.name + ' (on ' + made + ', may be delayed data)');
@@ -315,6 +335,7 @@ if (listArg) {
     const held = withOpenPositions(alertTickers);
     if (held.added.length) out.kept_for_open_positions = held.added;
     if (alerts) out.alerts = await syncAlerts(held.list, alertsPlan);
+    if (alerts && !alertsPlan) out.day_list_file = writeDayList(alertTickers.map(t => t.ticker), held.added);
     clearTimeout(timer);
     done(out.alerts && out.alerts.errors.length ? 1 : 0, out);
   } catch (e) { done(1, { error: String(e && e.message || e) }); }
@@ -348,6 +369,7 @@ if (listArg) {
     const held = withOpenPositions(alertTickers);
     if (held.added.length) out.kept_for_open_positions = held.added;
     out.alerts = await syncAlerts(held.list, alertsPlan || !apply);
+    if (apply && !alertsPlan) out.day_list_file = writeDayList(alertTickers.map(t => t.ticker), held.added);
     if (out.alerts.errors.length) { clearTimeout(timer); done(1, { error: 'some alerts could not be synced', ...out }); }
   }
   clearTimeout(timer);

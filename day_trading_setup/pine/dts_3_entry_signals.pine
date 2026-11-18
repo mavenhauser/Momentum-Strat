@@ -94,6 +94,13 @@ bandK = input.float(1.0, "VWAP band (standard deviations)", minval = 0.25, step 
 // the option is below its entry price (nothing changes on the chart: the trade continues here).
 // Kept after the older inputs so the alerts' saved settings line up.
 tlMin = input.int(120, "Time-limit check after (minutes, 0 = off)", minval = 0, step = 5, group = G_RISK, tooltip = "Sends 'DTS: CHECK LONG/SHORT <ticker> @ <price> | 2h without 2R | entry <price>' once per trade, at the first bar close this many minutes after the entry bar, if the 2R target has not been hit. The executor sells if the option is below its entry price. 0 = off.", display = display.none)
+// Alert start (v21.0, 2026-11-17, user decision): the list job sets this to the moment it
+// creates the alert. No trade opens on a bar that closed before then, so a new alert starts
+// flat instead of rebuilding a position from past bars (LLY, Nov 17: the alert made at 09:19
+// rebuilt Monday's short and sent its 4R / RUNNER exits at the open, and a rebuilt position
+// blocks new entries until it exits). The chart keeps the default, which changes nothing.
+// Kept last so the alerts' saved settings line up.
+alertStart = input.time(timestamp("2000-01-01T00:00:00"), "Alert start (set by the list job, leave as is)", group = G_AL, tooltip = "The list job sets this to the time it creates each alert, so the alert takes no trade from the bars before it existed. Leave it at the default on the chart.", display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744
@@ -462,7 +469,7 @@ vwapOkL  = not vwapFilter or close > vwapV
 vwapOkS  = not vwapFilter or close < vwapV
 chopOn = chopCrosses > 0 and not na(qqqCross) and qqqCross > chopCrosses
 chopSkip = chopOn and chopMode == "Skip"
-canEnter = barstate.isconfirmed and pos == 0 and pendDir == 0 and not exitNow and rth and inWindow and tradesToday < maxTrades and not chopSkip
+canEnter = barstate.isconfirmed and pos == 0 and pendDir == 0 and not exitNow and rth and inWindow and tradesToday < maxTrades and not chopSkip and time_close > alertStart
 
 // Stop: beyond the retest swing, but never closer than minStopNoise typical bars.
 noiseBar = ta.percentile_nearest_rank(high - low, 390, 50)

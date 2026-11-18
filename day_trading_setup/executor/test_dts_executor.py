@@ -1,3 +1,4 @@
+import json
 import unittest
 from datetime import date, datetime
 from unittest import mock
@@ -347,6 +348,31 @@ class ContractTest(unittest.TestCase):
             executor.on_entry(None, state, sig, datetime(2026, 10, 23, 13, 10, tzinfo=executor.NY))
         self.assertIn("no new entries on Friday from 13:00", sent[0])
         self.assertEqual(state["skipped"][0]["ticker"], "TSLA")
+
+    def test_entry_only_on_the_days_list(self):
+        # 2026-11-17 (user decision): a ticker held overnight keeps its alert for its exits,
+        # but a new entry needs the ticker on the day's list. Missing or older list: no block.
+        import tempfile
+        from pathlib import Path
+        from day_trading_setup.executor import executor
+        sig = signals.parse("DTS: SHORT TSLA @ 371.26 | stop 374.52 | target 364.74 (2R) | PML breakout")
+        t = datetime(2026, 11, 18, 11, 0, tzinfo=executor.NY)
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "list.json"
+            with mock.patch.object(settings, "DAY_LIST_FILE", f):
+                self.assertFalse(executor.off_day_list("TSLA", t.date()))          # no file
+                f.write_text(json.dumps({"date": "2026-11-17", "tickers": ["AMD"]}))
+                self.assertFalse(executor.off_day_list("TSLA", t.date()))          # yesterday's list
+                f.write_text(json.dumps({"date": "2026-11-18", "tickers": ["AMD", "TSLA"]}))
+                self.assertFalse(executor.off_day_list("TSLA", t.date()))
+                f.write_text(json.dumps({"date": "2026-11-18", "tickers": ["AMD"], "held_only": ["TSLA"]}))
+                sent = []
+                with mock.patch.object(executor, "notify", sent.append):
+                    state = {"positions": {}, "closed": []}
+                    executor.on_entry(None, state, sig, t)
+                self.assertIn("not on today", sent[-1])
+                self.assertEqual(state["skipped"][0]["ticker"], "TSLA")
+                self.assertEqual(state["positions"], {})
 
     def test_half_day_no_new_entries(self):
         from day_trading_setup.executor import executor

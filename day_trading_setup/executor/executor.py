@@ -417,12 +417,25 @@ def skip(state, sig, t, reason):
     state["skipped"] = state["skipped"][-500:]
 
 
+def off_day_list(ticker, d):
+    """True if today's list is known and the ticker is not on it (held overnight only)."""
+    try:
+        day = json.loads(settings.DAY_LIST_FILE.read_text())
+    except (OSError, ValueError):
+        return False
+    return day.get("date") == d.isoformat() and ticker not in (day.get("tickers") or [])
+
+
 def on_entry(broker, state, sig, t):
     hm = (t.hour, t.minute)
     if t.weekday() >= 5 or not (settings.ENTRY_START <= hm < settings.ENTRY_END):
         return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nOutside the regular session")
     if sig.ticker in state["positions"]:
         return notify(f"{title('IGNORED')}\n{signal_line(sig)}\nAlready holding <b>{h(describe(state['positions'][sig.ticker]))}</b>")
+    if off_day_list(sig.ticker, t.date()):
+        why = "not on today's list (its alert is kept only for the exits of a position held overnight)"
+        skip(state, sig, t, why)
+        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
     if contracts.half_day(t.date()):
         why = "half day (13:00 close): no new entries"
         skip(state, sig, t, why)

@@ -37,6 +37,11 @@ BACKFILL_UNTIL = (16, 10)          # a few minutes past the close, for the 15:55
 BACKFILL_MIN_AGE_S = 60            # leave a normal delivery time to land first
 BACKFILL_ENTRY_MAX_MIN = 5         # older missed entries are reported, not bought
 BACKFILL_STATE_FILE = STATE_DIR / "dts_backfill.json"
+# The day's list, written by the list job (update_screener_list.mjs) at each refresh. New
+# entries only on these tickers (2026-11-17, user decision): a ticker held overnight keeps its
+# TradingView alert for its exits, but holding it does not put it on the day's list. A missing
+# or older file blocks nothing.
+DAY_LIST_FILE = STATE_DIR / "dts_today_list.json"
 
 IBKR_CLIENT_ID = 47          # SPX scalp = 1, Momentum Strategy = 45
 PAPER_PORTS = (7497, 4002)   # same hard guard as the Momentum trader
