@@ -121,6 +121,11 @@ def main(argv=None):
     if settings.EXECUTE:
         print(json.dumps({"date": a.date, "skipped": "paper mode: broker fills are real prices"}))
         return 0
+    now = datetime.now(NY)
+    if day >= now.date() and (contracts.in_session(now) or (now.hour, now.minute) < (9, 30)):
+        # no resizing during the session (user, 2026-11-17): only after the day's close
+        print(json.dumps({"date": a.date, "skipped": "the trading day is not over yet: resize runs after the close"}))
+        return 0
     try:
         reprice.run("dry")                  # network: before the lock
     except Exception as e:

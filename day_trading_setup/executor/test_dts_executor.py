@@ -379,6 +379,7 @@ class ContractTest(unittest.TestCase):
                 self.assertEqual(state["positions"], {})
 
     def test_end_of_day_resize(self):
+        executor_ny = lambda: __import__("day_trading_setup.executor.executor", fromlist=["NY"]).NY
         # 2026-11-17 (user decision): no resize during the session; at the end of the day, when
         # the journal is built, each trade opened that day is re-booked at budget / real price.
         from day_trading_setup.executor import resize, reprice
@@ -419,6 +420,22 @@ class ContractTest(unittest.TestCase):
         self.assertNotIn("resize_checked", unpriced)                              # retried next run
         again = resize.resize_day(state, date(2026, 11, 18), rp)
         self.assertEqual((again["resized"], again["unchanged"]), ([], 0))         # once only
+        # the command refuses a day that isn't over: no resizing during the session
+        import io, contextlib
+        for now, refused in ((datetime(2026, 11, 18, 9, 49, tzinfo=executor_ny()), True),
+                             (datetime(2026, 11, 18, 8, 0, tzinfo=executor_ny()), True),
+                             (datetime(2026, 11, 18, 16, 20, tzinfo=executor_ny()), False)):
+            buf = io.StringIO()
+            with mock.patch.object(resize, "datetime", mock.Mock(now=lambda tz=None: now, fromisoformat=datetime.fromisoformat)), \
+                 mock.patch.object(settings, "EXECUTE", False), \
+                 mock.patch("day_trading_setup.executor.reprice.run", lambda mode: None), \
+                 mock.patch.object(resize, "resize_day", lambda st, d, rp: {"date": d.isoformat(), "resized": []}), \
+                 mock.patch.object(settings, "DRY_STATE_FILE", mock.Mock(read_text=lambda: "{}", with_suffix=lambda s: mock.Mock())), \
+                 mock.patch.object(resize.os, "replace", lambda a, b: None), \
+                 mock.patch.object(settings, "LOCK_FILE", "/dev/null"), \
+                 contextlib.redirect_stdout(buf):
+                resize.main(["--date", "2026-11-18"])
+            self.assertEqual("skipped" in buf.getvalue(), refused, now)
         early = pos("TSLA", 12, 4.0, [(12, 3.0, "EOD")], day="2026-11-17")
         self.assertEqual(resize.resize_day({"positions": {}, "closed": [early]}, date(2026, 11, 17),
                                            {k(early, 0): {"true": 6.5}})["resized"], [])   # before RESIZE_FROM
