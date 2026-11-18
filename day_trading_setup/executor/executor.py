@@ -418,12 +418,15 @@ def skip(state, sig, t, reason):
 
 
 def off_day_list(ticker, d):
-    """True if today's list is known and the ticker is not on it (held overnight only)."""
+    """True only for a ticker today's list file names as held overnight and not on the list.
+    Never blocks a ticker just because it is missing from the file: if a refresh fails halfway,
+    a new name can have its alert before the file lists it."""
     try:
         day = json.loads(settings.DAY_LIST_FILE.read_text())
     except (OSError, ValueError):
         return False
-    return day.get("date") == d.isoformat() and ticker not in (day.get("tickers") or [])
+    return (day.get("date") == d.isoformat() and ticker in (day.get("held_only") or [])
+            and ticker not in (day.get("tickers") or []))
 
 
 def on_entry(broker, state, sig, t):

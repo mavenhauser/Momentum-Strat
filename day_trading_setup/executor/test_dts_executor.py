@@ -365,6 +365,10 @@ class ContractTest(unittest.TestCase):
                 self.assertFalse(executor.off_day_list("TSLA", t.date()))          # yesterday's list
                 f.write_text(json.dumps({"date": "2026-11-18", "tickers": ["AMD", "TSLA"]}))
                 self.assertFalse(executor.off_day_list("TSLA", t.date()))
+                f.write_text(json.dumps({"date": "2026-11-18", "tickers": ["AMD"], "held_only": []}))
+                self.assertFalse(executor.off_day_list("TSLA", t.date()))          # missing from the file: never blocked
+                f.write_text(json.dumps({"date": "2026-11-17", "tickers": ["AMD"], "held_only": ["TSLA"]}))
+                self.assertFalse(executor.off_day_list("TSLA", t.date()))          # held-only yesterday
                 f.write_text(json.dumps({"date": "2026-11-18", "tickers": ["AMD"], "held_only": ["TSLA"]}))
                 sent = []
                 with mock.patch.object(executor, "notify", sent.append):
