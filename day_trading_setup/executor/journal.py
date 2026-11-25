@@ -82,6 +82,8 @@ def _exit_kind(ev):
         return m.group(1)
     if why.startswith("time limit"):
         return "TIME LIMIT"
+    if why.startswith("early exit"):
+        return "QQQ EXIT"
     return "SWEEP" if "sweep" in why else why[:20]
 
 

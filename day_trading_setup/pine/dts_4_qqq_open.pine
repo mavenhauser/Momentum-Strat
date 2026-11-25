@@ -1,0 +1,19 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// DTS QQQ Open - v1.0 (2026-11-24)
+// For the executor's early exit (user decision 2026-11-24, Nov 16-20 review): on QQQ, 5-minute
+// chart, regular session. Every confirmed 5-minute bar sends its close and QQQ's 09:30 open:
+//   DTS: QQQ 5M CLOSE 650.12 | open 640.05
+// The executor sells each position opened that day that has not reached 2R once a close is
+// back through the open against it (below for a long, above for a short).
+// One alert on NASDAQ:QQQ, 5 minutes, "Any alert() function call", webhook to the receiver.
+//@version=6
+indicator("DTS QQQ Open", overlay = true)
+
+var float dayOpen = na
+if session.isfirstbar_regular
+    dayOpen := open
+
+plot(dayOpen, "09:30 open", color = color.orange, linewidth = 2, style = plot.style_linebr)
+
+if barstate.isconfirmed and session.ismarket and not na(dayOpen)
+    alert("DTS: QQQ 5M CLOSE " + str.tostring(close, "0.00") + " | open " + str.tostring(dayOpen, "0.00"), alert.freq_once_per_bar_close)

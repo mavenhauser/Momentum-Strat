@@ -55,8 +55,8 @@ SIZING_ACCOUNT = 100_000
 # Size by confluence (2026-10-16, was a flat 1%): the entry alert carries DTS
 # Entry's setup grade (points for clean trend, VWAP side, beyond the opening
 # range, beyond the prior-week level; OUTSIDE = beyond both PDH/PMH or PDL/PML).
-# Only the strongest confluence gets the full 5%. With MAX_OPEN_POSITIONS = 10,
-# at most 25-50% of the account is in premium at once (2.5-5% each).
+# Only the strongest confluence gets the full 5%. With MAX_OPEN_POSITIONS = 12,
+# at most 30-60% of the account is in premium at once (2.5-5% each).
 SIZE_BY_GRADE = {
     "A+ OUTSIDE": 0.05,    # all 4 confirmations and outside the day + premarket range
     "A OUTSIDE": 0.035,    # 3 of 4, outside
@@ -90,7 +90,9 @@ ZERO_DTE_WINDOW = ((9, 30), (12, 0))
 # 0DTE time stop (2026-10-18): a same-day option that has not reached the 2R target
 # within this many minutes of entry is closed. Winners took a median 45 min to 2R;
 # a 0DTE that goes nowhere bleeds most of its value by the close (TSLA, Oct 16).
-ZERO_DTE_TIME_STOP_MIN = 90
+# Removed 2026-11-24 (user decision, Nov 16-20 review): Fridays Oct 16-Nov 20 +16.2R with
+# the stop vs +26.8R without it (Nov 20 alone ~$24k). 0 turns it off.
+ZERO_DTE_TIME_STOP_MIN = 0
 # Journal days from this date use fills re-priced from 1-minute history (reprice.py);
 # earlier days keep the executor's recorded figures (user decision, 2026-10-16).
 REPRICE_FROM = "2026-10-16"
@@ -214,9 +216,19 @@ TRIM_FRACTION = 0.5
 # first-hour QQQ rule below: brake 3 +81.9R, 4 +80.8R, 5 +79.8R, none +79.8R; without that
 # rule brake 3 +46.8R vs none +63.6R (it skipped 14 live signals in Nov). At 5 it never
 # fired in the sample: a backstop for a disaster day only. 0 turns it off.
-LOSS_BRAKE = 5
+# Removed 2026-11-24 (user decision, Nov 16-20 review): the trades it skipped Oct 14-Nov 20
+# made +9.5R net (Nov 19 alone +5.8R).
+LOSS_BRAKE = 0
 BRAKE_OVERRIDE_GRADES = {"A+ OUTSIDE"}
-MAX_OPEN_POSITIONS = 10      # raised from 5 (2026-10-18): on Oct 16 all 5 signals the cap blocked reached 2R; 10 would have taken them all
+MAX_OPEN_POSITIONS = 12      # raised from 5 (2026-10-18): on Oct 16 all 5 signals the cap blocked reached 2R; 10 would have taken them all
+                             # raised from 10 (2026-11-24, user decision): the 9 signals the cap skipped Oct 14-Nov 20 made +32.2R
+# Early exit on QQQ (2026-11-24, user decision, Nov 16-20 review): a position opened today
+# that has not reached 2R is sold when a QQQ 5-minute bar closes back through QQQ's 09:30
+# open against it (below for a long, above for a short), all day. The bar arrives as
+# "DTS: QQQ 5M CLOSE <close> | open <open>" from the DTS QQQ Open alert on QQQ.
+# Backtest Oct 14-Nov 24 (stock R, exit at that 5-minute close): first hour 14 of 64 cut,
+# +5.3R -> +12.8R; after 10:30 23 of 89 cut, -9.8R -> +1.5R; 4 winners cut (+2.7R -> +0.1R).
+QQQ_OPEN_EXIT = True
 MAX_HOLD_SESSIONS = 2        # mirrors "Max sessions held" on DTS Entry (backup only)
 # Overnight rule (2026-10-22, the user's idea): at the 15:56 sweep, a position that has not
 # reached 2R is sold; only runners past 2R (stop at break-even) are held overnight. On

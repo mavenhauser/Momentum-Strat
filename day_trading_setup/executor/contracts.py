@@ -235,6 +235,19 @@ def with_qqq(sig) -> bool:
     return sgn * day > 0 and above == (sgn > 0)
 
 
+def qqq_open_exit_due(pos, qqq_close, qqq_open, t) -> bool:
+    """True if a QQQ 5-minute close at `t` is back through QQQ's 09:30 open against this
+    position (below for a long, above for a short) and the position should be sold
+    (QQQ_OPEN_EXIT): opened today before that bar's close, nothing sold at 2R yet."""
+    if not settings.QQQ_OPEN_EXIT or pos.get("trimmed") or pos.get("open_qty", 0) < pos.get("qty", 0):
+        return False
+    opened = datetime.fromisoformat(pos["opened_at"])
+    if opened.date() != t.date() or opened >= t:
+        return False
+    sgn = 1 if pos["side"] == "LONG" else -1
+    return sgn * (qqq_close - qqq_open) < 0
+
+
 def close_before_overnight(pos) -> bool:
     """True if the 15:56 sweep should sell this position rather than hold it overnight:
     it has not reached 2R (runners past 2R, stop at break-even, are held). Since 2026-11-04
@@ -271,6 +284,8 @@ def time_stop_due(pos, now) -> bool:
     """True for a same-day (0DTE) position that has not reached 2R within
     ZERO_DTE_TIME_STOP_MIN minutes of entry."""
     opened = datetime.fromisoformat(pos["opened_at"])
+    if not settings.ZERO_DTE_TIME_STOP_MIN:          # off since 2026-11-24
+        return False
     if pos.get("trimmed") or date.fromisoformat(pos["expiry"]) != opened.date():
         return False
     return (now - opened).total_seconds() >= settings.ZERO_DTE_TIME_STOP_MIN * 60

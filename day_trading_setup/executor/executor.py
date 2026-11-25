@@ -653,6 +653,23 @@ def on_check(broker, state, sig, t):
            f"No 2R yet, but the option is not below its entry: {h(line)}")
 
 
+def qqq_exits_due(state, sig, t):
+    """Positions the QQQ 5-minute close in `sig` sells (QQQ_OPEN_EXIT), in the session only."""
+    if not contracts.in_session(t):
+        return []
+    return [p for p in state["positions"].values() if contracts.qqq_open_exit_due(p, sig.price, sig.stop, t)]
+
+
+def on_qqq_bar(broker, state, sig, t):
+    """The early exit (QQQ_OPEN_EXIT, 2026-11-24): a QQQ 5-minute close back through QQQ's
+    09:30 open sells every position opened today that has not reached 2R and that the move
+    goes against. A failed sale is retried by the next 5-minute bar if QQQ is still there."""
+    line = f"QQQ {sig.price:.2f} vs its open {sig.stop:.2f}"
+    for pos in qqq_exits_due(state, sig, t):
+        side = "below" if pos["side"] == "LONG" else "above"
+        close_position(broker, state, pos, t, f"early exit: QQQ closed back {side} its 09:30 open before 2R ({line})", sig.raw)
+
+
 def close_position(broker, state, pos, t, why, alert_raw):
     filled, avg, note = _sell(broker, state, pos, pos["open_qty"], t, why, alert_raw)
     if pos["open_qty"] > 0:
@@ -898,6 +915,11 @@ def main(argv=None):
             log.info("duplicate alert ignored: %s", sig.raw)
             return 0
         state["processed"][key] = t.isoformat()
+        if sig.kind == "QQQBAR":                   # every 5-minute close; connect only when it sells something
+            state["qqq_bar"] = {"t": t.isoformat(), "close": sig.price, "open": sig.stop}
+            if not qqq_exits_due(state, sig, t):
+                save_state(state)
+                return 0
         if sig.kind in ("TARGET", "EXIT", "CHECK") and sig.ticker not in state["positions"]:
             log.info("%s alert for %s with no open position - ignored", sig.kind, sig.ticker)
             save_state(state)
@@ -911,8 +933,9 @@ def main(argv=None):
             broker = Broker()
             try:
                 broker.connect()
-                broker.stock_now = sig.price
-                {"ENTRY": on_entry, "TARGET": on_target, "EXIT": on_exit, "CHECK": on_check}[sig.kind](broker, state, sig, t)
+                broker.stock_now = sig.price if sig.kind != "QQQBAR" else None   # QQQ's price is not the option's stock
+                {"ENTRY": on_entry, "TARGET": on_target, "EXIT": on_exit, "CHECK": on_check,
+                 "QQQBAR": on_qqq_bar}[sig.kind](broker, state, sig, t)
                 err = None
                 break
             except Exception as e:

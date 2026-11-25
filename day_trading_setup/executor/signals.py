@@ -13,6 +13,7 @@ day_trading_setup/pine/dts_3_entry_signals.pine:
   DTS: EXTENDED SHORT GEV @ 812.47 - already 4.2R from the open, no entry | grade A+ OUTSIDE   (v18.0; logged, no action)
   DTS: SHORT MU @ 731.20 | stop 738.90 | target 715.80 (2R) | ORL breakout + VWAP band retest | trend day | QQQ ... | grade A+ OUTSIDE   (v19.0 trend-day entry; parsed as ENTRY)
   DTS: CHECK LONG MU @ 795.10 | 2h without 2R | entry 790.00   (v20.0: the time limit's 2-hour check, live price)
+  DTS: QQQ 5M CLOSE 650.12 | open 640.05      (DTS QQQ Open alert on QQQ, every 5-minute close; 2026-11-24: the early exit)
 """
 import re
 from dataclasses import dataclass, field
@@ -30,7 +31,8 @@ _CHOP = re.compile(r"\| choppy \(QQQ crosses (\d+)\)")   # since DTS Entry v13.0
 _QQQ = re.compile(r"\| QQQ ([+-]?\d+(?:\.\d+)?)% \(1h ([+-]?\d+(?:\.\d+)?)%\) (above|below) VWAP")   # since v15.0 (2026-10-30)
 _APLUS = re.compile(rf"^DTS: A\+ OUTSIDE (LONG|SHORT) {_TICK} @ {_NUM}")
 _STRONG = re.compile(rf"^DTS: STRONG CLOSE (LONG|SHORT) {_TICK} @ {_NUM}")   # since v14.0 (2026-10-26)
-_CHECK = re.compile(rf"^DTS: CHECK (LONG|SHORT) {_TICK} @ {_NUM}")   # since v20.0 (2026-11-14): 2-hour time-limit check
+_CHECK = re.compile(rf"^DTS: CHECK (LONG|SHORT) {_TICK} @ {_NUM}")
+_QQQBAR = re.compile(rf"^DTS: QQQ 5M CLOSE {_NUM} \| open {_NUM}")   # 2026-11-24: QQQ back through its open   # since v20.0 (2026-11-14): 2-hour time-limit check
 
 
 def _f(x):
@@ -39,7 +41,7 @@ def _f(x):
 
 @dataclass
 class Signal:
-    kind: str                      # ENTRY / TARGET / EXIT / CHECK / APLUS / STRONG / IGNORED
+    kind: str                      # ENTRY / TARGET / EXIT / CHECK / QQQBAR / APLUS / STRONG / IGNORED
     ticker: Optional[str] = None
     side: Optional[str] = None     # LONG / SHORT
     price: Optional[float] = None  # entry, target or exit price on TradingView
@@ -77,6 +79,9 @@ def parse(message: str) -> Signal:
     m = _CHECK.match(text)
     if m:
         return Signal("CHECK", ticker=m.group(2), side=m.group(1), price=_f(m.group(3)), raw=text)
+    m = _QQQBAR.match(text)
+    if m:                              # price = QQQ's 5-minute close, stop = QQQ's 09:30 open
+        return Signal("QQQBAR", ticker="QQQ", price=_f(m.group(1)), stop=_f(m.group(2)), raw=text)
     m = _APLUS.match(text)
     if m:
         return Signal("APLUS", ticker=m.group(2), side=m.group(1), price=_f(m.group(3)), raw=text)

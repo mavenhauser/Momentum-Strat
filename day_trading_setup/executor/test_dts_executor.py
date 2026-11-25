@@ -234,6 +234,39 @@ class ContractTest(unittest.TestCase):
         self.assertIsNone(k)
         self.assertIn("too small for the option spread", rule)
 
+    def test_zero_dte_time_stop_off(self):
+        from zoneinfo import ZoneInfo
+        ny = ZoneInfo("America/New_York")
+        pos = {"opened_at": "2026-10-16T13:40:00-04:00", "expiry": "2026-10-16", "trimmed": False}
+        self.assertEqual(settings.ZERO_DTE_TIME_STOP_MIN, 0)              # removed 2026-11-24
+        self.assertFalse(contracts.time_stop_due(pos, datetime(2026, 10, 16, 15, 30, tzinfo=ny)))
+
+    def test_qqq_open_exit(self):
+        from zoneinfo import ZoneInfo
+        ny = ZoneInfo("America/New_York")
+        t = datetime(2026, 11, 24, 12, 30, tzinfo=ny)
+        lng = {"side": "LONG", "opened_at": "2026-11-24T12:05:00-05:00", "qty": 4, "open_qty": 4, "trimmed": False}
+        sht = {**lng, "side": "SHORT"}
+        self.assertTrue(contracts.qqq_open_exit_due(lng, 639.0, 640.05, t))     # QQQ below its open: long out
+        self.assertFalse(contracts.qqq_open_exit_due(lng, 641.0, 640.05, t))
+        self.assertTrue(contracts.qqq_open_exit_due(sht, 641.0, 640.05, t))     # above: short out
+        self.assertFalse(contracts.qqq_open_exit_due(sht, 639.0, 640.05, t))
+        self.assertFalse(contracts.qqq_open_exit_due({**lng, "trimmed": True}, 639.0, 640.05, t))          # past 2R
+        self.assertFalse(contracts.qqq_open_exit_due({**lng, "open_qty": 2}, 639.0, 640.05, t))           # 2R half sold
+        self.assertFalse(contracts.qqq_open_exit_due({**lng, "opened_at": "2026-11-23T12:05:00-05:00"}, 639.0, 640.05, t))  # held overnight
+        self.assertFalse(contracts.qqq_open_exit_due({**lng, "opened_at": "2026-11-24T12:31:00-05:00"}, 639.0, 640.05, t))  # after this bar
+        with mock.patch.object(settings, "QQQ_OPEN_EXIT", False):
+            self.assertFalse(contracts.qqq_open_exit_due(lng, 639.0, 640.05, t))
+
+    def test_qqq_bar_parse(self):
+        s = signals.parse("DTS: QQQ 5M CLOSE 650.12 | open 640.05")
+        self.assertEqual((s.kind, s.ticker, s.price, s.stop), ("QQQBAR", "QQQ", 650.12, 640.05))
+
+    def test_limits_from_review(self):
+        self.assertEqual(settings.LOSS_BRAKE, 0)
+        self.assertEqual(settings.MAX_OPEN_POSITIONS, 12)
+
+    @mock.patch.object(settings, "ZERO_DTE_TIME_STOP_MIN", 90)   # the mechanism, if it is ever switched back on
     def test_zero_dte_time_stop(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo
@@ -863,6 +896,32 @@ class TimeLimitLiveTest(unittest.TestCase):
         t = {"ticker": "MU", "opened_at": "2026-11-16T10:00:00-05:00", "qty": 4,
              "events": [{"t": "2026-11-16T10:00:00-05:00", "action": "BUY 4 @ 2.0", "qty": 4, "price": 2.0}]}
         self.assertIsNone(reprice.time_limit_check(t))
+
+
+class QqqOpenExitTest(unittest.TestCase):
+    """Early exit when QQQ closes back through its 09:30 open (user decision 2026-11-24)."""
+    NY = __import__("zoneinfo").ZoneInfo("America/New_York")
+
+    def test_sells_only_positions_it_goes_against(self):
+        from day_trading_setup.executor import executor
+        base = {"right": "C", "strike": 100.0, "expiry": "2026-11-27", "qty": 4, "open_qty": 4, "trimmed": False,
+                "avg_cost": 3.0, "opened_at": "2026-11-24T11:00:00-05:00", "events": []}
+        state = {"positions": {"MU": {**base, "ticker": "MU", "side": "LONG"},
+                               "AMD": {**base, "ticker": "AMD", "side": "SHORT", "right": "P"},
+                               "NVDA": {**base, "ticker": "NVDA", "side": "LONG", "trimmed": True, "open_qty": 2}},
+                 "closed": []}
+        closed = []
+        with mock.patch.object(executor, "close_position", lambda b, st, p, t, why, raw: closed.append((p["ticker"], why))):
+            executor.on_qqq_bar(None, state, signals.parse("DTS: QQQ 5M CLOSE 639.50 | open 640.05"),
+                                datetime(2026, 11, 24, 12, 30, tzinfo=self.NY))
+        self.assertEqual([c[0] for c in closed], ["MU"])            # the long; not the short, not the 2R runner
+        self.assertIn("early exit: QQQ closed back below its 09:30 open", closed[0][1])
+        self.assertIn("QQQ 639.50 vs its open 640.05", closed[0][1])
+        self.assertEqual(executor.qqq_exits_due(state, signals.parse("DTS: QQQ 5M CLOSE 639.50 | open 640.05"),
+                                                datetime(2026, 11, 24, 16, 5, tzinfo=self.NY)), [])   # after the close
+        from day_trading_setup.executor import journal, backfill
+        self.assertEqual(journal._exit_kind({"why": closed[0][1], "action": "SELL 4 @ 2.0"}), "QQQ EXIT")
+        self.assertNotIn("QQQBAR", backfill.ACTIONABLE)             # a stale bar is never re-sent
 
 
 class ExitTestsTest(unittest.TestCase):
