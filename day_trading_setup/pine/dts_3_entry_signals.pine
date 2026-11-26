@@ -400,6 +400,11 @@ if pos != 0 and bar_index > entBar
     if runNow and not exitNow and exitAlerts
         alert("DTS: " + syminfo.ticker + " hit " + str.tostring(runnerTgtR) + "R target @ " + fmt(entPx + (tgtPx - entPx) * runnerTgtR / rr) + " - take partial, the rest rides the trail", alert.freq_once_per_bar)
 
+// Mark (v23.0, 2026-11-26, user decision): at every 5-minute close while a trade is open, its
+// live price, so the executor can follow the day's P&L (protect a green day, daily loss limit).
+if pos != 0 and exitAlerts and barstate.isconfirmed and rth and not exitNow
+    alert("DTS: MARK " + (pos == 1 ? "LONG " : "SHORT ") + syminfo.ticker + " @ " + fmt(close), alert.freq_once_per_bar_close)
+
 // --- Arm on a key-level breakout (highest level broken wins for longs, lowest for shorts).
 float  upLvl = na
 string upName = ""

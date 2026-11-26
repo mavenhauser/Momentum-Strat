@@ -443,6 +443,11 @@ def on_entry(broker, state, sig, t):
         why = "half day (13:00 close): no new entries"
         skip(state, sig, t, why)
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
+    stopped = contracts.day_stopped(state, t.date())
+    if stopped:
+        why = f"day rules: no new entries today ({stopped})"
+        skip(state, sig, t, why)
+        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
     opening = contracts.is_opening(sig)
     if opening and contracts.openings_today(state, t.date()) >= settings.OPENING_MAX:
         why = f"opening entries: {settings.OPENING_MAX} already taken today"
@@ -560,11 +565,13 @@ def _sell(broker, state, pos, qty, t, why, alert_raw):
     if qty <= 0:
         return 0, None, "nothing held on IBKR"
     filled, avg, note = broker.fill("SELL", pos, qty)
+    mk = (state.get("marks") or {}).get(pos["ticker"])
+    stock_px = broker.stock_now if broker.stock_now else (mk["price"] if mk else None)
     pos["open_qty"] -= filled
     pos["proceeds"] = pos.get("proceeds", 0.0) + filled * (avg or 0.0)
     pos["events"].append({"t": t.isoformat(), "alert": alert_raw, "action": f"SELL {filled} @ {avg} ({why})",
                           "qty": filled, "price": avg, "bid": broker.last_quote[0], "ask": broker.last_quote[1],
-                          "quote_source": broker.last_quote[2], "why": why,
+                          "quote_source": broker.last_quote[2], "why": why, "stock_px": stock_px,
                           **({"quote_adjust": broker.last_adjust} if broker.last_adjust else {})})
     return filled, avg, note
 
@@ -676,6 +683,16 @@ def on_qqq_bar(broker, state, sig, t):
     for pos in qqq_exits_due(state, sig, t):
         side = "below" if pos["side"] == "LONG" else "above"
         close_position(broker, state, pos, t, f"early exit: QQQ closed back {side} its 09:30 open before 2R ({line})", sig.raw)
+
+
+def on_day_rule(broker, state, sig, t):
+    """Day rules (D4): sell everything and stop new entries for the day."""
+    why = state["day_stop"]["why"]
+    n = 0
+    for pos in list(state["positions"].values()):
+        close_position(broker, state, pos, t, f"day rules: {why}", sig.raw)
+        n += 1
+    notify(f"{title('DAY STOP')}\n<b>{h(why)}</b>\n{n} open position(s) sold; no new entries for the rest of the day")
 
 
 def close_position(broker, state, pos, t, why, alert_raw):
@@ -923,6 +940,17 @@ def main(argv=None):
             log.info("duplicate alert ignored: %s", sig.raw)
             return 0
         state["processed"][key] = t.isoformat()
+        if sig.kind == "MARK":                     # v23.0: live price of an open trade, for the day rules
+            if sig.ticker not in state["positions"]:
+                return 0                           # TradingView holds a trade the executor skipped: nothing to do
+            state.setdefault("marks", {})[sig.ticker] = {"t": t.isoformat(), "price": sig.price}
+            stop = None if contracts.day_stopped(state, t.date()) or not contracts.in_session(t) else \
+                contracts.day_rule_due(state, t.date(), contracts.day_units(state, t.date()))
+            if not stop:
+                save_state(state)
+                return 0
+            state["day_stop"] = {"date": t.date().isoformat(), "why": stop, "t": t.isoformat()}
+            log.info("day rules: %s", stop)
         if sig.kind == "QQQBAR":                   # every 5-minute close; connect only when it sells something
             state["qqq_bar"] = {"t": t.isoformat(), "close": sig.price, "open": sig.stop}
             if not qqq_exits_due(state, sig, t):
@@ -941,9 +969,9 @@ def main(argv=None):
             broker = Broker()
             try:
                 broker.connect()
-                broker.stock_now = sig.price if sig.kind != "QQQBAR" else None   # QQQ's price is not the option's stock
+                broker.stock_now = sig.price if sig.kind not in ("QQQBAR", "MARK") else None   # one price for many stocks
                 {"ENTRY": on_entry, "TARGET": on_target, "EXIT": on_exit, "CHECK": on_check,
-                 "QQQBAR": on_qqq_bar}[sig.kind](broker, state, sig, t)
+                 "QQQBAR": on_qqq_bar, "MARK": on_day_rule}[sig.kind](broker, state, sig, t)
                 err = None
                 break
             except Exception as e:

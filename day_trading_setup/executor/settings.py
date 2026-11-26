@@ -236,6 +236,19 @@ QQQ_OPEN_EXIT = True
 # sold by the QQQ-open early exit (it cut them: 15 normal days, cap 6, +36.3R without vs
 # +19.4R with it). All other rules apply (stop, 2R half, trail, 2-hour limit, 15:56).
 OPENING_MAX = 6
+# Day rules "D4" (2026-11-26, user decision, for steadier days): the day's P&L - every trade
+# opened today, closed sales plus open positions at their live stock price - is followed in
+# units of 1R at DAY_UNIT_SIZE premium (a 5% A+ OUTSIDE trade counts double). It is checked at
+# each MARK alert (DTS Entry v23.0, every 5-minute close for each open trade). Once the day
+# reaches +DAY_PROTECT_ARM_U it is protected: if it falls back to +DAY_PROTECT_FLOOR_U, or
+# at any time reaches -DAY_LOSS_LIMIT_U, everything is sold and no new entries are taken that
+# day. Backtest Oct 14-Nov 25 (as live from Nov 30): +87u -> +102u, worst day -14.5u -> -4.9u,
+# 345 -> 296 trades, green days unchanged (16/31); costs a comeback day like Nov 19 (+9.5u -> -4.2u).
+DAY_RULES = True
+DAY_UNIT_SIZE = 0.025
+DAY_PROTECT_ARM_U = 3.0
+DAY_PROTECT_FLOOR_U = 1.0
+DAY_LOSS_LIMIT_U = 4.0
 MAX_HOLD_SESSIONS = 2        # mirrors "Max sessions held" on DTS Entry (backup only)
 # Overnight rule (2026-10-22, the user's idea): at the 15:56 sweep, a position that has not
 # reached 2R is sold; only runners past 2R (stop at break-even) are held overnight. On

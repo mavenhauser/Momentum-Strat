@@ -1,5 +1,6 @@
 """Contract choice and sizing - pure functions, no broker calls."""
 import math
+import re
 from datetime import date, datetime, timedelta
 
 from day_trading_setup.executor import settings
@@ -244,6 +245,72 @@ def openings_today(state, day) -> int:
     """Opening entries opened on `day`, open or closed."""
     return sum(1 for p in list(state["positions"].values()) + list(state["closed"])
                if p.get("opening") and (p.get("opened_at") or "")[:10] == day.isoformat())
+
+
+def _stock_r(pos, px):
+    risk = abs((pos.get("tv_entry") or 0) - (pos.get("tv_stop") or 0))
+    if not risk or px is None:
+        return 0.0
+    return (px - pos["tv_entry"]) * (1 if pos["side"] == "LONG" else -1) / risk
+
+
+def _sale_stock_price(pos, ev, marks):
+    """Stock price behind a sale: recorded with the sale (since 2026-11-26), else the price in the
+    TradingView alert that triggered it, else the latest mark, else the entry."""
+    if ev.get("stock_px") is not None:
+        return ev["stock_px"]
+    m = re.search(r"@ ([0-9][0-9,]*(?:\.[0-9]+)?)", ev.get("alert") or "")
+    if m and pos["ticker"] in (ev.get("alert") or "") and not (ev.get("alert") or "").startswith("DTS: QQQ"):
+        return float(m.group(1).replace(",", ""))
+    mk = (marks or {}).get(pos["ticker"])
+    return mk["price"] if mk else pos.get("tv_entry")
+
+
+def trade_units(pos, marks):
+    """This trade's P&L in day-rule units: stock R of each sale and of the open rest (at its
+    latest mark), by the share of contracts, times its premium size / DAY_UNIT_SIZE."""
+    qty = pos.get("qty") or 0
+    if not qty or not pos.get("tv_entry") or not pos.get("tv_stop"):
+        return 0.0
+    r = 0.0
+    for ev in pos.get("events", []):
+        if str(ev.get("action", "")).startswith("SELL") and ev.get("qty"):
+            r += ev["qty"] / qty * _stock_r(pos, _sale_stock_price(pos, ev, marks))
+    if pos.get("open_qty", 0) > 0:
+        mk = (marks or {}).get(pos["ticker"])
+        r += pos["open_qty"] / qty * _stock_r(pos, mk["price"] if mk else pos["tv_entry"])
+    return r * (pos.get("size_fraction") or settings.DAY_UNIT_SIZE) / settings.DAY_UNIT_SIZE
+
+
+def day_units(state, day, marks=None):
+    """The day's P&L in units: every trade opened on `day`, open or closed."""
+    marks = state.get("marks", {}) if marks is None else marks
+    return sum(trade_units(p, marks) for p in list(state["positions"].values()) + list(state["closed"])
+               if (p.get("opened_at") or "")[:10] == day.isoformat())
+
+
+def day_rule_due(state, day, units):
+    """Update the day's peak / armed flag; return the reason to stop the day, or None."""
+    if not settings.DAY_RULES:
+        return None
+    d = state.setdefault("day_rules", {})
+    if d.get("date") != day.isoformat():
+        d.clear(); d.update(date=day.isoformat(), peak=units, armed=False)
+    d["peak"] = max(d.get("peak", units), units)
+    if units >= settings.DAY_PROTECT_ARM_U:
+        d["armed"] = True
+    if units <= -settings.DAY_LOSS_LIMIT_U:
+        return f"daily loss limit: the day reached {units:+.1f}u (limit -{settings.DAY_LOSS_LIMIT_U:g}u)"
+    if d.get("armed") and units <= settings.DAY_PROTECT_FLOOR_U:
+        return (f"green day protected: up {d['peak']:+.1f}u at best, back to {units:+.1f}u "
+                f"(sell at +{settings.DAY_PROTECT_FLOOR_U:g}u once up +{settings.DAY_PROTECT_ARM_U:g}u)")
+    return None
+
+
+def day_stopped(state, day):
+    """The reason the day rules stopped `day`, or None."""
+    s = state.get("day_stop") or {}
+    return s.get("why") if s.get("date") == day.isoformat() else None
 
 
 def qqq_open_exit_due(pos, qqq_close, qqq_open, t) -> bool:

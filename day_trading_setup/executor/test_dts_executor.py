@@ -963,6 +963,73 @@ class OpeningEntryTest(unittest.TestCase):
         self.assertEqual(settings.OPENING_MAX, 6)
 
 
+class DayRulesTest(unittest.TestCase):
+    """D4 day rules (user decision 2026-11-26): protect a green day at +3u -> +1u, loss limit -4u."""
+    NY = __import__("zoneinfo").ZoneInfo("America/New_York")
+
+    def _pos(self, tk, side="LONG", e=100.0, stop=99.0, qty=4, open_qty=4, size=0.025, sells=()):
+        return {"ticker": tk, "side": side, "tv_entry": e, "tv_stop": stop, "qty": qty, "open_qty": open_qty,
+                "size_fraction": size, "opened_at": "2026-11-30T10:00:00-05:00",
+                "events": [{"action": f"SELL {q} @ 1.0", "qty": q, "stock_px": px} for q, px in sells]}
+
+    def test_units(self):
+        marks = {"A": {"price": 102.0}, "B": {"price": 99.5}}
+        a = self._pos("A")                                   # +2R open, 2.5% size -> +2u
+        b = self._pos("B", side="SHORT", e=100.0, stop=101.0, size=0.05)   # short +0.5R at 5% -> +1u
+        self.assertAlmostEqual(contracts.trade_units(a, marks), 2.0)
+        self.assertAlmostEqual(contracts.trade_units(b, marks), 1.0)
+        c = self._pos("A", open_qty=2, sells=[(2, 102.0)])    # half sold at 2R, rest marked at 102 -> +2u
+        self.assertAlmostEqual(contracts.trade_units(c, marks), 2.0)
+        state = {"positions": {"A": a}, "closed": [self._pos("C", open_qty=0, sells=[(4, 99.0)])]}   # stopped: -1u
+        self.assertAlmostEqual(contracts.day_units(state, date(2026, 11, 30), marks), 1.0)
+        # a sale without a recorded stock price falls back to its TradingView alert's price
+        d = self._pos("D", open_qty=0); d["events"] = [{"action": "SELL 4 @ 1.0", "qty": 4, "alert": "DTS: EXIT LONG D (STOP) @ 99.00"}]
+        self.assertAlmostEqual(contracts.trade_units(d, {}), -1.0)
+
+    def test_triggers(self):
+        day = date(2026, 11, 30); st = {}
+        self.assertIsNone(contracts.day_rule_due(st, day, 2.5))
+        self.assertIsNone(contracts.day_rule_due(st, day, 3.2))          # armed
+        self.assertIsNone(contracts.day_rule_due(st, day, 1.4))
+        self.assertIn("green day protected", contracts.day_rule_due(st, day, 0.9))
+        st = {}
+        self.assertIsNone(contracts.day_rule_due(st, day, 0.5))            # never armed: +0.5 is fine
+        self.assertIsNone(contracts.day_rule_due(st, day, -3.9))
+        self.assertIn("daily loss limit", contracts.day_rule_due(st, day, -4.0))
+        self.assertIsNone(contracts.day_rule_due(st, date(2026, 12, 1), 0.9))   # new day: not armed
+        with mock.patch.object(settings, "DAY_RULES", False):
+            self.assertIsNone(contracts.day_rule_due({}, day, -9))
+
+    def test_mark_sells_everything_and_blocks_entries(self):
+        from day_trading_setup.executor import executor
+        t = datetime(2026, 11, 30, 11, 0, tzinfo=self.NY)
+        state = {"positions": {"A": self._pos("A"), "B": self._pos("B")}, "closed": [], "processed": {}}
+        closed, sent = [], []
+        class FakeBroker:
+            def __init__(self): self.stock_now = None
+            def connect(self): pass
+            def close(self): pass
+        def fake_close(b, st, p, tt, why, raw):
+            closed.append((p["ticker"], why)); del st["positions"][p["ticker"]]
+        with mock.patch.object(executor, "load_state", lambda: state), mock.patch.object(executor, "save_state", lambda s: None), \
+             mock.patch.object(executor, "Broker", FakeBroker), mock.patch.object(executor, "close_position", fake_close), \
+             mock.patch.object(executor, "notify", sent.append), mock.patch.object(executor.settings, "LOCK_FILE", "/tmp/dts_test.lock"), \
+             mock.patch.object(executor.logging, "basicConfig", lambda **k: None), mock.patch.object(executor.logging, "FileHandler", lambda *a, **k: None):
+            state.setdefault("marks", {})["B"] = {"t": t.isoformat(), "price": 98.0}          # B -2u
+            executor.main(["--message", "DTS: MARK LONG A @ 98.10", "--received", t.isoformat()])   # A -1.9u -> -3.9u: nothing
+            self.assertEqual(closed, [])
+            executor.main(["--message", "DTS: MARK LONG A @ 97.90", "--received", (t.replace(minute=5)).isoformat()])  # -4.1u
+        self.assertEqual(sorted(c[0] for c in closed), ["A", "B"])
+        self.assertIn("daily loss limit", closed[0][1])
+        self.assertIn("DAY STOP", sent[-1])
+        self.assertIn("daily loss limit", contracts.day_stopped(state, t.date()))
+        reasons = []
+        with mock.patch.object(executor, "notify", lambda *_: None), mock.patch.object(executor, "off_day_list", lambda *_: False):
+            executor.on_entry(None, state, signals.parse("DTS: LONG MU @ 700.00 | stop 690.00 | target 720.00 (2R) | ORH breakout + 8 EMA retest | grade A inside"), t.replace(minute=30))
+        self.assertIn("day rules: no new entries today", state["skipped"][-1]["reason"])
+        self.assertEqual(signals.parse("DTS: MARK SHORT NVDA @ 1,180.12").price, 1180.12)
+
+
 class ExitTestsTest(unittest.TestCase):
     """Report-only exit tests: option break-even stop and volume fade (user decision 2026-11-14)."""
     NY = __import__("zoneinfo").ZoneInfo("America/New_York")
