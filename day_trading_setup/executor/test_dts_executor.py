@@ -1061,6 +1061,33 @@ class DayRulesTest(unittest.TestCase):
         self.assertIn("day rules: no new entries today (daily loss limit", state["skipped"][-1]["reason"])
 
 
+class FadeReportTest(unittest.TestCase):
+    """Fade test, report only (user decision 2026-11-26)."""
+
+    def test_finds_a_fade_and_prices_it(self):
+        from day_trading_setup.executor import fade_report as fr
+        d = "2026-11-30"; prev = "2026-11-27"
+        rows = [(prev, f"{9 + (30 + 5 * i) // 60:02d}:{(30 + 5 * i) % 60:02d}", 100, 100.2, 99.8, 100, 1000) for i in range(40)]
+        hm = lambda i: f"{9 + (30 + 5 * i) // 60:02d}:{(30 + 5 * i) % 60:02d}"
+        day = [(d, hm(i), 100, 100.1, 99.9, 100, 1000) for i in range(6)]          # 09:30-09:55 flat around 100
+        day += [(d, hm(6), 100.0, 103.0, 100.0, 102.8, 3000)]                      # 10:00 bar: stretched far above the band
+        day += [(d, hm(7), 102.8, 102.9, 101.5, 101.6, 2000)]                      # 10:05 bar: closes back down -> short at 10:10
+        day += [(d, hm(i), 101.5, 101.6, 100.0, 100.2, 1500) for i in range(8, 20)]  # falls back to VWAP
+        fades = fr.find_fades({"XYZ": rows + day}, fr.date.fromisoformat(d))
+        self.assertEqual(len(fades), 1)
+        f = fades[0]
+        self.assertEqual((f["side"], f["t_in"], f["why"]), ("SHORT", "10:10", "target"))
+        self.assertGreater(f["R"], 0)
+        self.assertTrue(f["stop"] > 103.0)
+        f["cands"] = fr.option_candidates(f, fr.date.fromisoformat(d))
+        self.assertEqual(f["cands"][0], ".XYZ261204P101")
+        fr.price_fades(fades, {".XYZ261204P101": {"10:10": (2.00, 2.00), f["t_out"]: (2.60, 2.60)}})
+        self.assertEqual((f["qty"], f["pnl"]), (12, 720.0))
+        self.assertAlmostEqual(f["pnl_after_spread"], 720.0 - 0.043 * 2.0 * 100 * 12)
+        self.assertIn("Fade test (not traded", fr.note(None, fr.summary(fades)))
+        self.assertEqual(fr.find_fades({"XYZ": rows + day}, fr.date.fromisoformat(d), held={"XYZ": ("09:35", "12:00")}), [])
+
+
 class ExitTestsTest(unittest.TestCase):
     """Report-only exit tests: option break-even stop and volume fade (user decision 2026-11-14)."""
     NY = __import__("zoneinfo").ZoneInfo("America/New_York")
