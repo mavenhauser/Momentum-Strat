@@ -1088,6 +1088,45 @@ class FadeReportTest(unittest.TestCase):
         self.assertEqual(fr.find_fades({"XYZ": rows + day}, fr.date.fromisoformat(d), held={"XYZ": ("09:35", "12:00")}), [])
 
 
+class SmallAccountTest(unittest.TestCase):
+    """$10k shadow next to normal operations (user decision 2026-11-26), sizing H."""
+
+    def _t(self, tk, grade, p, sells, qty=10, frac=None, day="2026-11-30", t_buy="10:00"):
+        return {"ticker": tk, "grade": grade, "size_fraction": frac, "qty": qty,
+                "buy": {"t": f"{day}T{t_buy}:00-05:00", "true": p, "qty": qty},
+                "sells": [{"t": f"{day}T{h}:00-05:00", "true": sp, "qty": q} for h, sp, q in sells]}
+
+    def test_sizing_splits_and_skips(self):
+        from day_trading_setup.executor import small_account as sa
+        trades = [
+            self._t("A", "A+ OUTSIDE", 2.0, [("11:00", 3.0, 5), ("12:00", 4.0, 5)], frac=0.05),   # $1,000 -> 5 contracts
+            self._t("B", "B inside", 4.0, [("11:30", 3.0, 10)], frac=0.025),                   # $500 -> 1 contract
+            self._t("C", "A inside", 6.0, [("11:30", 7.0, 10)], frac=0.025),                   # $500 < $600: skipped
+            self._t("D", "A inside", 2.0, [("10:30", 2.5, 5), ("14:00", 1.0, 5)], frac=0.0125),  # choppy half: $250 -> 1, last sale
+        ]
+        rows, _ = sa.replay([("2026-11-30", trades)])
+        r = rows[0]
+        self.assertEqual({x["ticker"]: x["contracts"] for x in r["taken"]}, {"A": 5, "B": 1, "D": 1})
+        self.assertEqual([x["ticker"] for x in r["skipped"]], ["C"])
+        # A: 2.5 x +1.00 + 2.5 x +2.00 = +$750; B: 1 x -1.00 = -$100; D: one contract, out at the last sale 1.00 = -$100
+        self.assertAlmostEqual(r["pnl"], 550.0)
+        self.assertAlmostEqual(r["balance"], 10550.0)
+        self.assertIn("Small account ($10k shadow", sa.note(r, rows))
+
+    def test_max_open_and_overnight(self):
+        from day_trading_setup.executor import small_account as sa
+        many = [self._t(f"T{i}", "B inside", 1.0, [("15:00", 1.1, 10)], frac=0.025, t_buy=f"10:0{i}") for i in range(8)]
+        rows, _ = sa.replay([("2026-11-30", many)])
+        self.assertEqual(len(rows[0]["taken"]), 6)
+        self.assertIn("6 already open", rows[0]["skipped"][0]["why"])
+        held = self._t("H", "B inside", 1.0, [], frac=0.025)
+        nxt = dict(held, sells=[{"t": "2026-12-01T10:00:00-05:00", "true": 2.0, "qty": 10}])
+        rows, _ = sa.replay([("2026-11-30", [held]), ("2026-12-01", [nxt])])
+        self.assertEqual(rows[0]["pnl"], 0.0)
+        self.assertEqual(rows[0]["open"], [{"ticker": "H", "contracts": 5}])
+        self.assertAlmostEqual(rows[1]["pnl"], 500.0)
+
+
 class ExitTestsTest(unittest.TestCase):
     """Report-only exit tests: option break-even stop and volume fade (user decision 2026-11-14)."""
     NY = __import__("zoneinfo").ZoneInfo("America/New_York")
