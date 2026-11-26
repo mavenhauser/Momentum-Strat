@@ -235,11 +235,22 @@ def with_qqq(sig) -> bool:
     return sgn * day > 0 and above == (sgn > 0)
 
 
+def is_opening(sig) -> bool:
+    """True for DTS Entry's 09:35 opening entry (v22.0): level OPEN."""
+    return sig.kind == "ENTRY" and sig.level == "OPEN"
+
+
+def openings_today(state, day) -> int:
+    """Opening entries opened on `day`, open or closed."""
+    return sum(1 for p in list(state["positions"].values()) + list(state["closed"])
+               if p.get("opening") and (p.get("opened_at") or "")[:10] == day.isoformat())
+
+
 def qqq_open_exit_due(pos, qqq_close, qqq_open, t) -> bool:
     """True if a QQQ 5-minute close at `t` is back through QQQ's 09:30 open against this
     position (below for a long, above for a short) and the position should be sold
     (QQQ_OPEN_EXIT): opened today before that bar's close, nothing sold at 2R yet."""
-    if not settings.QQQ_OPEN_EXIT or pos.get("trimmed") or pos.get("open_qty", 0) < pos.get("qty", 0):
+    if not settings.QQQ_OPEN_EXIT or pos.get("opening") or pos.get("trimmed") or pos.get("open_qty", 0) < pos.get("qty", 0):
         return False
     opened = datetime.fromisoformat(pos["opened_at"])
     if opened.date() != t.date() or opened >= t:

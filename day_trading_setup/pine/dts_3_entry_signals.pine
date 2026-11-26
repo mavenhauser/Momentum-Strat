@@ -101,6 +101,14 @@ tlMin = input.int(120, "Time-limit check after (minutes, 0 = off)", minval = 0, 
 // blocks new entries until it exits). The chart keeps the default, which changes nothing.
 // Kept last so the alerts' saved settings line up.
 alertStart = input.time(timestamp("2000-01-01T00:00:00"), "Alert start (set by the list job, leave as is)", group = G_AL, tooltip = "The list job sets this to the time it creates each alert, so the alert takes no trade from the bars before it existed. Leave it at the default on the chart.", display = display.none)
+// Opening entry (v22.0, 2026-11-26, user decision): at the close of the first 5-minute bar
+// (09:35), on a day QQQ opened less than openGapMax % from yesterday's close, enter in the
+// direction of QQQ's first bar when this stock's first bar went the same way; stop at the
+// far side of that bar, 2R target as usual. Backtest on the real day lists Oct 14-Nov 25:
+// normal days +77.1R from 181 trades; gap days -38.7R (skipped). Added after "Alert start"
+// so the alerts' saved settings keep their places.
+openEntry  = input.bool(true, "Opening entry at 09:35 (first 5-min bar, QQQ's direction)", group = G_ENT, tooltip = "At the close of the 09:30 bar: long if this stock's first bar and QQQ's first bar both closed up, short if both closed down. Stop at the bar's low (long) / high (short). Not on a day QQQ opened the gap below or more from yesterday's close.", display = display.none)
+openGapMax = input.float(1.0, "Opening entry: skip if QQQ gapped this % or more", minval = 0, step = 0.25, group = G_ENT, display = display.none)
 
 C_BULL = #00E676
 C_BEAR = #FF1744
@@ -235,6 +243,8 @@ f_qqqState() =>
     [n, (close / o - 1) * 100, (close / close[60] - 1) * 100, above]
 [qqqCross, qqqDay, qqqHour, qqqAbove] = request.security(ticker.new("NASDAQ", "QQQ", session.regular), "1", f_qqqState())
 f_pct(x) => (x >= 0 ? "+" : "") + str.tostring(x, "0.00") + "%"
+[qqqPrevClose, qqqOpenD] = request.security(ticker.new("NASDAQ", "QQQ", session.regular), "D", [close[1], open], lookahead = barmerge.lookahead_on)
+qqqGap = na(qqqPrevClose) or na(qqqOpenD) ? na : (qqqOpenD / qqqPrevClose - 1) * 100
 trendL = trendPct > 0 and not na(qqqDay) and qqqDay >= trendPct and qqqAbove
 trendS = trendPct > 0 and not na(qqqDay) and qqqDay <= -trendPct and not qqqAbove
 qqqTag = na(qqqDay) or na(qqqHour) ? "" : " | QQQ " + f_pct(qqqDay) + " (1h " + f_pct(qqqHour) + ") " + (qqqAbove ? "above" : "below") + " VWAP"
@@ -542,10 +552,24 @@ if longSig or shortSig
         sRetest := false
         sSwing := na
 
+// Opening entry (v22.0): at the first bar's close, in QQQ's first-bar direction.
+openDir = 0
+if openEntry and rthOpen and barstate.isconfirmed and pos == 0 and pendDir == 0 and goDir == 0 and time_close > alertStart and not na(qqqDay) and not na(qqqGap) and math.abs(qqqGap) < openGapMax
+    if close > open and qqqDay > 0 and allowLong and close > low
+        openDir := 1
+    else if close < open and qqqDay < 0 and allowShort and high > close
+        openDir := -1
+if openDir != 0
+    goDir   := openDir
+    goPx    := close
+    goStp   := openDir == 1 ? low : high
+    goName  := "OPEN"
+    goGrade := openDir == 1 ? f_grade(ptsL) + (outLong ? " OUTSIDE" : " inside") : f_grade(ptsS) + (outShort ? " OUTSIDE" : " inside")
+
 // Extension filter (v18.0): skip the entry once the stock has already moved maxExtR R
 // from today's open in the trade's direction. Oct 19-Nov 4: 36 of 161 signals, -13.1R.
 goTrend = goDir == 1 ? trendL : goDir == -1 ? trendS : false
-if goDir != 0 and maxExtR > 0 and not na(dOpen) and goPx != goStp and not (trendChase and goTrend)
+if goDir != 0 and goName != "OPEN" and maxExtR > 0 and not na(dOpen) and goPx != goStp and not (trendChase and goTrend)
     doneR = (goPx - dOpen) * goDir / math.abs(goPx - goStp)
     if doneR >= maxExtR
         label.new(bar_index, goDir == 1 ? high : low, "extended " + str.tostring(doneR, "0.0") + "R", yloc = goDir == 1 ? yloc.abovebar : yloc.belowbar, style = label.style_none, textcolor = C_DIM, size = size.tiny)
@@ -570,9 +594,9 @@ if goDir != 0
     lnStp := line.new(bar_index, stpPx, bar_index + 1, stpPx, color = C_BEAR, style = line.style_dashed)
     lnTgt := line.new(bar_index, tgtPx, bar_index + 1, tgtPx, color = C_BULL, style = line.style_dashed)
     side = goDir == 1 ? "LONG" : "SHORT"
-    txt = side + " · " + goName + " retest\nEntry " + fmt(entPx) + "\nStop " + fmt(stpPx) + "\nTarget " + fmt(tgtPx)
+    txt = side + " · " + (goName == "OPEN" ? "opening bar" : goName + " retest") + "\nEntry " + fmt(entPx) + "\nStop " + fmt(stpPx) + "\nTarget " + fmt(tgtPx)
     label.new(bar_index, close, txt, yloc = goDir == 1 ? yloc.belowbar : yloc.abovebar, style = goDir == 1 ? label.style_label_up : label.style_label_down, color = goDir == 1 ? #00C853 : #D50000, textcolor = color.white, size = size.small)
-    alert("DTS: " + side + " " + syminfo.ticker + " @ " + fmt(entPx) + " | stop " + fmt(stpPx) + " | target " + fmt(tgtPx) + " (" + str.tostring(rr) + "R) | " + goName + " breakout + " + (bandEntry and goTrend ? "VWAP band" : "8 EMA") + " retest" + (chopOn ? " | choppy (QQQ crosses " + str.tostring(qqqCross) + ")" : "") + (goTrend ? " | trend day" : "") + qqqTag + " | grade " + goGrade, confirmEntry ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
+    alert("DTS: " + side + " " + syminfo.ticker + " @ " + fmt(entPx) + " | stop " + fmt(stpPx) + " | target " + fmt(tgtPx) + " (" + str.tostring(rr) + "R) | " + goName + " breakout + " + (goName == "OPEN" ? "first 5-min bar, QQQ gap " + f_pct(qqqGap) : (bandEntry and goTrend ? "VWAP band" : "8 EMA") + " retest") + (chopOn ? " | choppy (QQQ crosses " + str.tostring(qqqCross) + ")" : "") + (goTrend ? " | trend day" : "") + qqqTag + " | grade " + goGrade, confirmEntry ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
 
 plotshape(retestNowL and pos == 0 and allowLong, "Retest (long) - get ready", shape.diamond, location.belowbar, color.new(C_BULL, 30), size = size.tiny, display = display.all - display.status_line)
 plotshape(retestNowS and pos == 0 and allowShort, "Retest (short) - get ready", shape.diamond, location.abovebar, color.new(C_BEAR, 30), size = size.tiny, display = display.all - display.status_line)

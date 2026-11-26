@@ -443,7 +443,12 @@ def on_entry(broker, state, sig, t):
         why = "half day (13:00 close): no new entries"
         skip(state, sig, t, why)
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
-    if settings.QQQ_DIRECTION_UNTIL and hm < settings.QQQ_DIRECTION_UNTIL and not contracts.with_qqq(sig):
+    opening = contracts.is_opening(sig)
+    if opening and contracts.openings_today(state, t.date()) >= settings.OPENING_MAX:
+        why = f"opening entries: {settings.OPENING_MAX} already taken today"
+        skip(state, sig, t, why)
+        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
+    if not opening and settings.QQQ_DIRECTION_UNTIL and hm < settings.QQQ_DIRECTION_UNTIL and not contracts.with_qqq(sig):
         u = settings.QQQ_DIRECTION_UNTIL
         why = f"before {u[0]}:{u[1]:02d} only trades in the direction of QQQ ({qqq_line(sig)})"
         skip(state, sig, t, why)
@@ -517,6 +522,8 @@ def on_entry(broker, state, sig, t):
                nlv=nlv, nlv_source=nlv_src, est_entry=avg)
     if late:
         pos["late"] = late
+    if opening:
+        pos["opening"] = True
     state["positions"][sig.ticker] = pos
     notify(f"{title('BOUGHT')}\n"
            f"<b>{filled} × {h(describe(pos))}</b>\n"
@@ -528,6 +535,7 @@ def on_entry(broker, state, sig, t):
            + (f" (half: choppy market, QQQ crossed VWAP {sig.chop}×)" if sig.chop is not None else "") + "\n"
            f"Premium <b>${filled * avg * 100:,.0f}</b> = {filled * avg * 100 / nlv:.1%} of ${nlv:,.0f} ({h(nlv_src)})\n"
            f"Strike chosen: delta {abs(pos['delta']) if pos.get('delta') is not None else float('nan'):.2f} · {h(pos.get('sizing_rule', ''))}\n"
+           + ("Opening entry (09:35, QQQ's first-bar direction): not sold by the QQQ-open early exit\n" if opening else "")
            + ("Friday swing: smaller size, next week's expiry, sold at 15:56 if not at 2R\n" if contracts.weekend_swing(pos) else "")
            + ("Late high-conviction entry: sold at 15:56 if not at 2R\n" if late == "overnight" else "")
            + (f"Late entry on strong market momentum ({h(qqq_line(sig))}): sold at 15:56 if not at 2R\n" if late == "momentum" else "")

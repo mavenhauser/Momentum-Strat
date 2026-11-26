@@ -924,6 +924,45 @@ class QqqOpenExitTest(unittest.TestCase):
         self.assertNotIn("QQQBAR", backfill.ACTIONABLE)             # a stale bar is never re-sent
 
 
+class OpeningEntryTest(unittest.TestCase):
+    """09:35 opening entry, DTS Entry v22.0 (user decision 2026-11-26)."""
+    NY = __import__("zoneinfo").ZoneInfo("America/New_York")
+    MSG = ("DTS: SHORT AAPL @ 350.49 | stop 353.84 | target 343.79 (2R) | OPEN breakout + first 5-min bar, "
+           "QQQ gap -0.45% | QQQ -0.30% (1h -0.50%) above VWAP | grade B inside")
+
+    def _entry(self, state, msg=None, at=(9, 35)):
+        from day_trading_setup.executor import executor
+        reasons = []
+        with mock.patch.object(executor, "notify", lambda *_: None), \
+             mock.patch.object(executor, "off_day_list", lambda *_: False), \
+             mock.patch.object(executor, "choose_contract", lambda *a, **k: (None, "reached contract choice")), \
+             mock.patch.object(executor, "friday_fallback", lambda *a, **k: None):
+            executor.on_entry(None, state, signals.parse(msg or self.MSG), datetime(2026, 11, 30, *at, 2, tzinfo=self.NY))
+        return state["skipped"][-1]["reason"] if state.get("skipped") else None
+
+    def test_parse_and_qqq_rule_exemption(self):
+        sig = signals.parse(self.MSG)
+        self.assertEqual((sig.kind, sig.side, sig.level, sig.stop), ("ENTRY", "SHORT", "OPEN", 353.84))
+        self.assertTrue(contracts.is_opening(sig))
+        # QQQ above its VWAP would block an ordinary short before 10:30; the opening entry goes on
+        self.assertEqual(self._entry({"positions": {}, "closed": []}), "reached contract choice")
+        normal = self.MSG.replace("OPEN breakout + first 5-min bar, QQQ gap -0.45%", "ORL breakout + 8 EMA retest")
+        self.assertIn("only trades in the direction of QQQ", self._entry({"positions": {}, "closed": []}, normal))
+
+    def test_cap_of_six_a_day(self):
+        today = [{"ticker": f"T{i}", "opening": True, "opened_at": "2026-11-30T09:35:05-05:00"} for i in range(6)]
+        self.assertIn("opening entries: 6 already taken today", self._entry({"positions": {}, "closed": today}))
+        older = [{**p, "opened_at": "2026-11-27T09:35:05-05:00"} for p in today]
+        self.assertEqual(self._entry({"positions": {}, "closed": older[:6] + today[:5]}), "reached contract choice")
+
+    def test_never_sold_by_the_early_exit(self):
+        t = datetime(2026, 11, 30, 10, 0, tzinfo=self.NY)
+        pos = {"side": "SHORT", "opened_at": "2026-11-30T09:35:05-05:00", "qty": 4, "open_qty": 4, "trimmed": False}
+        self.assertTrue(contracts.qqq_open_exit_due(pos, 641.0, 640.0, t))
+        self.assertFalse(contracts.qqq_open_exit_due({**pos, "opening": True}, 641.0, 640.0, t))
+        self.assertEqual(settings.OPENING_MAX, 6)
+
+
 class ExitTestsTest(unittest.TestCase):
     """Report-only exit tests: option break-even stop and volume fade (user decision 2026-11-14)."""
     NY = __import__("zoneinfo").ZoneInfo("America/New_York")
