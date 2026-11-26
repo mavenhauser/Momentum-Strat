@@ -1089,42 +1089,58 @@ class FadeReportTest(unittest.TestCase):
 
 
 class SmallAccountTest(unittest.TestCase):
-    """$10k shadow next to normal operations (user decision 2026-11-26), sizing H."""
+    """$10k shadow next to normal operations (user decisions 2026-11-26): sizing H, cheaper strikes."""
 
-    def _t(self, tk, grade, p, sells, qty=10, frac=None, day="2026-11-30", t_buy="10:00"):
-        return {"ticker": tk, "grade": grade, "size_fraction": frac, "qty": qty,
-                "buy": {"t": f"{day}T{t_buy}:00-05:00", "true": p, "qty": qty},
-                "sells": [{"t": f"{day}T{h}:00-05:00", "true": sp, "qty": q} for h, sp, q in sells]}
+    def _t(self, tk, grade, px, sells, qty=10, frac=None, strike=100.0, right="C", t_buy="10:00", day="2026-11-30"):
+        return {"ticker": tk, "grade": grade, "size_fraction": frac, "qty": qty, "strike": strike, "right": right,
+                "expiry": "2026-12-04", "tv_entry": 100.0, "side": "LONG" if right == "C" else "SHORT",
+                "buy": {"t": f"{day}T{t_buy}:00-05:00", "true": px, "qty": qty},
+                "sells": [{"t": f"{day}T{h}:00-05:00", "true": sp, "qty": q, "kind": kd} for h, sp, q, kd in sells]}
 
-    def test_sizing_splits_and_skips(self):
+    def _fake(self, prices):
+        """prices: {strike: (entry price, {"HH:MM": price})} for .X calls expiring Dec 4."""
+        def fetch(symbols, day):
+            out = {}
+            for sym in symbols:
+                k = float(sym.split("C")[-1]) if "C" in sym[-8:] else None
+                if k in prices:
+                    p0, later = prices[k]
+                    ser = {"10:00": (p0, p0, 500)}
+                    ser.update({h: (v, v, 50) for h, v in later.items()})
+                    out[sym] = ser
+            return out
+        return fetch
+
+    def test_steps_out_for_a_cheaper_strike_and_mirrors_sales(self):
         from day_trading_setup.executor import small_account as sa
-        trades = [
-            self._t("A", "A+ OUTSIDE", 2.0, [("11:00", 3.0, 5), ("12:00", 4.0, 5)], frac=0.05),   # $1,000 -> 5 contracts
-            self._t("B", "B inside", 4.0, [("11:30", 3.0, 10)], frac=0.025),                   # $500 -> 1 contract
-            self._t("C", "A inside", 6.0, [("11:30", 7.0, 10)], frac=0.025),                   # $500 < $600: skipped
-            self._t("D", "A inside", 2.0, [("10:30", 2.5, 5), ("14:00", 1.0, 5)], frac=0.0125),  # choppy half: $250 -> 1, last sale
-        ]
-        rows, _ = sa.replay([("2026-11-30", trades)])
-        r = rows[0]
-        self.assertEqual({x["ticker"]: x["contracts"] for x in r["taken"]}, {"A": 5, "B": 1, "D": 1})
-        self.assertEqual([x["ticker"] for x in r["skipped"]], ["C"])
-        # A: 2.5 x +1.00 + 2.5 x +2.00 = +$750; B: 1 x -1.00 = -$100; D: one contract, out at the last sale 1.00 = -$100
-        self.assertAlmostEqual(r["pnl"], 550.0)
-        self.assertAlmostEqual(r["balance"], 10550.0)
-        self.assertIn("Small account ($10k shadow", sa.note(r, rows))
+        # main bought the 100 call at $6 (too dear for a $500 budget: 0 contracts); 104 at $1.20 buys 4
+        t = self._t("X", "B inside", 6.0, [("11:00", 8.0, 5, "2R"), ("12:00", 9.0, 5, "TRAIL")], frac=0.025)
+        prices = {100.0: (6.0, {}), 101.0: (4.9, {}), 102.0: (3.4, {}), 103.0: (2.2, {}), 104.0: (1.2, {"11:00": 1.9, "12:00": 2.4}),
+                  105.0: (0.70, {})}
+        recs, carried = sa.build_day(sa.date(2026, 11, 30), [t], 10000.0, {}, fetch=self._fake(prices))
+        r = recs[0]
+        self.assertTrue(r["taken"])
+        self.assertEqual((r["strike"], r["qty"], r["price"]), (104.0, 4, 1.2))
+        self.assertGreaterEqual(r["delta"], 0.15)
+        self.assertEqual([(s["qty"], s["price"]) for s in r["sells"]], [(2, 1.9), (2, 2.4)])
+        self.assertAlmostEqual(r["pnl"], 2 * 0.7 * 100 + 2 * 1.2 * 100)
+        self.assertEqual(carried, {})
 
-    def test_max_open_and_overnight(self):
+    def test_skips_when_no_strike_fits_and_ledger(self):
         from day_trading_setup.executor import small_account as sa
-        many = [self._t(f"T{i}", "B inside", 1.0, [("15:00", 1.1, 10)], frac=0.025, t_buy=f"10:0{i}") for i in range(8)]
-        rows, _ = sa.replay([("2026-11-30", many)])
-        self.assertEqual(len(rows[0]["taken"]), 6)
-        self.assertIn("6 already open", rows[0]["skipped"][0]["why"])
-        held = self._t("H", "B inside", 1.0, [], frac=0.025)
-        nxt = dict(held, sells=[{"t": "2026-12-01T10:00:00-05:00", "true": 2.0, "qty": 10}])
-        rows, _ = sa.replay([("2026-11-30", [held]), ("2026-12-01", [nxt])])
-        self.assertEqual(rows[0]["pnl"], 0.0)
-        self.assertEqual(rows[0]["open"], [{"ticker": "H", "contracts": 5}])
-        self.assertAlmostEqual(rows[1]["pnl"], 500.0)
+        t = self._t("X", "B inside", 6.0, [("12:00", 5.0, 10, "STOP")], frac=0.025)
+        recs, _ = sa.build_day(sa.date(2026, 11, 30), [t], 10000.0, {}, fetch=self._fake({100.0: (6.0, {})}))
+        self.assertFalse(recs[0]["taken"])
+        self.assertIn("buys 2", recs[0]["why"])
+        day_doc, trades_doc = sa.page_docs({"date": "2026-11-30", "start": 10000.0, "pnl": 0.0, "balance": 10000.0, "taken": 0, "skipped": 1,
+                                            "main_trades": 1}, recs, {"summary": {"pnl_real": -1234.0}})
+        self.assertEqual((day_doc["main_pnl_tenth"], day_doc["skipped"]), (-123.4, 1))
+        self.assertEqual(trades_doc["trades"][0]["id"], "2026-11-30_00")
+        self.assertFalse(trades_doc["trades"][0]["taken"])
+        self.assertIn("buys 2", trades_doc["trades"][0]["note"])
+        rows = sa.ledger([("2026-11-30", {"records": [{"taken": True, "pnl": 250.0}], "main_trades": 3}),
+                          ("2026-12-01", {"records": [{"taken": True, "pnl": -100.0}, {"taken": False}], "main_trades": 2})])
+        self.assertEqual([(r["pnl"], r["balance"], r["taken"], r["skipped"]) for r in rows], [(250.0, 10250.0, 1, 0), (-100.0, 10150.0, 1, 1)])
 
 
 class ExitTestsTest(unittest.TestCase):
