@@ -443,6 +443,8 @@ def on_entry(broker, state, sig, t):
         why = "half day (13:00 close): no new entries"
         skip(state, sig, t, why)
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
+    if check_day_rules(state, t):                  # the day's P&L right now, before adding a trade
+        on_day_rule(broker, state, sig, t)
     stopped = contracts.day_stopped(state, t.date())
     if stopped:
         why = f"day rules: no new entries today ({stopped})"
@@ -683,6 +685,18 @@ def on_qqq_bar(broker, state, sig, t):
     for pos in qqq_exits_due(state, sig, t):
         side = "below" if pos["side"] == "LONG" else "above"
         close_position(broker, state, pos, t, f"early exit: QQQ closed back {side} its 09:30 open before 2R ({line})", sig.raw)
+
+
+def check_day_rules(state, t):
+    """Day rules (D4) on the day's P&L now: True if they stop the day (state["day_stop"] is set)."""
+    if contracts.day_stopped(state, t.date()) or not contracts.in_session(t):
+        return False
+    stop = contracts.day_rule_due(state, t.date(), contracts.day_units(state, t.date()))
+    if not stop:
+        return False
+    state["day_stop"] = {"date": t.date().isoformat(), "why": stop, "t": t.isoformat()}
+    log.info("day rules: %s", stop)
+    return True
 
 
 def on_day_rule(broker, state, sig, t):
@@ -944,16 +958,16 @@ def main(argv=None):
             if sig.ticker not in state["positions"]:
                 return 0                           # TradingView holds a trade the executor skipped: nothing to do
             state.setdefault("marks", {})[sig.ticker] = {"t": t.isoformat(), "price": sig.price}
-            stop = None if contracts.day_stopped(state, t.date()) or not contracts.in_session(t) else \
-                contracts.day_rule_due(state, t.date(), contracts.day_units(state, t.date()))
-            if not stop:
+            if not check_day_rules(state, t):
                 save_state(state)
                 return 0
-            state["day_stop"] = {"date": t.date().isoformat(), "why": stop, "t": t.isoformat()}
-            log.info("day rules: %s", stop)
         if sig.kind == "QQQBAR":                   # every 5-minute close; connect only when it sells something
             state["qqq_bar"] = {"t": t.isoformat(), "close": sig.price, "open": sig.stop}
-            if not qqq_exits_due(state, sig, t):
+            # the day rules run on this bar too: it arrives every 5 minutes even with nothing open
+            # (MARK alerts only come while a position is), so a closed-out -4u day is still stopped
+            if check_day_rules(state, t):
+                sig = signals.Signal("MARK", ticker="QQQ", price=sig.price, raw=sig.raw)
+            elif not qqq_exits_due(state, sig, t):
                 save_state(state)
                 return 0
         if sig.kind in ("TARGET", "EXIT", "CHECK") and sig.ticker not in state["positions"]:

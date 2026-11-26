@@ -1029,6 +1029,35 @@ class DayRulesTest(unittest.TestCase):
         self.assertIn("day rules: no new entries today", state["skipped"][-1]["reason"])
         self.assertEqual(signals.parse("DTS: MARK SHORT NVDA @ 1,180.12").price, 1180.12)
 
+    def test_loss_limit_with_nothing_open(self):
+        """All trades closed at -4.5u: no MARK alerts come, so the 5-minute QQQ bar must stop the day."""
+        from day_trading_setup.executor import executor
+        t = datetime(2026, 11, 30, 11, 0, tzinfo=self.NY)
+        lost = [self._pos(f"L{i}", open_qty=0, sells=[(4, 99.0)]) for i in range(4)] + [self._pos("L4", open_qty=0, sells=[(4, 99.5)])]
+        state = {"positions": {}, "closed": lost, "processed": {}}
+        self.assertAlmostEqual(contracts.day_units(state, t.date()), -4.5)
+        class FakeBroker:
+            def __init__(self): self.stock_now = None
+            def connect(self): pass
+            def close(self): pass
+        sent = []
+        with mock.patch.object(executor, "load_state", lambda: state), mock.patch.object(executor, "save_state", lambda s: None), \
+             mock.patch.object(executor, "Broker", FakeBroker), mock.patch.object(executor, "notify", sent.append), \
+             mock.patch.object(executor.settings, "LOCK_FILE", "/tmp/dts_test.lock"), \
+             mock.patch.object(executor.logging, "basicConfig", lambda **k: None), mock.patch.object(executor.logging, "FileHandler", lambda *a, **k: None):
+            executor.main(["--message", "DTS: QQQ 5M CLOSE 641.00 | open 640.00", "--received", t.isoformat()])
+        self.assertIn("daily loss limit", contracts.day_stopped(state, t.date()))
+        self.assertIn("DAY STOP", sent[-1])
+
+    def test_entry_checks_the_day_first(self):
+        from day_trading_setup.executor import executor
+        t = datetime(2026, 11, 30, 11, 2, tzinfo=self.NY)
+        lost = [self._pos(f"L{i}", open_qty=0, sells=[(4, 99.0)]) for i in range(4)] + [self._pos("L4", open_qty=0, sells=[(4, 99.0)])]
+        state = {"positions": {}, "closed": lost}
+        with mock.patch.object(executor, "notify", lambda *_: None), mock.patch.object(executor, "off_day_list", lambda *_: False):
+            executor.on_entry(None, state, signals.parse("DTS: LONG MU @ 700.00 | stop 690.00 | target 720.00 (2R) | ORH breakout + 8 EMA retest | grade A inside"), t)
+        self.assertIn("day rules: no new entries today (daily loss limit", state["skipped"][-1]["reason"])
+
 
 class ExitTestsTest(unittest.TestCase):
     """Report-only exit tests: option break-even stop and volume fade (user decision 2026-11-14)."""
