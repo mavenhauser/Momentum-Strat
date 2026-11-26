@@ -1028,6 +1028,8 @@ class DayRulesTest(unittest.TestCase):
             executor.on_entry(None, state, signals.parse("DTS: LONG MU @ 700.00 | stop 690.00 | target 720.00 (2R) | ORH breakout + 8 EMA retest | grade A inside"), t.replace(minute=30))
         self.assertIn("day rules: no new entries today", state["skipped"][-1]["reason"])
         self.assertEqual(signals.parse("DTS: MARK SHORT NVDA @ 1,180.12").price, 1180.12)
+        from day_trading_setup.executor import journal
+        self.assertEqual(journal._exit_kind({"why": closed[0][1], "action": "SELL 4 @ 1.0"}), "DAY STOP")
 
     def test_loss_limit_with_nothing_open(self):
         """All trades closed at -4.5u: no MARK alerts come, so the 5-minute QQQ bar must stop the day."""
