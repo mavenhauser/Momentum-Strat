@@ -21,6 +21,10 @@ midLen  = input.int(21, "mid", minval = 1, group = G_EMA, inline = "ema", displa
 slowLen = input.int(50, "slow", minval = 1, group = G_EMA, inline = "ema", display = display.none)
 
 G_ENT = "Entry rules"
+// v24.0 (2026-11-26, user decision "A"): retest tolerance 0.15 -> 0.35 ATR, don't-chase limit
+// 0.75 -> 1.0 ATR, no don't-chase limit before 11:00 (was 10:30). Replay of this engine on the real
+// day lists, Oct 19-Nov 25, with the executor's rules: +38.7R -> +55.3R, green/red days 12/12 -> 14/10,
+// better in both halves (Oct 19-Nov 6 +24.9 -> +33.5R, Nov 9-25 +13.8 -> +21.8R).
 direction   = input.string("Both", "Direction", options = ["Both", "Long only", "Short only"], group = G_ENT, display = display.none)
 orMin       = input.int(5, "Opening range (minutes)", options = [1, 2, 5, 10, 15, 30], group = G_ENT, display = display.none)
 useOR       = input.bool(true, "Arm on opening-range break (ORH / ORL)", group = G_ENT, display = display.none)
@@ -31,8 +35,8 @@ trendFilter = input.string("Clean trend", "Trend filter at entry", options = ["C
 minSpread   = input.float(0.10, "Clean trend: min 8/21 spread (x ATR)", minval = 0, step = 0.05, group = G_ENT, display = display.none)
 minSlope    = input.float(0.05, "Clean trend: min 21 EMA slope over 3 bars (x ATR)", minval = 0, step = 0.01, group = G_ENT, display = display.none)
 vwapFilter  = input.bool(true, "Longs only above VWAP, shorts only below", group = G_ENT, display = display.none)
-tolAtr      = input.float(0.15, "Retest tolerance (x ATR)", minval = 0, step = 0.05, group = G_ENT, tooltip = "How close the pullback must come to the 8 EMA or the broken level to count as a retest.", display = display.none)
-maxExt      = input.float(0.75, "Max close distance from 8 EMA (x ATR)", minval = 0, step = 0.05, group = G_ENT, tooltip = "The trigger candle must close RIGHT above (below) the 8 EMA - no chasing extended candles.", display = display.none)
+tolAtr      = input.float(0.35, "Retest tolerance (x ATR)", minval = 0, step = 0.05, group = G_ENT, tooltip = "How close the pullback must come to the 8 EMA or the broken level to count as a retest.", display = display.none)
+maxExt      = input.float(1.0, "Max close distance from 8 EMA (x ATR)", minval = 0, step = 0.05, group = G_ENT, tooltip = "The trigger candle must close RIGHT above (below) the 8 EMA - no chasing extended candles.", display = display.none)
 failAtr     = input.float(0.25, "Breakout fails if close back through level by (x ATR)", minval = 0, step = 0.05, group = G_ENT, display = display.none)
 entrySess   = input.session("0935-1200", "Entry window (New York time)", group = G_ENT, display = display.none)
 maxTrades   = input.int(3, "Max entries per day", minval = 1, group = G_ENT, display = display.none)
@@ -79,7 +83,7 @@ flatNo2R = input.bool(true, "Flat by 15:55 unless the 2R target was hit", group 
 weakR = input.float(3.0, "Weak market: sell the runner at (R multiple, 0 = off)", minval = 0, step = 0.5, group = G_RISK, tooltip = "After the 2R target, if QQQ is on the wrong side of its VWAP for the trade (below it for a long, above it for a short) when price reaches this R multiple, the runner exits (WEAK) instead of waiting for the runner target.", display = display.none)
 runnerTrim = input.bool(true, "Runner target: take another partial when QQQ is with the trade", group = G_RISK, tooltip = "At the runner target, with QQQ on the trade's side of its VWAP: alert 'hit 4R target - take partial, the rest rides the trail' and keep trailing the rest, with no further target. With QQQ against the trade, the runner exits there (RUNNER) as before.", display = display.none)
 // Added 2026-11-05 (v18.0, user decision; replay Oct 19-Nov 4 in the README).
-noChaseUntil = input.int(1030, "No 'don't chase' limit before (HHMM New York, 0 = off)", minval = 0, maxval = 1600, group = G_ENT, tooltip = "Before this time the trigger candle may close any distance from the 8 EMA (Max close distance is ignored), so a fast opening move isn't waited out until the 8 EMA catches up.", display = display.none)
+noChaseUntil = input.int(1100, "No 'don't chase' limit before (HHMM New York, 0 = off)", minval = 0, maxval = 1600, group = G_ENT, tooltip = "Before this time the trigger candle may close any distance from the 8 EMA (Max close distance is ignored), so a fast opening move isn't waited out until the 8 EMA catches up.", display = display.none)
 maxExtR = input.float(4.0, "Skip if the stock already moved this many R from the open (0 = off)", minval = 0, step = 0.5, group = G_ENT, tooltip = "At the entry, the move from today's open in the trade's direction, in R of this trade (entry to stop). At or beyond this the entry is skipped and 'DTS: EXTENDED ...' is sent instead: the move is usually spent.", display = display.none)
 // Trend day (v19.0, 2026-11-05, user decision): QQQ at least trendPct from today's open in the
 // trade's direction AND on the trade's side of its VWAP, checked bar by bar.

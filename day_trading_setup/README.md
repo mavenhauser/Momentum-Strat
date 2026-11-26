@@ -203,7 +203,7 @@ Long rules (shorts are the mirror image):
 2. **Disarm.** The setup is cancelled by a close below the 21 EMA, or a
    close more than 0.25 ATR back below the broken level (a failed breakout).
 3. **Retest.** On a later bar, the low tags the 8 EMA **or** the broken
-   level (within 0.15 ATR). A ◆ diamond appears to say "get ready".
+   level (within 0.35 ATR since v24.0, 0.15 before). A ◆ diamond appears to say "get ready".
 4. **ENTRY.** The setup triggers when a bar **closes** with all of these
    true:
    - close > 8 EMA, and it's a green candle
@@ -399,9 +399,15 @@ close: enter at or just after it. Nothing fires mid-candle.
   sample can't separate them yet.
 - **Early entries and the extension filter** (since DTS Entry v18.0, Thu
   2026-11-05, user decision, ending the Nov 4-17 rule freeze early):
-  - before **10:30 ET** the trigger candle may close any distance from the 8 EMA
-    (the 0.75 ATR *Max close distance* is ignored; input *No 'don't chase' limit
-    before*), so a fast opening move isn't waited out until the 8 EMA catches up;
+  - before **11:00 ET** (10:30 until v24.0) the trigger candle may close any distance
+    from the 8 EMA (the *Max close distance*, **1.0 ATR** since v24.0 and 0.75 before, is
+    ignored; input *No 'don't chase' limit before*), so a fast opening move isn't waited
+    out until the 8 EMA catches up. v24.0 (2026-11-26, user decision): retest tolerance
+    0.15 → 0.35 ATR, chase limit 0.75 → 1.0 ATR, no limit until 11:00. A Python replay of the
+    engine on the real day lists, Oct 19–Nov 25, with the executor's rules: +38.7R → +55.3R,
+    green / red days 12/12 → 14/10, better in both halves. The same replay found faster entries
+    worse: entering at the trigger close without the confirm break +25.5R, confirm within 1 bar
+    +37.5R;
   - an entry is **skipped** when the stock has already moved **4R or more from
     today's open** in the trade's direction (R = entry to stop; input *Skip if the
     stock already moved this many R from the open*). TradingView sends `DTS:
