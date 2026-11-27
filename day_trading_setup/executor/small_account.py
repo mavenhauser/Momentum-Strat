@@ -35,7 +35,7 @@ from day_trading_setup.executor import estimate, settings
 from day_trading_setup.executor.journal import NY
 
 SMALL_START = 10000.0
-SMALL_FROM = "2026-11-30"
+SMALL_FROM = "2026-11-27"      # first day: the half day the user chose to trade
 SMALL_SIZE = {"A+ OUTSIDE": 0.10, "A OUTSIDE": 0.07}
 SMALL_SIZE_DEFAULT = 0.05
 SMALL_MAX_OPEN = 6

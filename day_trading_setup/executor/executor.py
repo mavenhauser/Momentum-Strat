@@ -439,8 +439,13 @@ def on_entry(broker, state, sig, t):
         why = "not on today's list (its alert is kept only for the exits of a position held overnight)"
         skip(state, sig, t, why)
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
-    if contracts.half_day(t.date()):
+    if contracts.half_day(t.date()) and t.date().isoformat() not in settings.HALF_DAY_TRADE_DATES:
         why = "half day (13:00 close): no new entries"
+        skip(state, sig, t, why)
+        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
+    if contracts.half_day(t.date()) and hm >= settings.HALF_DAY_ENTRY_END:
+        e = settings.HALF_DAY_ENTRY_END
+        why = f"half day (13:00 close): no new entries from {e[0]}:{e[1]:02d}"
         skip(state, sig, t, why)
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
     if check_day_rules(state, t):                  # the day's P&L right now, before adding a trade

@@ -325,6 +325,11 @@ SWEEP_AT = (15, 56)
 HALF_DAYS = {"2026-11-27", "2026-12-24", "2027-11-26", "2028-07-03", "2028-11-24"}
 HALF_DAY_CLOSE = (13, 0)
 HALF_DAY_SWEEP_AT = (12, 56)
+# Exceptions (user, 2026-11-27): half days traded like a Friday morning anyway, with new entries
+# until HALF_DAY_ENTRY_END. Before 12:00 a Friday entry buys the expiry of that day, which the
+# 12:56 sweep sells, so nothing from such a day is held past the close.
+HALF_DAY_TRADE_DATES = {"2026-11-27"}
+HALF_DAY_ENTRY_END = (12, 0)
 MARKET_HOLIDAYS = {
     "2026-11-26", "2026-12-25",
     "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31", "2027-06-18",

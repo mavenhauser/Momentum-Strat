@@ -478,12 +478,28 @@ class ContractTest(unittest.TestCase):
         sent = []
         sig = signals.parse("DTS: SHORT TSLA @ 371.26 | stop 374.52 | target 364.74 (2R) | PML breakout")
         for t in (datetime(2026, 11, 27, 10, 0, tzinfo=executor.NY), datetime(2026, 12, 24, 10, 0, tzinfo=executor.NY)):
-            with mock.patch.object(executor, "notify", sent.append):
+            with mock.patch.object(executor, "notify", sent.append), mock.patch.object(settings, "HALF_DAY_TRADE_DATES", set()):
                 state = {"positions": {}, "closed": []}
                 executor.on_entry(None, state, sig, t)
             self.assertIn("half day", sent[-1])
             self.assertEqual(state["skipped"][0]["ticker"], "TSLA")
             self.assertEqual(state["positions"], {})
+
+    def test_half_day_exception_trades_until_noon(self):
+        from day_trading_setup.executor import executor
+        sent = []
+        sig = signals.parse("DTS: SHORT TSLA @ 371.26 | stop 374.52 | target 364.74 (2R) | PML breakout")
+        with mock.patch.object(executor, "notify", sent.append), \
+             mock.patch.object(settings, "HALF_DAY_TRADE_DATES", {"2026-11-27"}), \
+             mock.patch.object(executor, "check_day_rules", lambda s, t: (_ for _ in ()).throw(RuntimeError("past the half-day check"))):
+            state = {"positions": {}, "closed": []}
+            executor.on_entry(None, state, sig, datetime(2026, 11, 27, 12, 0, tzinfo=executor.NY))
+            self.assertIn("no new entries from 12:00", sent[-1])
+            with self.assertRaisesRegex(RuntimeError, "past the half-day check"):     # 11:59: carries on to the usual checks
+                executor.on_entry(None, state, sig, datetime(2026, 11, 27, 11, 59, tzinfo=executor.NY))
+            with mock.patch.object(executor, "skip", lambda *a: None):
+                executor.on_entry(None, state, sig, datetime(2026, 12, 24, 10, 0, tzinfo=executor.NY))
+            self.assertIn("half day (13:00 close): no new entries", sent[-1])          # other half days unchanged
 
     def test_half_day_and_holiday_sweep(self):
         from day_trading_setup.executor import executor
