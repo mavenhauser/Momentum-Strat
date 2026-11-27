@@ -318,7 +318,12 @@ if pos != 0 and bar_index > entBar
     // v25.0 (2026-11-26): a trade still open at a new day's first bar without 2R is closed at the
     // open. Only happens after a 13:00 half day (the 15:55 exit never comes): the executor has
     // already sold it at 12:56, and a leftover position would block the next day's opening entry.
-    if chartNewDay and not tgtHit
+    // v26.0 (2026-11-27): after a session that closed early (last bar before 15:55 New York),
+    // a trade entered on that day is closed at the open even past 2R: the executor takes no
+    // entries on a half day, so it is TradingView's alone and would block the opening entry.
+    prevCloseHM = hour(time_close[1], NY) * 100 + minute(time_close[1], NY)
+    afterShortDay = chartNewDay and prevCloseHM < 1555 and heldSessions == 2
+    if (chartNewDay and not tgtHit) or afterShortDay
         exitNow := true
         exitPx  := open
         exitTxt := "EOD"
