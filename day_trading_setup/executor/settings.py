@@ -11,7 +11,9 @@ REPO = Path(__file__).resolve().parents[2]
 STATE_DIR = REPO / "state"
 STATE_FILE = STATE_DIR / "dts_positions.json"          # paper-order mode
 DRY_STATE_FILE = STATE_DIR / "dts_positions_dry.json"  # dry-run mode (simulated fills)
-LOCK_FILE = STATE_DIR / "dts_executor.lock"
+# Outside iCloud Drive (2026-11-28): ~/Documents is synced, and iCloud briefly refused to open
+# the lock while syncing it (EDEADLK), losing alerts; see fsio.py.
+LOCK_FILE = Path.home() / ".dts-executor" / "dts_executor.lock"
 INBOX_FILE = STATE_DIR / "dts_alert_inbox.jsonl"       # every alert received, as received
 LOG_DIR = REPO / "logs"
 

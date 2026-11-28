@@ -658,6 +658,8 @@ paper account, and Python allowed to read the Documents folder (macOS asks
 once). Executor log: `logs/dts_executor.log`. Unit tests:
 `venv/bin/python3 -m unittest day_trading_setup.executor.test_dts_executor`.
 
+**iCloud Drive** (2026-11-28): `~/Documents` is synced by iCloud, and while it syncs a file macOS can briefly refuse to open it (`Resource deadlock avoided`). On Nov 27 at 12:25 ET eight alerts failed that way opening the executor's lock. The lock now lives outside iCloud (`~/.dts-executor/dts_executor.lock`, opened without rewriting it), and the state file, the alert inbox and the spawn log are retried for up to 10 seconds on that error (`executor/fsio.py`). Moving `state/` and `logs/` out of iCloud as well would remove the rest of the risk.
+
 ## Limitations
 
 - **Request limit:** DTS 1 makes one request per ticker, so at most 20,

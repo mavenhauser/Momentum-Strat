@@ -1167,6 +1167,35 @@ class DayRulesTest(unittest.TestCase):
         self.assertIn("day rules: no new entries today (daily loss limit", state["skipped"][-1]["reason"])
 
 
+class FileAccessTest(unittest.TestCase):
+    """fsio (2026-11-28): iCloud Drive can refuse a file briefly with EDEADLK; retried, not lost."""
+
+    def test_retry_on_edeadlk(self):
+        import errno
+        from day_trading_setup.executor import fsio
+        calls = []
+        def flaky():
+            calls.append(1)
+            if len(calls) < 3:
+                raise OSError(errno.EDEADLK, "Resource deadlock avoided")
+            return "ok"
+        with mock.patch.object(fsio, "PAUSE", 0):
+            self.assertEqual(fsio.retry(flaky), "ok")
+            self.assertEqual(len(calls), 3)
+            with self.assertRaises(FileNotFoundError):                     # other errors are not retried
+                fsio.retry(open, "/nonexistent/dir/x")
+
+    def test_lock_outside_icloud(self):
+        from day_trading_setup.executor import fsio
+        self.assertNotIn("Documents", str(settings.LOCK_FILE))
+        import tempfile, pathlib
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(settings, "LOCK_FILE", pathlib.Path(d) / "sub" / "x.lock"):
+            with fsio.open_lock() as f:
+                self.assertEqual(f.mode, "a")
+            with fsio.open_lock() as f:                                     # reopened, never truncated
+                pass
+
+
 class FadeReportTest(unittest.TestCase):
     """Fade test, report only (user decision 2026-11-26)."""
 

@@ -290,8 +290,8 @@ def _stock_r(pos, px):
 
 def mark_price(pos, marks):
     """The latest MARK price for this position's stock, only if it came after the position
-    opened (marks are kept per stock, and since v27.0 come only on 0.25R moves, so one left
-    by an earlier trade in the same stock can be the newest for a while). Else None."""
+    opened (marks are kept per stock, so one left by an earlier trade in the same stock is
+    never used for a newer position). Else None."""
     mk = (marks or {}).get(pos.get("ticker"))
     if not mk or not pos.get("opened_at"):
         return None
@@ -354,7 +354,9 @@ def day_rule_due(state, day, units, hm=None):
     late_enough = hm is None or not getattr(settings, "DAY_PROTECT_FROM", None) or tuple(hm) >= settings.DAY_PROTECT_FROM
     if d.get("armed") and units <= settings.DAY_PROTECT_FLOOR_U and late_enough:
         return (f"green day protected: up {d['peak']:+.1f}u at best, back to {units:+.1f}u "
-                f"(sell at +{settings.DAY_PROTECT_FLOOR_U:g}u once up +{settings.DAY_PROTECT_ARM_U:g}u)")
+                f"(once up +{settings.DAY_PROTECT_ARM_U:g}u, sell at +{settings.DAY_PROTECT_FLOOR_U:g}u"
+                + (f" from {settings.DAY_PROTECT_FROM[0]}:{settings.DAY_PROTECT_FROM[1]:02d}" if getattr(settings, "DAY_PROTECT_FROM", None) else "")
+                + (", runners past 2R kept" if getattr(settings, "DAY_PROTECT_KEEP_RUNNERS", False) else "") + ")")
     return None
 
 

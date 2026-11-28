@@ -20,7 +20,7 @@ import os
 import re
 from datetime import date, datetime
 
-from day_trading_setup.executor import contracts, settings
+from day_trading_setup.executor import contracts, fsio, settings
 from day_trading_setup.executor.journal import NY
 
 RESIZE_FROM = "2026-11-18"        # earlier days were resized by hand (Nov 9-13, 16, 17)
@@ -132,7 +132,7 @@ def main(argv=None):
         print(json.dumps({"date": a.date, "warning": f"reprice failed: {type(e).__name__}: {e}"}))
     rp = reprice.reprice_path("dry")
     repriced = json.loads(rp.read_text()) if rp.exists() else {}
-    with open(settings.LOCK_FILE, "w") as lock:
+    with fsio.open_lock() as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)    # the executor's lock: no alert lands mid-write
         state = json.loads(settings.DRY_STATE_FILE.read_text())
         out = resize_day(state, day, repriced)

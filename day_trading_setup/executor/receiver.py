@@ -18,7 +18,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from zoneinfo import ZoneInfo
 
-from day_trading_setup.executor import settings
+from day_trading_setup.executor import fsio, settings
 
 NY = ZoneInfo("America/New_York")
 log = logging.getLogger("dts.receiver")
@@ -70,21 +70,32 @@ class Handler(BaseHTTPRequestHandler):
                 pass
         received = datetime.now(NY).isoformat()
         settings.STATE_DIR.mkdir(parents=True, exist_ok=True)
-        with open(settings.INBOX_FILE, "a") as f:
-            row = {"received": received, "message": message}
-            if refired:                               # re-sent by the missed-alert backup (backfill.py)
-                row["redelivered_from"] = refired
-            f.write(json.dumps(row) + "\n")
+        row = {"received": received, "message": message}
+        if refired:                                   # re-sent by the missed-alert backup (backfill.py)
+            row["redelivered_from"] = refired
+        try:                                          # iCloud can refuse a file briefly (fsio.py); the alert matters more
+            def _append():
+                with open(settings.INBOX_FILE, "a") as f:
+                    f.write(json.dumps(row) + "\n")
+            fsio.retry(_append)
+        except OSError as e:
+            log.error("alert inbox not written (%s: %s): %s", type(e).__name__, e, message)
         log.info("alert: %s%s", message, f" (re-sent by the missed-alert backup, fired {refired})" if refired else "")
         # The project's venv Python, not sys.executable: under launchd, after a restart on
         # 2026-11-11, sys.executable was the framework Python without the venv's packages,
         # so entries (which need tastytrade) crashed silently. Output goes to a log, not
         # /dev/null, so a crash like that is visible.
-        with open(settings.LOG_DIR / "dts_executor_spawn.log", "a") as out:
-            subprocess.Popen([PYTHON, "-m", "day_trading_setup.executor.executor",
-                              "--message", message, "--received", received],
-                             cwd=str(settings.REPO), stdout=out, stderr=subprocess.STDOUT,
-                             start_new_session=True)
+        cmd = [PYTHON, "-m", "day_trading_setup.executor.executor", "--message", message, "--received", received]
+        try:
+            out = fsio.retry(open, settings.LOG_DIR / "dts_executor_spawn.log", "a")
+        except OSError as e:                          # never lose the alert over its log file
+            log.error("spawn log not opened (%s: %s); running without it", type(e).__name__, e)
+            out = subprocess.DEVNULL
+        try:
+            subprocess.Popen(cmd, cwd=str(settings.REPO), stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+        finally:
+            if out is not subprocess.DEVNULL:
+                out.close()
         self._reply(200, "ok")
 
     def log_message(self, fmt, *args):   # route http.server's own logging through ours

@@ -34,7 +34,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from src import config
-from day_trading_setup.executor import contracts, estimate, settings, signals
+from day_trading_setup.executor import contracts, estimate, fsio, settings, signals
 
 NY = ZoneInfo("America/New_York")
 log = logging.getLogger("dts")
@@ -67,7 +67,7 @@ def state_path():
 def load_state():
     p = state_path()
     if p.exists():
-        return json.loads(p.read_text())
+        return json.loads(fsio.retry(p.read_text))
     return {"positions": {}, "closed": [], "processed": {}}
 
 
@@ -78,8 +78,8 @@ def save_state(state):
     state["processed"] = dict(sorted(state["processed"].items(), key=lambda kv: kv[1])[-500:])
     state["closed"] = state["closed"][-300:]
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=2, default=str))
-    os.replace(tmp, p)
+    fsio.retry(tmp.write_text, json.dumps(state, indent=2, default=str))
+    fsio.retry(os.replace, tmp, p)
 
 
 def mode_tag():
@@ -942,7 +942,7 @@ def main(argv=None):
         except Exception as e:
             log.warning("missed-alert backup failed: %s: %s", type(e).__name__, e)
         prefetch_results(datetime.fromisoformat(a.received).astimezone(NY) if a.received else now_ny())
-    with open(settings.LOCK_FILE, "w") as lock:
+    with fsio.open_lock() as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)          # one alert at a time, in arrival order
         state = load_state()
         if a.status:
