@@ -1,7 +1,7 @@
 #!/bin/bash
 # Report DTS executor notifications, resuming from where the last watch stopped,
 # so nothing is lost while the watch is being re-armed.
-LOG="/Users/James Woo/Documents/Trading/Momentum Strat/logs/dts_executor.log"
+LOG="$HOME/.dts-executor/logs/dts_executor.log"
 OFF="${DTS_WATCH_OFFSET:-$HOME/.dts-executor/watch.offset}"
 [ -f "$OFF" ] || stat -f %z "$LOG" > "$OFF"
 while true; do

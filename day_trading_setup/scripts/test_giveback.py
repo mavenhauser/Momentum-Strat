@@ -12,7 +12,7 @@ from src.tastytrade_client import config
 from tastytrade import DXLinkStreamer, Session
 from tastytrade.dxfeed import Candle
 NY=ZoneInfo("America/New_York")
-s=json.load(open('state/dts_positions_dry.json'))
+s=json.load(open(__import__('os').path.expanduser('~/.dts-executor/state/dts_positions_dry.json')))
 trades=[t for t in s['closed']+list(s['positions'].values()) if t.get('opened_at','')>='2026-10-14T09:30' and t.get('trimmed') and t.get('tv_target')]
 tks=sorted({t['ticker'] for t in trades})
 async def get():

@@ -488,7 +488,7 @@ orders.
 ```
 TradingView alert (DTS Entry, any alert() call, webhook on)
   -> ngrok tunnel  https://sherill-sudoriparous-soothedly.ngrok-free.dev/dts/<secret>
-  -> receiver.py   127.0.0.1:8090, logs state/dts_alert_inbox.jsonl
+  -> receiver.py   127.0.0.1:8090, logs ~/.dts-executor/state/dts_alert_inbox.jsonl
   -> executor.py   one alert at a time -> IBKR paper (TWS, port 7497)
 ```
 
@@ -543,13 +543,13 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
 - **Missed-alert backup** (since 2026-11-11, `backfill.py`, run by the sweep
   every minute 09:30–16:10 ET): reads TradingView's alert fire log from the
   desktop app (debugging port 9222, via `tv_fires.mjs`) and compares it with
-  `state/dts_alert_inbox.jsonl`. A DTS fire that never arrived (at least 60 s
+  `~/.dts-executor/state/dts_alert_inbox.jsonl`. A DTS fire that never arrived (at least 60 s
   old, no inbox line with the same message from 2 min before to 10 min after)
   is sent to the receiver now, marked `redelivered_from` in the inbox: exits,
   2R/4R sales and strong-close notes always, entries only within 5 minutes of
   the fire (older ones get a MISSED ENTRY message and are not bought). Each
   re-send gets an ALERT RECOVERED message and is remembered in
-  `state/dts_backfill.json`. If the fire log can't be read, one BACKUP OFF
+  `~/.dts-executor/state/dts_backfill.json`. If the fire log can't be read, one BACKUP OFF
   message a day. Why: on Nov 11 TradingView fired AVGO's 14:20 STOP but its
   webhook failed on TradingView's side, and the call was held to the 15:56
   sweep (−$1,208 instead of about −$600). Off with `DTS_BACKFILL=0`.
@@ -619,7 +619,7 @@ TradingView alert (DTS Entry, any alert() call, webhook on)
 
 **Dry run is the default.** With `DTS_EXECUTE` unset or `0` it does
 everything except send orders: real chain, quotes and sizing, simulated
-fills at mid, kept in `state/dts_positions_dry.json`. To place paper
+fills at mid, kept in `~/.dts-executor/state/dts_positions_dry.json`. To place paper
 orders, set `DTS_EXECUTE` to `1` in the receiver and sweep jobs and
 reload them:
 
@@ -635,7 +635,7 @@ plutil -replace EnvironmentVariables.DTS_EXECUTE -string 1 ~/Library/LaunchAgent
 launchctl kickstart -k gui/$(id -u)/com.jameswoo.dts-receiver
 ```
 
-Paper mode uses `state/dts_positions.json`. Check either mode with:
+Paper mode uses `~/.dts-executor/state/dts_positions.json`. Check either mode with:
 
 ```bash
 venv/bin/python3 -m day_trading_setup.executor.executor --status
@@ -645,7 +645,7 @@ venv/bin/python3 -m day_trading_setup.executor.executor --status
 
 | Job | What |
 |---|---|
-| `com.jameswoo.dts-receiver` | The webhook receiver, always on. Log: `logs/dts_receiver.log`. |
+| `com.jameswoo.dts-receiver` | The webhook receiver, always on. Log: `~/.dts-executor/logs/dts_receiver.log`. |
 | `com.jameswoo.dts-tunnel` | ngrok to port 8090, always on. Log: `~/.dts-executor/dts-tunnel.log`. Uses the static ngrok address that the SPX project's (currently stopped) tunnel also uses, so only one of the two can be online. |
 | `com.jameswoo.dts-sweep` | Every minute: the missed-alert backup (09:30–16:10 ET), retries, and the 15:56 ET safety sweep. |
 | `com.jameswoo.dts-keepawake` | Keeps the Mac awake Mon–Fri 09:10–16:10 New York time (`caffeinate`), checked every 2 minutes. Script: `scripts/dts_keepawake.sh`, installed copy in `~/.dts-executor/`. Log: `~/.dts-executor/keepawake.log`. It cannot stop sleep when the lid is closed (unless an external display is attached), only prevents system sleep on AC power, and cannot wake a Mac that is already asleep: for that, `sudo pmset repeat wake MTWRF 21:05:00` (Singapore time for 09:05 ET in daylight time; 22:05 from Nov 2). |
@@ -655,10 +655,10 @@ screener job writes it into each alert's webhook, so changing the secret
 only needs that job to run again. Needs: TradingView open with the
 debugging port (for the alerts to be kept in sync), TWS logged in to the
 paper account, and Python allowed to read the Documents folder (macOS asks
-once). Executor log: `logs/dts_executor.log`. Unit tests:
+once). Executor log: `~/.dts-executor/logs/dts_executor.log`. Unit tests:
 `venv/bin/python3 -m unittest day_trading_setup.executor.test_dts_executor`.
 
-**iCloud Drive** (2026-11-28): `~/Documents` is synced by iCloud, and while it syncs a file macOS can briefly refuse to open it (`Resource deadlock avoided`). On Nov 27 at 12:25 ET eight alerts failed that way opening the executor's lock. The lock now lives outside iCloud (`~/.dts-executor/dts_executor.lock`, opened without rewriting it), and the state file, the alert inbox and the spawn log are retried for up to 10 seconds on that error (`executor/fsio.py`). Moving `state/` and `logs/` out of iCloud as well would remove the rest of the risk.
+**iCloud Drive** (2026-11-28): `~/Documents` is synced by iCloud, and while it syncs a file macOS can briefly refuse to open it (`Resource deadlock avoided`). On Nov 27 at 12:25 ET eight alerts failed that way opening the executor's lock. Since then the executor's whole state and its logs live outside iCloud, in **`~/.dts-executor/state`** and **`~/.dts-executor/logs`**, with the lock at `~/.dts-executor/dts_executor.lock` (opened without rewriting it); `settings.DATA_DIR`, overridable with `DTS_DATA_DIR`. The launchd logs of the receiver and the sweep and the morning sync (both copies of `update_screener_list.mjs`) point there too. File access the alerts depend on is still retried for up to 10 seconds on that error (`executor/fsio.py`). The repo's own `state/` and `logs/` folders now hold only the Momentum Strategy's files.
 
 ## Limitations
 

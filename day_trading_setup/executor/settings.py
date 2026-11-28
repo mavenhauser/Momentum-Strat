@@ -8,14 +8,18 @@ import os
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-STATE_DIR = REPO / "state"
+# State and logs live outside iCloud Drive (2026-11-28): ~/Documents, where the repo is, is
+# synced by iCloud, which briefly refused file opens while syncing (EDEADLK) and lost alerts
+# (see fsio.py). DTS_DATA_DIR overrides the folder.
+DATA_DIR = Path(os.environ.get("DTS_DATA_DIR") or Path.home() / ".dts-executor")
+STATE_DIR = DATA_DIR / "state"
 STATE_FILE = STATE_DIR / "dts_positions.json"          # paper-order mode
 DRY_STATE_FILE = STATE_DIR / "dts_positions_dry.json"  # dry-run mode (simulated fills)
 # Outside iCloud Drive (2026-11-28): ~/Documents is synced, and iCloud briefly refused to open
 # the lock while syncing it (EDEADLK), losing alerts; see fsio.py.
-LOCK_FILE = Path.home() / ".dts-executor" / "dts_executor.lock"
+LOCK_FILE = DATA_DIR / "dts_executor.lock"
 INBOX_FILE = STATE_DIR / "dts_alert_inbox.jsonl"       # every alert received, as received
-LOG_DIR = REPO / "logs"
+LOG_DIR = DATA_DIR / "logs"
 
 # Orders are only ever placed when this is "1" (set by the user, not by default).
 # Anything else = dry run: full contract selection, sizing and quotes, no orders.

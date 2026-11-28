@@ -54,12 +54,13 @@ const SCREENER_ALERT_SYMBOL = 'BATS:SPY';
 const WITH_SCREENER_ALERT = false;
 const WEBHOOK_BASE = 'https://sherill-sudoriparous-soothedly.ngrok-free.dev/dts/';
 const WEBHOOK_SECRET_FILE = `${process.env.HOME}/.dts-executor/secret`;
-// The executor's open positions (absolute path: the scheduled copy runs from ~/.dts-screener).
-const DTS_STATE_FILES = ['dts_positions_dry.json', 'dts_positions.json'].map(f => `${process.env.HOME}/Documents/Trading/Momentum Strat/state/${f}`);
+// The executor's open positions (absolute path: the scheduled copy runs from ~/.dts-screener). Outside
+// iCloud Drive since 2026-11-28 (the executor's settings.STATE_DIR).
+const DTS_STATE_FILES = ['dts_positions_dry.json', 'dts_positions.json'].map(f => `${process.env.HOME}/.dts-executor/state/${f}`);
 // The day's list for the executor (2026-11-17, user decision): it takes new entries only on
 // these tickers. A ticker held overnight keeps its alert so TradingView still sends its exits,
 // but holding it does not put it on the day's list.
-const DTS_LIST_FILE = `${process.env.HOME}/Documents/Trading/Momentum Strat/state/dts_today_list.json`;
+const DTS_LIST_FILE = `${process.env.HOME}/.dts-executor/state/dts_today_list.json`;
 function writeDayList(tickers, heldOnly) {
   const nyDate = new Date().toLocaleString('sv-SE', { timeZone: 'America/New_York' }).slice(0, 10);
   writeFileSync(DTS_LIST_FILE, JSON.stringify({ date: nyDate, tickers, held_only: heldOnly,
