@@ -712,7 +712,7 @@ def check_day_rules(state, t):
     """Day rules (D4) on the day's P&L now: True if they stop the day (state["day_stop"] is set)."""
     if contracts.day_stopped(state, t.date()) or not contracts.in_session(t):
         return False
-    stop = contracts.day_rule_due(state, t.date(), contracts.day_units(state, t.date()))
+    stop = contracts.day_rule_due(state, t.date(), contracts.day_units(state, t.date()), (t.hour, t.minute))
     if not stop:
         return False
     state["day_stop"] = {"date": t.date().isoformat(), "why": stop, "t": t.isoformat()}

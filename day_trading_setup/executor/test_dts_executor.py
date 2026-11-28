@@ -1075,6 +1075,12 @@ class DayRulesTest(unittest.TestCase):
         self.assertIsNone(contracts.day_rule_due(st, day, -3.9))
         self.assertIn("daily loss limit", contracts.day_rule_due(st, day, -4.0))
         self.assertIsNone(contracts.day_rule_due(st, date(2026, 12, 1), 0.9))   # new day: not armed
+        # protect only from 12:00 (2026-11-28): armed in the morning, a morning dip to +0.9u doesn't sell
+        st2 = {}; d2 = date(2026, 12, 2)
+        self.assertIsNone(contracts.day_rule_due(st2, d2, 3.5, (10, 0)))           # armed
+        self.assertIsNone(contracts.day_rule_due(st2, d2, 0.9, (10, 30)))          # morning dip: kept
+        self.assertIn("daily loss limit", contracts.day_rule_due(dict(st2), d2, -4.2, (10, 35)))   # the loss limit works all day
+        self.assertIn("green day protected", contracts.day_rule_due(st2, d2, 0.8, (12, 0)))
         with mock.patch.object(settings, "DAY_RULES", False):
             self.assertIsNone(contracts.day_rule_due({}, day, -9))
 

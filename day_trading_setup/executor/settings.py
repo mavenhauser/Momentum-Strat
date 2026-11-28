@@ -256,6 +256,14 @@ DAY_UNIT_SIZE = 0.025
 DAY_PROTECT_ARM_U = 3.0
 DAY_PROTECT_FLOOR_U = 1.0
 DAY_LOSS_LIMIT_U = 4.0
+# Protect only from 12:00 (2026-11-28, user decision, scheduled review): the day still arms at
+# +DAY_PROTECT_ARM_U at any time and the loss limit works all day, but the +DAY_PROTECT_FLOOR_U sale
+# happens only from DAY_PROTECT_FROM. Protect at any time sold out the biggest trend days in their
+# morning dip (Oct 16 +43.1u -> +0.4u, Nov 20 +35.9u -> +0.8u: a knife-edge, Oct 16 dipped to +1.3u).
+# Replay Oct 14-Nov 27 with the Nov 30 rules and opening entries: D4 at any time +58.3u (21/32 green),
+# loss limit only +121.5u (worst -6.0u, 16/32), protect from 12:00 +129.8u (worst -4.9u, 20/32 green;
+# better in both halves: Oct 14-Nov 6 +34.1u -> +73.2u, Nov 7-27 +24.2u -> +56.5u).
+DAY_PROTECT_FROM = (12, 0)
 MAX_HOLD_SESSIONS = 2        # mirrors "Max sessions held" on DTS Entry (backup only)
 # Overnight rule (2026-10-22, the user's idea): at the 15:56 sweep, a position that has not
 # reached 2R is sold; only runners past 2R (stop at break-even) are held overnight. On

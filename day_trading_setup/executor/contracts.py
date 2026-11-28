@@ -338,8 +338,9 @@ def day_units(state, day, marks=None):
                if (p.get("opened_at") or "")[:10] == day.isoformat())
 
 
-def day_rule_due(state, day, units):
-    """Update the day's peak / armed flag; return the reason to stop the day, or None."""
+def day_rule_due(state, day, units, hm=None):
+    """Update the day's peak / armed flag; return the reason to stop the day, or None.
+    hm: (hour, minute) New York; the protect sale only from DAY_PROTECT_FROM (None: any time)."""
     if not settings.DAY_RULES:
         return None
     d = state.setdefault("day_rules", {})
@@ -350,7 +351,8 @@ def day_rule_due(state, day, units):
         d["armed"] = True
     if units <= -settings.DAY_LOSS_LIMIT_U:
         return f"daily loss limit: the day reached {units:+.1f}u (limit -{settings.DAY_LOSS_LIMIT_U:g}u)"
-    if d.get("armed") and units <= settings.DAY_PROTECT_FLOOR_U:
+    late_enough = hm is None or not getattr(settings, "DAY_PROTECT_FROM", None) or tuple(hm) >= settings.DAY_PROTECT_FROM
+    if d.get("armed") and units <= settings.DAY_PROTECT_FLOOR_U and late_enough:
         return (f"green day protected: up {d['peak']:+.1f}u at best, back to {units:+.1f}u "
                 f"(sell at +{settings.DAY_PROTECT_FLOOR_U:g}u once up +{settings.DAY_PROTECT_ARM_U:g}u)")
     return None
