@@ -416,9 +416,16 @@ if pos != 0 and bar_index > entBar
     if runNow and not exitNow and exitAlerts
         alert("DTS: " + syminfo.ticker + " hit " + str.tostring(runnerTgtR) + "R target @ " + fmt(entPx + (tgtPx - entPx) * runnerTgtR / rr) + " - take partial, the rest rides the trail", alert.freq_once_per_bar)
 
-// Mark (v23.0, 2026-11-26, user decision): at every 5-minute close while a trade is open, its
+// Mark (v23.0, 2026-11-26, user decision): at a 5-minute close while a trade is open, its
 // live price, so the executor can follow the day's P&L (protect a green day, daily loss limit).
-if pos != 0 and exitAlerts and barstate.isconfirmed and rth and not exitNow
+// v27.0 (2026-11-28, user decision): only once the close is MARK_STEP_R of the trade's risk
+// away from the last price the executor has (the entry, then the last MARK). On Nov 27 that
+// was 97 MARKs instead of 520; the day rules see each trade to within 0.25R.
+MARK_STEP_R = 0.25
+var float markPx = na
+markMoved = not na(markPx) and math.abs(close - markPx) >= MARK_STEP_R * math.abs(tgtPx - entPx) / rr
+if pos != 0 and exitAlerts and barstate.isconfirmed and rth and not exitNow and markMoved
+    markPx := close
     alert("DTS: MARK " + (pos == 1 ? "LONG " : "SHORT ") + syminfo.ticker + " @ " + fmt(close), alert.freq_once_per_bar_close)
 
 // --- Arm on a key-level breakout (highest level broken wins for longs, lowest for shorts).
@@ -611,6 +618,7 @@ if goDir != 0
     chkSent := false
     tradesToday += 1
     heldSessions := 1
+    markPx := goPx
     lnEnt := line.new(bar_index, entPx, bar_index + 1, entPx, color = color.new(color.white, 30), width = 1)
     lnStp := line.new(bar_index, stpPx, bar_index + 1, stpPx, color = C_BEAR, style = line.style_dashed)
     lnTgt := line.new(bar_index, tgtPx, bar_index + 1, tgtPx, color = C_BULL, style = line.style_dashed)

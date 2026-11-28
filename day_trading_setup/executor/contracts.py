@@ -254,6 +254,21 @@ def _stock_r(pos, px):
     return (px - pos["tv_entry"]) * (1 if pos["side"] == "LONG" else -1) / risk
 
 
+def mark_price(pos, marks):
+    """The latest MARK price for this position's stock, only if it came after the position
+    opened (marks are kept per stock, and since v27.0 come only on 0.25R moves, so one left
+    by an earlier trade in the same stock can be the newest for a while). Else None."""
+    mk = (marks or {}).get(pos.get("ticker"))
+    if not mk or not pos.get("opened_at"):
+        return None
+    try:
+        if datetime.fromisoformat(mk["t"]) < datetime.fromisoformat(pos["opened_at"]):
+            return None
+    except (KeyError, TypeError, ValueError):
+        return None
+    return mk["price"]
+
+
 def _sale_stock_price(pos, ev, marks):
     """Stock price behind a sale: recorded with the sale (since 2026-11-26), else the price in the
     TradingView alert that triggered it, else the latest mark, else the entry."""
@@ -262,8 +277,8 @@ def _sale_stock_price(pos, ev, marks):
     m = re.search(r"@ ([0-9][0-9,]*(?:\.[0-9]+)?)", ev.get("alert") or "")
     if m and pos["ticker"] in (ev.get("alert") or "") and not (ev.get("alert") or "").startswith("DTS: QQQ"):
         return float(m.group(1).replace(",", ""))
-    mk = (marks or {}).get(pos["ticker"])
-    return mk["price"] if mk else pos.get("tv_entry")
+    mk = mark_price(pos, marks)
+    return mk if mk is not None else pos.get("tv_entry")
 
 
 def trade_units(pos, marks):
@@ -277,8 +292,8 @@ def trade_units(pos, marks):
         if str(ev.get("action", "")).startswith("SELL") and ev.get("qty"):
             r += ev["qty"] / qty * _stock_r(pos, _sale_stock_price(pos, ev, marks))
     if pos.get("open_qty", 0) > 0:
-        mk = (marks or {}).get(pos["ticker"])
-        r += pos["open_qty"] / qty * _stock_r(pos, mk["price"] if mk else pos["tv_entry"])
+        mk = mark_price(pos, marks)
+        r += pos["open_qty"] / qty * _stock_r(pos, mk if mk is not None else pos["tv_entry"])
     return r * (pos.get("size_fraction") or settings.DAY_UNIT_SIZE) / settings.DAY_UNIT_SIZE
 
 

@@ -572,8 +572,7 @@ def _sell(broker, state, pos, qty, t, why, alert_raw):
     if qty <= 0:
         return 0, None, "nothing held on IBKR"
     filled, avg, note = broker.fill("SELL", pos, qty)
-    mk = (state.get("marks") or {}).get(pos["ticker"])
-    stock_px = broker.stock_now if broker.stock_now else (mk["price"] if mk else None)
+    stock_px = broker.stock_now if broker.stock_now else contracts.mark_price(pos, state.get("marks"))
     pos["open_qty"] -= filled
     pos["proceeds"] = pos.get("proceeds", 0.0) + filled * (avg or 0.0)
     pos["events"].append({"t": t.isoformat(), "alert": alert_raw, "action": f"SELL {filled} @ {avg} ({why})",

@@ -989,7 +989,8 @@ class DayRulesTest(unittest.TestCase):
                 "events": [{"action": f"SELL {q} @ 1.0", "qty": q, "stock_px": px} for q, px in sells]}
 
     def test_units(self):
-        marks = {"A": {"price": 102.0}, "B": {"price": 99.5}}
+        at = "2026-11-30T10:30:00-05:00"
+        marks = {"A": {"t": at, "price": 102.0}, "B": {"t": at, "price": 99.5}}
         a = self._pos("A")                                   # +2R open, 2.5% size -> +2u
         b = self._pos("B", side="SHORT", e=100.0, stop=101.0, size=0.05)   # short +0.5R at 5% -> +1u
         self.assertAlmostEqual(contracts.trade_units(a, marks), 2.0)
@@ -1001,6 +1002,11 @@ class DayRulesTest(unittest.TestCase):
         # a sale without a recorded stock price falls back to its TradingView alert's price
         d = self._pos("D", open_qty=0); d["events"] = [{"action": "SELL 4 @ 1.0", "qty": 4, "alert": "DTS: EXIT LONG D (STOP) @ 99.00"}]
         self.assertAlmostEqual(contracts.trade_units(d, {}), -1.0)
+        # v27 marks come only on 0.25R moves: one left by an earlier trade in the stock is not used
+        old = {"A": {"t": "2026-11-30T09:50:00-05:00", "price": 95.0}}
+        self.assertAlmostEqual(contracts.trade_units(a, old), 0.0)                   # valued at its entry
+        self.assertIsNone(contracts.mark_price(a, old))
+        self.assertEqual(contracts.mark_price(a, marks), 102.0)
 
     def test_triggers(self):
         day = date(2026, 11, 30); st = {}
