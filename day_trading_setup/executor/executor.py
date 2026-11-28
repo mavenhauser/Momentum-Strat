@@ -721,13 +721,21 @@ def check_day_rules(state, t):
 
 
 def on_day_rule(broker, state, sig, t):
-    """Day rules (D4): sell everything and stop new entries for the day."""
+    """Day rules (D4): sell and stop new entries for the day. The protect sale keeps runners past
+    2R (DAY_PROTECT_KEEP_RUNNERS); the loss limit sells everything."""
     why = state["day_stop"]["why"]
-    n = 0
+    keep = settings.DAY_PROTECT_KEEP_RUNNERS and why.startswith("green day protected")
+    n = kept = 0
     for pos in list(state["positions"].values()):
+        if keep and pos.get("trimmed"):
+            kept += 1
+            pos["events"].append({"t": t.isoformat(), "alert": sig.raw, "action": "HOLD (day rules: runner past 2R kept)"})
+            continue
         close_position(broker, state, pos, t, f"day rules: {why}", sig.raw)
         n += 1
-    notify(f"{title('DAY STOP')}\n<b>{h(why)}</b>\n{n} open position(s) sold; no new entries for the rest of the day")
+    notify(f"{title('DAY STOP')}\n<b>{h(why)}</b>\n{n} open position(s) sold"
+           + (f"; {kept} runner(s) past 2R kept, stop at break-even" if kept else "")
+           + "; no new entries for the rest of the day")
 
 
 def close_position(broker, state, pos, t, why, alert_raw):

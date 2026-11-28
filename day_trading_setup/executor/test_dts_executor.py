@@ -1075,14 +1075,35 @@ class DayRulesTest(unittest.TestCase):
         self.assertIsNone(contracts.day_rule_due(st, day, -3.9))
         self.assertIn("daily loss limit", contracts.day_rule_due(st, day, -4.0))
         self.assertIsNone(contracts.day_rule_due(st, date(2026, 12, 1), 0.9))   # new day: not armed
-        # protect only from 12:00 (2026-11-28): armed in the morning, a morning dip to +0.9u doesn't sell
+        # protect only from 13:00 (2026-11-28): armed in the morning, a dip to +0.9u before 13:00 doesn't sell
         st2 = {}; d2 = date(2026, 12, 2)
+        self.assertEqual(settings.DAY_PROTECT_FROM, (13, 0))
         self.assertIsNone(contracts.day_rule_due(st2, d2, 3.5, (10, 0)))           # armed
         self.assertIsNone(contracts.day_rule_due(st2, d2, 0.9, (10, 30)))          # morning dip: kept
+        self.assertIsNone(contracts.day_rule_due(st2, d2, 0.9, (12, 55)))
         self.assertIn("daily loss limit", contracts.day_rule_due(dict(st2), d2, -4.2, (10, 35)))   # the loss limit works all day
-        self.assertIn("green day protected", contracts.day_rule_due(st2, d2, 0.8, (12, 0)))
+        self.assertIn("green day protected", contracts.day_rule_due(st2, d2, 0.8, (13, 0)))
         with mock.patch.object(settings, "DAY_RULES", False):
             self.assertIsNone(contracts.day_rule_due({}, day, -9))
+
+    def test_protect_sale_keeps_runners(self):
+        """DAY_PROTECT_KEEP_RUNNERS (2026-11-28): the protect sale sells only positions not yet at 2R;
+        the loss limit sells everything."""
+        from day_trading_setup.executor import executor
+        t = datetime(2026, 12, 2, 13, 0, tzinfo=self.NY)
+        for why, sold_expected in (("green day protected: up +3.5u at best, back to +0.8u", ["B"]),
+                                   ("daily loss limit: the day reached -4.2u (limit -4u)", ["A", "B"])):
+            runner = dict(self._pos("A", open_qty=2, sells=[(2, 102.0)]), trimmed=True, events=[])
+            fresh = dict(self._pos("B"), trimmed=False, events=[])
+            state = {"positions": {"A": runner, "B": fresh}, "closed": [], "day_stop": {"date": "2026-12-02", "why": why}}
+            sold, sent = [], []
+            with mock.patch.object(executor, "close_position", lambda b, s, p, t, w, a: sold.append(p["ticker"])), \
+                 mock.patch.object(executor, "notify", sent.append):
+                executor.on_day_rule(None, state, signals.Signal("MARK", ticker="QQQ", price=1.0, raw="x"), t)
+            self.assertEqual(sold, sold_expected, why)
+            if len(sold_expected) == 1:
+                self.assertIn("1 runner(s) past 2R kept", sent[-1])
+                self.assertIn("runner past 2R kept", runner["events"][-1]["action"])
 
     def test_mark_sells_everything_and_blocks_entries(self):
         from day_trading_setup.executor import executor

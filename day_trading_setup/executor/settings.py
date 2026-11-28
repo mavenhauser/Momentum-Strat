@@ -263,7 +263,15 @@ DAY_LOSS_LIMIT_U = 4.0
 # Replay Oct 14-Nov 27 with the Nov 30 rules and opening entries: D4 at any time +58.3u (21/32 green),
 # loss limit only +121.5u (worst -6.0u, 16/32), protect from 12:00 +129.8u (worst -4.9u, 20/32 green;
 # better in both halves: Oct 14-Nov 6 +34.1u -> +73.2u, Nov 7-27 +24.2u -> +56.5u).
-DAY_PROTECT_FROM = (12, 0)
+# 2026-11-28, later the same day (user decision): from 13:00 instead, in line with the 13:00 entry cutoff.
+# Replay with runners kept: 12:00 +131.3u (20/32 green), 13:00 +131.3u (18/32 green), worst day -4.9u both.
+DAY_PROTECT_FROM = (13, 0)
+# Let runners run (2026-11-28, user decision): the protect sale sells only positions that have not
+# reached 2R; runners past 2R (half sold, stop at break-even) keep riding to their own exits. The
+# loss limit still sells everything. Replay as above: +129.8u -> +131.3u, worst day and green days
+# unchanged (-4.9u, 20/32) at 12:00 (10:30 cuts Oct 16 / Nov 20; 11:00-12:00 keep 20 green days,
+# 12:30-15:00 18-19).
+DAY_PROTECT_KEEP_RUNNERS = True
 MAX_HOLD_SESSIONS = 2        # mirrors "Max sessions held" on DTS Entry (backup only)
 # Overnight rule (2026-10-22, the user's idea): at the 15:56 sweep, a position that has not
 # reached 2R is sold; only runners past 2R (stop at break-even) are held overnight. On
