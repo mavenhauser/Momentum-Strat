@@ -501,6 +501,42 @@ class ContractTest(unittest.TestCase):
                 executor.on_entry(None, state, sig, datetime(2026, 12, 24, 10, 0, tzinfo=executor.NY))
             self.assertIn("half day (13:00 close): no new entries", sent[-1])          # other half days unchanged
 
+    def test_first_hour_up_on_the_day(self):
+        """QQQ_UP_ON_DAY (2026-11-28): QQQ down from its open but up on the day lets a first-hour long in,
+        and its QQQ early exit uses yesterday's close."""
+        from day_trading_setup.executor import executor
+        NY = executor.NY
+        state = {"positions": {}, "closed": [], "qqq_bar": {"t": "2026-11-27T09:50:00-05:00", "close": 640.03, "open": 645.72},
+                 "qqq_close": {"2026-11-25": {"t": "2026-11-25T16:00:21-05:00", "close": 633.95}}}
+        self.assertEqual(contracts.prev_session(date(2026, 11, 27)), date(2026, 11, 25))     # Thanksgiving skipped
+        self.assertEqual(contracts.prev_session(date(2026, 11, 30)), date(2026, 11, 27))     # weekend skipped
+        lng = signals.parse("DTS: LONG TXN @ 272.96 | stop 268.53 | target 281.82 (2R) | PDH breakout + 8 EMA retest | QQQ -1.01% (1h +1.11%) below VWAP | grade B inside")
+        sht = signals.parse("DTS: SHORT TXN @ 272.96 | stop 276.00 | target 266.88 (2R) | PDL breakout + 8 EMA retest | QQQ -1.01% (1h +1.11%) below VWAP | grade B inside")
+        day = date(2026, 11, 27)
+        self.assertEqual(contracts.qqq_day_ref(state, lng, day), 633.95)          # 645.72 x (1 - 1.01%) = 639.2 > 633.95
+        self.assertIsNone(contracts.qqq_day_ref(state, sht, day))                 # a short with QQQ down from its open: the normal rule
+        deep = signals.parse(lng.raw.replace("QQQ -1.01%", "QQQ -2.10%"))         # 632.2: below yesterday's close too
+        self.assertIsNone(contracts.qqq_day_ref(state, deep, day))
+        self.assertIsNone(contracts.qqq_day_ref({**state, "qqq_close": {}}, lng, day))         # no close kept: the normal rule
+        self.assertIsNone(contracts.qqq_day_ref({**state, "qqq_bar": {**state["qqq_bar"], "t": "2026-11-25T15:55:00-05:00"}}, lng, day))  # stale bar
+        with mock.patch.object(settings, "QQQ_UP_ON_DAY", False):
+            self.assertIsNone(contracts.qqq_day_ref(state, lng, day))
+        # on_entry lets it past the first-hour rule (the next check raises to stop the test there)
+        sent = []
+        with mock.patch.object(executor, "notify", sent.append), mock.patch.object(executor, "off_day_list", lambda *a: False), \
+             mock.patch.object(contracts, "late_entry", lambda t: (_ for _ in ()).throw(RuntimeError("past the QQQ rule"))):
+            with self.assertRaisesRegex(RuntimeError, "past the QQQ rule"):
+                executor.on_entry(None, dict(state), lng, datetime(2026, 11, 27, 9, 55, tzinfo=NY))
+            st2 = dict(state, skipped=[])
+            executor.on_entry(None, st2, deep, datetime(2026, 11, 27, 9, 55, tzinfo=NY))
+            self.assertIn("only trades in the direction of QQQ", sent[-1])
+        # the early exit for such a position: yesterday's close, not the open
+        pos = {"side": "LONG", "qty": 4, "open_qty": 4, "trimmed": False, "opened_at": "2026-11-27T09:55:05-05:00", "qqq_ref": 633.95}
+        t = datetime(2026, 11, 27, 10, 0, tzinfo=NY)
+        self.assertFalse(contracts.qqq_open_exit_due(pos, 637.76, 645.72, t))     # below the open, above yesterday's close: kept
+        self.assertTrue(contracts.qqq_open_exit_due(pos, 633.50, 645.72, t))
+        self.assertTrue(contracts.qqq_open_exit_due(dict(pos, qqq_ref=None), 637.76, 645.72, t))   # a normal position: the open
+
     def test_half_day_and_holiday_sweep(self):
         from day_trading_setup.executor import executor
         closed = []
@@ -1072,6 +1108,7 @@ class DayRulesTest(unittest.TestCase):
             executor.main(["--message", "DTS: QQQ 5M CLOSE 641.00 | open 640.00", "--received", t.isoformat()])
         self.assertIn("daily loss limit", contracts.day_stopped(state, t.date()))
         self.assertIn("DAY STOP", sent[-1])
+        self.assertEqual(state["qqq_close"]["2026-11-30"]["close"], 641.00)        # QQQ_UP_ON_DAY: the day's latest QQQ close is kept
 
     def test_entry_checks_the_day_first(self):
         from day_trading_setup.executor import executor

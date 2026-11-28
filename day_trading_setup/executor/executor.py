@@ -460,11 +460,14 @@ def on_entry(broker, state, sig, t):
         why = f"opening entries: {settings.OPENING_MAX} already taken today"
         skip(state, sig, t, why)
         return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
+    day_ref = None
     if not opening and settings.QQQ_DIRECTION_UNTIL and hm < settings.QQQ_DIRECTION_UNTIL and not contracts.with_qqq(sig):
-        u = settings.QQQ_DIRECTION_UNTIL
-        why = f"before {u[0]}:{u[1]:02d} only trades in the direction of QQQ ({qqq_line(sig)})"
-        skip(state, sig, t, why)
-        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
+        day_ref = contracts.qqq_day_ref(state, sig, t.date())
+        if day_ref is None:
+            u = settings.QQQ_DIRECTION_UNTIL
+            why = f"before {u[0]}:{u[1]:02d} only trades in the direction of QQQ ({qqq_line(sig)})"
+            skip(state, sig, t, why)
+            return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
     late = None
     if contracts.late_entry(t):
         if sig.grade in settings.LATE_ENTRY_GRADES:
@@ -536,6 +539,8 @@ def on_entry(broker, state, sig, t):
         pos["late"] = late
     if opening:
         pos["opening"] = True
+    if day_ref is not None:
+        pos["qqq_ref"] = day_ref
     state["positions"][sig.ticker] = pos
     notify(f"{title('BOUGHT')}\n"
            f"<b>{filled} × {h(describe(pos))}</b>\n"
@@ -548,6 +553,8 @@ def on_entry(broker, state, sig, t):
            f"Premium <b>${filled * avg * 100:,.0f}</b> = {filled * avg * 100 / nlv:.1%} of ${nlv:,.0f} ({h(nlv_src)})\n"
            f"Strike chosen: delta {abs(pos['delta']) if pos.get('delta') is not None else float('nan'):.2f} · {h(pos.get('sizing_rule', ''))}\n"
            + ("Opening entry (09:35, QQQ's first-bar direction): not sold by the QQQ-open early exit\n" if opening else "")
+           + (f"First hour, QQQ {'down' if sig.side == 'LONG' else 'up'} from its open but {'up' if sig.side == 'LONG' else 'down'} on the day "
+              f"(yesterday's close {day_ref:.2f}): its QQQ early exit uses yesterday's close\n" if day_ref is not None else "")
            + ("Friday swing: smaller size, next week's expiry, sold at 15:56 if not at 2R\n" if contracts.weekend_swing(pos) else "")
            + ("Late high-conviction entry: sold at 15:56 if not at 2R\n" if late == "overnight" else "")
            + (f"Late entry on strong market momentum ({h(qqq_line(sig))}): sold at 15:56 if not at 2R\n" if late == "momentum" else "")
@@ -685,10 +692,13 @@ def on_qqq_bar(broker, state, sig, t):
     """The early exit (QQQ_OPEN_EXIT, 2026-11-24): a QQQ 5-minute close back through QQQ's
     09:30 open sells every position opened today that has not reached 2R and that the move
     goes against. A failed sale is retried by the next 5-minute bar if QQQ is still there."""
-    line = f"QQQ {sig.price:.2f} vs its open {sig.stop:.2f}"
     for pos in qqq_exits_due(state, sig, t):
         side = "below" if pos["side"] == "LONG" else "above"
-        close_position(broker, state, pos, t, f"early exit: QQQ closed back {side} its 09:30 open before 2R ({line})", sig.raw)
+        if pos.get("qqq_ref"):
+            why = f"early exit: QQQ closed {side} yesterday's close before 2R (QQQ {sig.price:.2f} vs {pos['qqq_ref']:.2f})"
+        else:
+            why = f"early exit: QQQ closed back {side} its 09:30 open before 2R (QQQ {sig.price:.2f} vs its open {sig.stop:.2f})"
+        close_position(broker, state, pos, t, why, sig.raw)
 
 
 def check_day_rules(state, t):
@@ -967,6 +977,11 @@ def main(argv=None):
                 return 0
         if sig.kind == "QQQBAR":                   # every 5-minute close; connect only when it sells something
             state["qqq_bar"] = {"t": t.isoformat(), "close": sig.price, "open": sig.stop}
+            # the day's latest QQQ close: the last one of a session is its close (QQQ_UP_ON_DAY)
+            qc = state.setdefault("qqq_close", {})
+            qc[t.date().isoformat()] = {"t": t.isoformat(), "close": sig.price}
+            for old_day in sorted(qc)[:-10]:
+                del qc[old_day]
             # the day rules run on this bar too: it arrives every 5 minutes even with nothing open
             # (MARK alerts only come while a position is), so a closed-out -4u day is still stopped
             if check_day_rules(state, t):

@@ -236,6 +236,40 @@ def with_qqq(sig) -> bool:
     return sgn * day > 0 and above == (sgn > 0)
 
 
+def prev_session(day: date) -> date:
+    """The trading day before `day` (weekends and settings.MARKET_HOLIDAYS skipped)."""
+    d = day - timedelta(days=1)
+    while d.weekday() >= 5 or d.isoformat() in settings.MARKET_HOLIDAYS:
+        d -= timedelta(days=1)
+    return d
+
+
+def qqq_prev_close(state, day: date):
+    """QQQ's close on the trading day before `day`: the last QQQ 5-minute bar the executor got
+    that day (state["qqq_close"]), else None (also when that day's bar is missing)."""
+    rec = (state.get("qqq_close") or {}).get(prev_session(day).isoformat())
+    return rec.get("close") if rec else None
+
+
+def qqq_day_ref(state, sig, day: date):
+    """QQQ_UP_ON_DAY: for an entry whose alert shows QQQ against the trade from its open, the
+    previous close if QQQ is still on the trade's side of it (up on the day for a long, down for
+    a short), else None. QQQ now = today's open (from the QQQ bar) moved by the alert's % from
+    the open."""
+    if not settings.QQQ_UP_ON_DAY or not sig.qqq:
+        return None
+    pct = sig.qqq[0]
+    sgn = 1 if sig.side == "LONG" else -1
+    if sgn * pct >= 0:
+        return None
+    bar = state.get("qqq_bar") or {}
+    pc = qqq_prev_close(state, day)
+    if not bar.get("open") or not pc or (bar.get("t") or "")[:10] != day.isoformat():
+        return None
+    now = bar["open"] * (1 + pct / 100)
+    return pc if sgn * (now - pc) > 0 else None
+
+
 def is_opening(sig) -> bool:
     """True for DTS Entry's 09:35 opening entry (v22.0): level OPEN."""
     return sig.kind == "ENTRY" and sig.level == "OPEN"
@@ -338,7 +372,8 @@ def qqq_open_exit_due(pos, qqq_close, qqq_open, t) -> bool:
     if opened.date() != t.date() or opened >= t:
         return False
     sgn = 1 if pos["side"] == "LONG" else -1
-    return sgn * (qqq_close - qqq_open) < 0
+    ref = pos.get("qqq_ref") or qqq_open           # QQQ_UP_ON_DAY entries: the previous close
+    return sgn * (qqq_close - ref) < 0
 
 
 def close_before_overnight(pos) -> bool:

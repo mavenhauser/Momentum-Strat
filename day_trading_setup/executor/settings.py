@@ -314,6 +314,16 @@ ENTRY_CUTOFF = (13, 0)
 # better on 11 days, worse on 4; Oct 14-26 +28.5 -> +41.9R, Oct 27-Nov 6 +35.1 -> +37.9R.
 # First 30 min only (to 10:00): +71.7R. None = off.
 QQQ_DIRECTION_UNTIL = (10, 30)
+# First-hour exception, up on the day (2026-11-28, user decision, Nov 27 debrief): before
+# QQQ_DIRECTION_UNTIL, an entry against QQQ's move from its open is still taken when QQQ is on the
+# trade's side of the PREVIOUS CLOSE (a long with QQQ below its open but above yesterday's close: a
+# gap-up pulling back; the mirror for a short). Such a position's QQQ early exit uses yesterday's
+# close instead of the open, else the next 5-minute close would sell it at once. The previous close
+# is the last "DTS: QQQ 5M CLOSE" bar of the previous session, kept in the state (qqq_close).
+# Nov 10-27: 33 first-hour signals skipped this way, +14.4R held to TradingView's exits (22 won).
+# Replay Oct 14-Nov 27 (32 days, units, all executor exits): +73.0u -> +82.5u, worst day unchanged
+# (-14.5u), green days 14 -> 15; better on 6 days, worse on 5; Nov 27 alone +8.0u (without it +1.5u).
+QQQ_UP_ON_DAY = True
 LATE_ENTRY_GRADES = {"A+ OUTSIDE"}
 MOMENTUM_DAY_PCT = 0.5
 MOMENTUM_HOUR_PCT = 0.25
