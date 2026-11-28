@@ -229,6 +229,13 @@ MAX_OPEN_POSITIONS = 12      # raised from 5 (2026-10-18): on Oct 16 all 5 signa
 # Backtest Oct 14-Nov 24 (stock R, exit at that 5-minute close): first hour 14 of 64 cut,
 # +5.3R -> +12.8R; after 10:30 23 of 89 cut, -9.8R -> +1.5R; 4 winners cut (+2.7R -> +0.1R).
 QQQ_OPEN_EXIT = True
+# No entry the QQQ exit would sell at once (2026-11-28, user: "make sure all possible solutions
+# have been implemented"; Nov 27 debrief): from QQQ_DIRECTION_UNTIL, an entry is skipped while the
+# alert's QQQ tag shows QQQ on the wrong side of its open (below for a long, above for a short):
+# the next 5-minute close would sell it before it could work (Nov 27: all 4 trades, held 2-5 min).
+# Replay Oct 14-Nov 27 with the Nov 30 rules: 45 fewer trades, +82.2u -> +84.1u before spreads
+# (better in both halves, worst day and green days unchanged), about 45 round-trip spreads saved.
+NO_ENTRY_WHEN_QQQ_EXIT_DUE = True
 # Opening entry (2026-11-26, user decision): DTS Entry v22.0 sends "... | OPEN breakout +
 # first 5-min bar ..." at 09:35 on a day QQQ opened under 1% from yesterday's close, in
 # the direction of QQQ's first bar. At most OPENING_MAX are taken a day (first come), they

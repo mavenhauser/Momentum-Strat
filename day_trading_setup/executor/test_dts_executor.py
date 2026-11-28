@@ -537,6 +537,26 @@ class ContractTest(unittest.TestCase):
         self.assertTrue(contracts.qqq_open_exit_due(pos, 633.50, 645.72, t))
         self.assertTrue(contracts.qqq_open_exit_due(dict(pos, qqq_ref=None), 637.76, 645.72, t))   # a normal position: the open
 
+    def test_no_entry_when_the_qqq_exit_is_due(self):
+        """NO_ENTRY_WHEN_QQQ_EXIT_DUE (2026-11-28): from 10:30, no entry while QQQ is on the wrong side of its open."""
+        from day_trading_setup.executor import executor
+        NY = executor.NY
+        sent = []
+        lng = signals.parse("DTS: LONG AMZN @ 251.76 | stop 248.92 | target 257.44 (2R) | ORH breakout + 8 EMA retest | QQQ -0.50% (1h +0.43%) above VWAP | grade A inside")
+        sht = signals.parse(lng.raw.replace("LONG", "SHORT").replace("stop 248.92", "stop 254.60").replace("target 257.44", "target 246.08"))
+        up = signals.parse(lng.raw.replace("QQQ -0.50%", "QQQ +0.10%"))
+        stop_here = lambda t: (_ for _ in ()).throw(RuntimeError("past the check"))
+        with mock.patch.object(executor, "notify", sent.append), mock.patch.object(executor, "off_day_list", lambda *a: False), \
+             mock.patch.object(contracts, "late_entry", stop_here):
+            state = {"positions": {}, "closed": []}
+            executor.on_entry(None, state, lng, datetime(2026, 11, 30, 10, 35, tzinfo=NY))
+            self.assertIn("QQQ early exit would sell it", state["skipped"][-1]["reason"])
+            for sig in (sht, up):                                                    # QQQ on the trade's side: carries on
+                with self.assertRaisesRegex(RuntimeError, "past the check"):
+                    executor.on_entry(None, state, sig, datetime(2026, 11, 30, 10, 35, tzinfo=NY))
+            with mock.patch.object(settings, "NO_ENTRY_WHEN_QQQ_EXIT_DUE", False), self.assertRaisesRegex(RuntimeError, "past the check"):
+                executor.on_entry(None, state, lng, datetime(2026, 11, 30, 10, 35, tzinfo=NY))
+
     def test_half_day_and_holiday_sweep(self):
         from day_trading_setup.executor import executor
         closed = []

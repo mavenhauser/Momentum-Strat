@@ -468,6 +468,13 @@ def on_entry(broker, state, sig, t):
             why = f"before {u[0]}:{u[1]:02d} only trades in the direction of QQQ ({qqq_line(sig)})"
             skip(state, sig, t, why)
             return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
+    if (not opening and settings.NO_ENTRY_WHEN_QQQ_EXIT_DUE and settings.QQQ_OPEN_EXIT and sig.qqq
+            and (not settings.QQQ_DIRECTION_UNTIL or hm >= settings.QQQ_DIRECTION_UNTIL)
+            and (1 if sig.side == "LONG" else -1) * sig.qqq[0] < 0):
+        why = (f"QQQ is {'below' if sig.side == 'LONG' else 'above'} its open ({qqq_line(sig)}): "
+               f"the QQQ early exit would sell it at the next 5-minute close")
+        skip(state, sig, t, why)
+        return notify(f"{title('SKIPPED')}\n{signal_line(sig)}\n\n<b>{h(why)}</b>")
     late = None
     if contracts.late_entry(t):
         if sig.grade in settings.LATE_ENTRY_GRADES:
