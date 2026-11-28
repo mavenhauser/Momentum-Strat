@@ -130,7 +130,7 @@ def vol_check(trade):
 async def _candles5(symbols, start):
     """{symbol: {bar start ms: [open, high, low, close, volume]}} of regular-hours 5-minute bars."""
     import sys
-    sys.path.insert(0, str(settings.STATE_DIR.parent))
+    sys.path.insert(0, str(settings.REPO))
     from src.tastytrade_client import config
     from tastytrade import DXLinkStreamer, Session
     from tastytrade.dxfeed import Candle
@@ -157,7 +157,7 @@ async def _candles5(symbols, start):
 
 async def _candles(symbols, start):
     import sys
-    sys.path.insert(0, str(settings.STATE_DIR.parent))
+    sys.path.insert(0, str(settings.REPO))
     from src.tastytrade_client import config
     from tastytrade import DXLinkStreamer, Session
     from tastytrade.dxfeed import Candle

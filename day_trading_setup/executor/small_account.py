@@ -98,7 +98,7 @@ def candidate_strikes(t, budget):
 async def _fetch(symbols, start):
     """{symbol: {"HH:MM": (open, close, volume)}} 1-minute candles of `start`'s day."""
     import sys
-    sys.path.insert(0, str(settings.STATE_DIR.parent))
+    sys.path.insert(0, str(settings.REPO))
     from src.tastytrade_client import config
     from tastytrade import DXLinkStreamer, Session
     from tastytrade.dxfeed import Candle
