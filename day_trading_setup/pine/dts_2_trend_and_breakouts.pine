@@ -1,0 +1,233 @@
+//@version=6
+// Day Trading Setup 2/3 - Trend & Breakouts.
+//
+// Entry confirmation with trend: colors clean trends vs chop (8/21 ribbon +
+// bar colors), draws the key levels (PDH / PDL / PMH / PML / opening range)
+// (+ prior-week PWH / PWL, HH/HL/BOS market structure) and marks breakouts at those levels - bright in a clean trend, gray in
+// chop - so you only focus on the high-probability moves.
+//
+// Does NOT draw the EMA lines, VWAP or pivots: use TradingView's built-in
+// EMA (8 / 21 / 50), VWAP and Pivot Points Standard for those. Keep the EMA
+// lengths below equal to the built-in EMAs on your chart.
+//
+// Part of day_trading_setup/ (see ../README.md).
+indicator("DTS Trend", shorttitle = "DTS Trend", overlay = true, max_labels_count = 500, max_lines_count = 500)
+
+G_TR = "Trend vs chop"
+fastLen   = input.int(8, "EMA fast", minval = 1, group = G_TR, inline = "ema", display = display.none)
+midLen    = input.int(21, "mid", minval = 1, group = G_TR, inline = "ema", display = display.none)
+slowLen   = input.int(50, "slow", minval = 1, group = G_TR, inline = "ema", display = display.none)
+minSpread = input.float(0.10, "Min 8/21 EMA spread (x ATR)", minval = 0, step = 0.05, group = G_TR, tooltip = "The 8 and 21 EMAs must be at least this far apart (in ATR) for the trend to count as clean. Smaller = more bars count as trend.", display = display.none)
+minSlope  = input.float(0.05, "Min 21 EMA slope over 3 bars (x ATR)", minval = 0, step = 0.01, group = G_TR, display = display.none)
+showRib   = input.bool(true, "Trend ribbon between 8 and 21 EMA", group = G_TR, display = display.none)
+barMode   = input.string("Off", "Bar coloring", options = ["Trend colors", "Dim chop only", "Off"], group = G_TR, display = display.none)
+
+G_LVL = "Key levels"
+showLevels = input.bool(true, "Show PDH / PDL / PMH / PML", group = G_LVL, display = display.none)
+showWeek   = input.bool(true, "Show prior-week high / low (PWH / PWL)", group = G_LVL, display = display.none)
+tagMode    = input.string("Name", "Right-edge level tags", options = ["Name", "Name + price", "Off"], group = G_LVL, display = display.none)
+orMin      = input.int(5, "Opening range (minutes)", options = [1, 2, 5, 10, 15, 30], group = G_LVL, display = display.none)
+showOR     = input.bool(true, "Show opening range high / low", group = G_LVL, display = display.none)
+showBrk    = input.bool(true, "Mark key-level breakouts", group = G_LVL, display = display.none)
+cleanOnly  = input.bool(false, "Only mark breakouts in a clean trend", group = G_LVL, display = display.none)
+
+G_MS = "Market structure"
+showMS = input.bool(true, "Show HH / HL / LH / LL swings and BOS (break of structure)", group = G_MS, display = display.none)
+swLen  = input.int(3, "Swing strength (bars each side)", minval = 1, group = G_MS, display = display.none)
+
+C_BULL = #00E676
+C_BEAR = #FF1744
+C_CHOP = #7E57C2
+C_OR   = #FFEB3B
+C_DIM  = #787B86
+C_PWH  = #26A69A
+C_PWL  = #EF5350
+C_MS   = #B2B5BE
+
+fmt(float x) => na(x) ? "–" : str.tostring(x, format.mintick)
+
+// Runs on the EXTENDED-hours version of the symbol so premarket levels exist
+// even on a regular-hours chart. PDH/PDL = prior REGULAR session high/low.
+f_levels() =>
+    var float pdh  = na
+    var float pdl  = na
+    var float rthH = na
+    var float rthL = na
+    var float pmh  = na
+    var float pml  = na
+    newDay = nz(ta.change(dayofmonth)) != 0
+    if newDay
+        if not na(rthH)
+            pdh := rthH
+            pdl := rthL
+        rthH := na
+        rthL := na
+        pmh  := na
+        pml  := na
+    if session.ispremarket
+        pmh := na(pmh) ? high : math.max(pmh, high)
+        pml := na(pml) ? low : math.min(pml, low)
+    if session.ismarket
+        rthH := na(rthH) ? high : math.max(rthH, high)
+        rthL := na(rthL) ? low : math.min(rthL, low)
+    [pdh, pdl, pmh, pml]
+
+[pdh, pdl, pmh, pml] = request.security(ticker.modify(syminfo.tickerid, session.extended), timeframe.period, f_levels())
+// Prior completed week (non-repainting: [1] with lookahead on).
+[pwh, pwl] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+
+chartNewDay = nz(ta.change(dayofmonth)) != 0
+rth = session.ismarket
+
+// Opening range: first `orMin` minutes of the regular session.
+var float orh = na
+var float orl = na
+var int orStart = na
+if chartNewDay
+    orh := na
+    orl := na
+    orStart := na
+rthOpen = rth and (not session.ismarket[1] or chartNewDay)
+if rthOpen
+    orStart := time
+    orh := high
+    orl := low
+else if rth and not na(orStart) and time < orStart + orMin * 60000
+    orh := math.max(orh, high)
+    orl := math.min(orl, low)
+orDone = not na(orStart) and time_close >= orStart + orMin * 60000
+
+// ---------------------------------------------------------------- Trend state
+e8  = ta.ema(close, fastLen)
+e21 = ta.ema(close, midLen)
+e50 = ta.ema(close, slowLen)
+atr = ta.atr(14)
+
+bullStack = e8 > e21 and e21 > e50
+bearStack = e8 < e21 and e21 < e50
+spreadOk  = math.abs(e8 - e21) >= minSpread * atr
+slope21   = e21 - e21[3]
+// 1 = clean uptrend, -1 = clean downtrend, 0 = chop
+trend = bullStack and spreadOk and slope21 >= minSlope * atr ? 1 : bearStack and spreadOk and slope21 <= -minSlope * atr ? -1 : 0
+trendCol = trend == 1 ? C_BULL : trend == -1 ? C_BEAR : C_CHOP
+
+// Invisible EMA plots, only used to anchor the ribbon fill.
+p8  = plot(e8, "EMA fast (ribbon edge)", color = color(na), display = display.none)
+p21 = plot(e21, "EMA mid (ribbon edge)", color = color(na), display = display.none)
+fill(p8, p21, color = not showRib ? color(na) : trend == 1 ? color.new(C_BULL, 55) : trend == -1 ? color.new(C_BEAR, 55) : color.new(C_CHOP, 75), title = "Trend ribbon")
+
+barcolor(barMode == "Off" ? color(na) : trend == 0 ? C_DIM : barMode == "Trend colors" ? trendCol : color(na), title = "Trend / chop bars")
+
+// ---------------------------------------------------------------- Level plots
+lv(float x, bool on) => on and not chartNewDay ? x : na
+plot(lv(pdh, showLevels), "PDH", color = C_BULL, style = plot.style_linebr, display = display.all - display.status_line)
+plot(lv(pdl, showLevels), "PDL", color = C_BEAR, style = plot.style_linebr, display = display.all - display.status_line)
+plot(lv(pmh, showLevels), "PMH", color = color.new(C_BULL, 20), style = plot.style_circles, linewidth = 1, display = display.all - display.status_line)
+plot(lv(pml, showLevels), "PML", color = color.new(C_BEAR, 20), style = plot.style_circles, linewidth = 1, display = display.all - display.status_line)
+plot(lv(pwh, showWeek), "PWH", color = color.new(C_PWH, 10), style = plot.style_linebr, linewidth = 2, display = display.all - display.status_line)
+plot(lv(pwl, showWeek), "PWL", color = color.new(C_PWL, 10), style = plot.style_linebr, linewidth = 2, display = display.all - display.status_line)
+plot(lv(orh, showOR), "ORH", color = color.new(C_OR, 20), style = plot.style_linebr, display = display.all - display.status_line)
+plot(lv(orl, showOR), "ORL", color = color.new(C_OR, 20), style = plot.style_linebr, display = display.all - display.status_line)
+
+// Right-edge flag tags for today's levels (price shown on hover).
+f_tag(array<label> arr, float y, string name, color col) =>
+    if not na(y)
+        txt = tagMode == "Name + price" ? name + " " + fmt(y) : name
+        lb = label.new(bar_index + 3, y, txt, style = label.style_label_left, color = col, textcolor = color.white, size = size.small, tooltip = name + " " + fmt(y))
+        array.push(arr, lb)
+    true
+
+var array<label> tags = array.new<label>()
+if barstate.islast
+    for lb in tags
+        label.delete(lb)
+    array.clear(tags)
+    if tagMode != "Off"
+        if showLevels
+            f_tag(tags, pdh, "PDH", color.new(#1B5E20, 0))
+            f_tag(tags, pdl, "PDL", color.new(#8E0000, 0))
+            f_tag(tags, pmh, "PMH", color.new(#2E7D32, 0))
+            f_tag(tags, pml, "PML", color.new(#B71C1C, 0))
+        if showWeek
+            f_tag(tags, pwh, "PWH", color.new(#00695C, 0))
+            f_tag(tags, pwl, "PWL", color.new(#C62828, 0))
+        if showOR
+            f_tag(tags, orh, "ORH", color.new(#9E9D24, 0))
+            f_tag(tags, orl, "ORL", color.new(#9E9D24, 0))
+
+// ---------------------------------------------------------------- Market structure
+// Confirmed swings (swLen bars each side) labelled HH / LH / HL / LL, and a
+// dotted BOS line when a close breaks the last swing high (low).
+ph = ta.pivothigh(high, swLen, swLen)
+pl = ta.pivotlow(low, swLen, swLen)
+var float lastSH = na
+var int   lastSHBar = na
+var bool  shBroken = true
+var float lastSL = na
+var int   lastSLBar = na
+var bool  slBroken = true
+if not na(ph)
+    if showMS and not na(lastSH)
+        label.new(bar_index - swLen, ph, ph > lastSH ? "HH" : "LH", style = label.style_label_down, color = color.new(color.black, 100), textcolor = C_MS, size = size.small)
+    lastSH := ph
+    lastSHBar := bar_index - swLen
+    shBroken := false
+if not na(pl)
+    if showMS and not na(lastSL)
+        label.new(bar_index - swLen, pl, pl > lastSL ? "HL" : "LL", style = label.style_label_up, color = color.new(color.black, 100), textcolor = C_MS, size = size.small)
+    lastSL := pl
+    lastSLBar := bar_index - swLen
+    slBroken := false
+bosUp = not shBroken and close > lastSH
+bosDn = not slBroken and close < lastSL
+if bosUp
+    shBroken := true
+    if showMS
+        line.new(lastSHBar, lastSH, bar_index, lastSH, color = C_BULL, style = line.style_dotted)
+        label.new(math.round((lastSHBar + bar_index) / 2), lastSH, "BOS", style = label.style_label_down, color = color.new(color.black, 100), textcolor = C_BULL, size = size.tiny)
+if bosDn
+    slBroken := true
+    if showMS
+        line.new(lastSLBar, lastSL, bar_index, lastSL, color = C_BEAR, style = line.style_dotted)
+        label.new(math.round((lastSLBar + bar_index) / 2), lastSL, "BOS", style = label.style_label_up, color = color.new(color.black, 100), textcolor = C_BEAR, size = size.tiny)
+
+// ---------------------------------------------------------------- Breakouts
+// Crossings computed every bar (Pine v6 'and' is lazy, so never inside a condition).
+xuOR = ta.crossover(close, orh)
+xdOR = ta.crossunder(close, orl)
+xuPM = ta.crossover(close, pmh)
+xdPM = ta.crossunder(close, pml)
+xuPD = ta.crossover(close, pdh)
+xdPD = ta.crossunder(close, pdl)
+xuPW = ta.crossover(close, pwh)
+xdPW = ta.crossunder(close, pwl)
+
+okUp = showBrk and rth and (not cleanOnly or trend == 1)
+okDn = showBrk and rth and (not cleanOnly or trend == -1)
+brkORH = okUp and orDone and xuOR
+brkORL = okDn and orDone and xdOR
+brkPMH = okUp and xuPM
+brkPML = okDn and xdPM
+brkPDH = okUp and xuPD
+brkPDL = okDn and xdPD
+brkPWH = okUp and showWeek and xuPW
+brkPWL = okDn and showWeek and xdPW
+
+upCol = trend == 1 ? C_BULL : C_DIM
+dnCol = trend == -1 ? C_BEAR : C_DIM
+plotshape(brkORH, "ORH break", shape.triangleup, location.belowbar, upCol, text = "ORH", textcolor = upCol, size = size.tiny, display = display.all - display.status_line)
+plotshape(brkPMH, "PMH break", shape.triangleup, location.belowbar, upCol, text = "PMH", textcolor = upCol, size = size.tiny, display = display.all - display.status_line)
+plotshape(brkPDH, "PDH break", shape.triangleup, location.belowbar, upCol, text = "PDH", textcolor = upCol, size = size.tiny, display = display.all - display.status_line)
+plotshape(brkPWH, "PWH break", shape.triangleup, location.belowbar, upCol, text = "PWH", textcolor = upCol, size = size.tiny, display = display.all - display.status_line)
+plotshape(brkORL, "ORL break", shape.triangledown, location.abovebar, dnCol, text = "ORL", textcolor = dnCol, size = size.tiny, display = display.all - display.status_line)
+plotshape(brkPML, "PML break", shape.triangledown, location.abovebar, dnCol, text = "PML", textcolor = dnCol, size = size.tiny, display = display.all - display.status_line)
+plotshape(brkPDL, "PDL break", shape.triangledown, location.abovebar, dnCol, text = "PDL", textcolor = dnCol, size = size.tiny, display = display.all - display.status_line)
+plotshape(brkPWL, "PWL break", shape.triangledown, location.abovebar, dnCol, text = "PWL", textcolor = dnCol, size = size.tiny, display = display.all - display.status_line)
+
+cleanUpBreak = (brkORH or brkPMH or brkPDH or brkPWH) and trend == 1
+cleanDnBreak = (brkORL or brkPML or brkPDL or brkPWL) and trend == -1
+alertcondition(cleanUpBreak, "Clean-trend breakout up", "DTS {{ticker}}: key level breakout UP in a clean uptrend @ {{close}}")
+alertcondition(cleanDnBreak, "Clean-trend breakdown", "DTS {{ticker}}: key level breakdown in a clean downtrend @ {{close}}")
+alertcondition(trend != trend[1] and trend != 0, "Trend turns clean", "DTS {{ticker}}: trend turned clean @ {{close}}")
+alertcondition(bosUp, "BOS up", "DTS {{ticker}}: break of structure UP @ {{close}}")
+alertcondition(bosDn, "BOS down", "DTS {{ticker}}: break of structure DOWN @ {{close}}")
